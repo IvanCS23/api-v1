@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\OrganizationController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\ProductController;
 use Illuminate\Support\Facades\Route;
 
 
@@ -37,3 +38,11 @@ Route::middleware('auth:api')->group(function () {
     Route::put('/clients/{id}', [ClientController::class, 'update']);
     Route::get('/clients/{id}', [ClientController::class, 'show']);
     Route::delete('/clients/{id}', [ClientController::class, 'destroy']);
+
+
+//products
+    Route::get('/products', [ProductController::class, 'index']);
+    Route::post('/products', [ProductController::class, 'store']);
+    Route::put('/products/{id}', [ProductController::class, 'update']);
+    Route::get('/products/{id}', [ProductController::class, 'show']);
+    Route::delete('/products/{id}', [ProductController::class, 'destroy']);

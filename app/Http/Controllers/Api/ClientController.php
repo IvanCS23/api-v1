@@ -9,7 +9,9 @@ class ClientController extends Controller
 {
     public function index()
     {
-        return response()->json(Client::all());
+        $clients = Client::all();
+
+        return response()->json($clients);
     }
 
     public function store(Request $request)
