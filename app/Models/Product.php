@@ -3,9 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Product extends Model
 {
+    use SoftDeletes;
+
     protected $fillable = [
     'name',
     'no_identificacion',
@@ -21,5 +24,13 @@ class Product extends Model
     'iva_retenido',
     'ieps',
     'isr'
+    ];
+
+    protected $casts = [
+        'precio_unitario' => 'decimal:2',
+        'iva' => 'decimal:2',
+        'iva_retenido' => 'decimal:2',
+        'ieps' => 'decimal:2',
+        'isr' => 'decimal:2',
     ];
 }

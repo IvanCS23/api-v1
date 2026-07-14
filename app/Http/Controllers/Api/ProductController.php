@@ -24,6 +24,8 @@ class ProductController extends Controller
      */
     public function store(Request $request)
     {
+        $this->normalizeInput($request);
+
         $validated = $request->validate([
             'name' => 'required|string|max:255',
             'no_identificacion' => 'nullable|string|max:255|unique:products,no_identificacion',
@@ -41,6 +43,7 @@ class ProductController extends Controller
             'isr' => 'nullable|numeric|min:0',
         ]);
 
+        $validated = array_filter($validated, fn ($value) => $value !== null);
         $product = Product::create($validated);
 
         return response()->json($product, 201);
@@ -51,13 +54,7 @@ class ProductController extends Controller
      */
     public function show(string $id)
     {
-        $product = Product::find($id);
-
-        if (!$product) {
-            return response()->json([
-                'message' => 'Producto no encontrado'
-            ], 404);
-        }
+        $product = Product::findOrFail($id);
 
         return response()->json($product);
     }
@@ -67,37 +64,26 @@ class ProductController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        $product = Product::find($id);
+        $product = Product::findOrFail($id);
 
-        if (!$product) {
-            return response()->json([
-                'message' => 'Producto no encontrado'
-            ], 404);
-        }
+        $this->normalizeInput($request);
 
         $validated = $request->validate([
-    'name' => 'sometimes|string|max:255',
-
-    'no_identificacion' => 'nullable|string|max:255|unique:products,no_identificacion,' . $product->id,
-
-    'descripcion' => 'sometimes|string|max:255',
-
-    'precio_unitario' => 'sometimes|numeric|min:0',
-
-    'cuenta_predial' => 'nullable|string|max:255',
-
-    'clave_producto' => 'sometimes|string|size:8|unique:products,clave_producto,' . $product->id,
-
-    'clave_unidad' => 'nullable|string|max:10',
-    'objeto_imp' => 'nullable|string|max:10',
-    'no_pedimento' => 'nullable|string|max:255',
-    'impuesto_local' => 'nullable|string|max:255',
-
-    'iva' => 'nullable|numeric|min:0',
-    'iva_retenido' => 'nullable|numeric|min:0',
-    'ieps' => 'nullable|numeric|min:0',
-    'isr' => 'nullable|numeric|min:0',
-]);
+             'name' => 'sometimes|string|max:255',
+             'descripcion' => 'sometimes|string|max:255',
+             'precio_unitario' => 'sometimes|numeric|min:0',
+             'cuenta_predial' => 'nullable|string|max:255',
+             'clave_producto' => 'sometimes|string|size:8|unique:products,clave_producto,' . $product->id,
+             'clave_unidad' => 'nullable|string|max:10',
+             'objeto_imp' => 'nullable|string|max:10',
+             'no_pedimento' => 'nullable|string|max:255',
+             'impuesto_local' => 'nullable|string|max:255',
+             'iva' => 'nullable|numeric|min:0',
+             'iva_retenido' => 'nullable|numeric|min:0',
+             'ieps' => 'nullable|numeric|min:0',
+             'isr' => 'nullable|numeric|min:0',
+             'no_identificacion' => 'nullable|string|max:255|unique:products,no_identificacion,' . $product->id,
+        ]);
 
         $product->update($validated);
 
@@ -109,18 +95,36 @@ class ProductController extends Controller
      */
     public function destroy(string $id)
     {
-        $product = Product::find($id);
-
-        if (!$product) {
-            return response()->json([
-                'message' => 'Producto no encontrado'
-            ], 404);
-        }
+        $product = Product::findOrFail($id);
 
         $product->delete();
 
         return response()->json([
             'message' => 'Producto eliminado correctamente'
         ]);
+    }
+
+    private function normalizeInput(Request $request): void
+    {
+        $nullableFields = [
+            'no_identificacion',
+            'cuenta_predial',
+            'clave_unidad',
+            'objeto_imp',
+            'no_pedimento',
+            'impuesto_local',
+            'iva_retenido',
+            'ieps',
+            'isr',
+        ];
+
+        $data = [];
+        foreach ($nullableFields as $field) {
+            if ($request->has($field) && $request->input($field) === '') {
+                $data[$field] = null;
+            }
+        }
+
+        $request->merge($data);
     }
 }
