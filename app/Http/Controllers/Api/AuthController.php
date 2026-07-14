@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
+use App\Http\Resources\UserResource;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -31,17 +33,25 @@ class AuthController extends Controller
         /** @var \App\Models\User $user */
         $user = Auth::guard('web')->user();
 
+        if ($user->status !== UserStatus::Active) {
+            Auth::guard('web')->logout();
+
+            throw ValidationException::withMessages([
+                'email' => ['Esta cuenta se encuentra desactivada. Contacta a un administrador.'],
+            ]);
+        }
+
         // Generate a new plain-text token, store its SHA-256 hash
         $plainToken = Str::random(80);
-        $user->forceFill(['api_token' => hash('sha256', $plainToken)])->save();
+        $user->forceFill([
+            'api_token' => hash('sha256', $plainToken),
+            'last_login_at' => now(),
+            'last_login_ip' => $request->ip(),
+        ])->save();
 
         return response()->json([
             'token' => $plainToken,
-            'user'  => [
-                'id'    => $user->id,
-                'name'  => $user->name,
-                'email' => $user->email,
-            ],
+            'user'  => new UserResource($user->load('company')),
         ]);
     }
 
@@ -50,7 +60,10 @@ class AuthController extends Controller
      */
     public function user(Request $request): JsonResponse
     {
-        return response()->json(['user' => $request->user('api')]);
+        /** @var \App\Models\User $user */
+        $user = $request->user('api');
+
+        return response()->json(['user' => new UserResource($user->load('company'))]);
     }
 
     /**
