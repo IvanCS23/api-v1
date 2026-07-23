@@ -144,7 +144,10 @@ return [
     */
 
     'features' => [
-        Features::registration(),
+        // Features::registration(), // Deshabilitado a propósito (decisión de arquitectura):
+        // users.company_id es NOT NULL y no existe todavía un flujo de onboarding que cree
+        // la Company y su usuario propietario. No reactivar sin ese flujo. Reutilizar
+        // App\Actions\Fortify\CreateNewUser cuando exista (no se eliminó).
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([

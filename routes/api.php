@@ -5,6 +5,10 @@ use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\EmployeController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\QuoteController;
+use App\Http\Controllers\Api\QuoteItemController;
+use App\Http\Controllers\Api\SaleController;
+use App\Http\Controllers\Api\SaleItemController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserSecurityController;
 use Illuminate\Support\Facades\Route;
@@ -62,4 +66,29 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::put('/invoices/{id}', [InvoiceController::class, 'update']);
     Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
     Route::delete('/invoices/{id}', [InvoiceController::class, 'destroy']);
+
+    // Sales (Fase 2 — motor comercial, sin Facturapi)
+    Route::get('/sales', [SaleController::class, 'index']);
+    Route::post('/sales', [SaleController::class, 'store']);
+    Route::put('/sales/{id}', [SaleController::class, 'update']);
+    Route::get('/sales/{id}', [SaleController::class, 'show']);
+    Route::delete('/sales/{id}', [SaleController::class, 'destroy']);
+
+    // Sale items (anidados bajo una venta)
+    Route::get('/sales/{sale}/items', [SaleItemController::class, 'index']);
+    Route::post('/sales/{sale}/items', [SaleItemController::class, 'store']);
+    Route::delete('/sales/{sale}/items/{item}', [SaleItemController::class, 'destroy']);
+
+    // Quotes (Fase 3 — cotizaciones, sin Facturapi)
+    Route::get('/quotes', [QuoteController::class, 'index']);
+    Route::post('/quotes', [QuoteController::class, 'store']);
+    Route::put('/quotes/{id}', [QuoteController::class, 'update']);
+    Route::get('/quotes/{id}', [QuoteController::class, 'show']);
+    Route::delete('/quotes/{id}', [QuoteController::class, 'destroy']);
+    Route::post('/quotes/{id}/convert', [QuoteController::class, 'convert']);
+
+    // Quote items (anidados bajo una cotización)
+    Route::get('/quotes/{quote}/items', [QuoteItemController::class, 'index']);
+    Route::post('/quotes/{quote}/items', [QuoteItemController::class, 'store']);
+    Route::delete('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'destroy']);
 });

@@ -51,6 +51,11 @@ test('email verification status is unchanged when the email address is unchanged
 });
 
 test('user can delete their account', function () {
+    // La cuenta se elimina de forma lógica (User usa SoftDeletes): los
+    // usuarios pueden quedar referenciados a futuro por ventas, facturas,
+    // pagos, gastos, transacciones y audit_logs, así que un borrado físico
+    // rompería esa trazabilidad. Este test verifica borrado lógico, no
+    // borrado físico.
     $user = User::factory()->create();
 
     $response = $this
@@ -64,7 +69,12 @@ test('user can delete their account', function () {
         ->assertRedirect(route('home'));
 
     $this->assertGuest();
-    expect($user->fresh())->toBeNull();
+
+    $this->assertSoftDeleted($user);
+
+    expect(User::find($user->id))->toBeNull()
+        ->and(User::withTrashed()->find($user->id))->not->toBeNull()
+        ->and(User::withTrashed()->find($user->id)->deleted_at)->not->toBeNull();
 });
 
 test('correct password must be provided to delete account', function () {
