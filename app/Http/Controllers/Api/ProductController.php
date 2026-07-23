@@ -3,50 +3,33 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use Illuminate\Http\Request;
+use App\Http\Requests\StoreProductRequest;
+use App\Http\Requests\UpdateProductRequest;
+use App\Http\Resources\ProductResource;
 use App\Models\Product;
 
 class ProductController extends Controller
 {
-
     /**
      * Obtener todos los productos
      */
     public function index()
     {
-        $products = Product::all();
+        $this->authorize('viewAny', Product::class);
 
-        return response()->json($products);
+        return ProductResource::collection(Product::all());
     }
 
     /**
      * Crear producto
      */
-    public function store(Request $request)
+    public function store(StoreProductRequest $request)
     {
-        $this->normalizeInput($request);
+        $this->authorize('create', Product::class);
 
-        $validated = $request->validate([
-            'name' => 'required|string|max:255',
-            'no_identificacion' => 'nullable|string|max:255|unique:products,no_identificacion',
-            'descripcion' => 'required|string|max:255',
-            'precio_unitario' => 'required|numeric|min:0',
-            'cuenta_predial' => 'nullable|string|max:255',
-            'clave_producto' => 'required|string|size:8|unique:products,clave_producto',
-            'clave_unidad' => 'nullable|string|max:10',
-            'objeto_imp' => 'nullable|string|max:10',
-            'no_pedimento' => 'nullable|string|max:255',
-            'impuesto_local' => 'nullable|string|max:255',
-            'iva' => 'nullable|numeric|min:0',
-            'iva_retenido' => 'nullable|numeric|min:0',
-            'ieps' => 'nullable|numeric|min:0',
-            'isr' => 'nullable|numeric|min:0',
-        ]);
+        $product = Product::create($request->validated());
 
-        $validated = array_filter($validated, fn ($value) => $value !== null);
-        $product = Product::create($validated);
-
-        return response()->json($product, 201);
+        return (new ProductResource($product))->response()->setStatusCode(201);
     }
 
     /**
@@ -56,38 +39,23 @@ class ProductController extends Controller
     {
         $product = Product::findOrFail($id);
 
-        return response()->json($product);
+        $this->authorize('view', $product);
+
+        return new ProductResource($product);
     }
 
     /**
      * Actualizar producto
      */
-    public function update(Request $request, string $id)
+    public function update(UpdateProductRequest $request, string $id)
     {
         $product = Product::findOrFail($id);
 
-        $this->normalizeInput($request);
+        $this->authorize('update', $product);
 
-        $validated = $request->validate([
-             'name' => 'sometimes|string|max:255',
-             'descripcion' => 'sometimes|string|max:255',
-             'precio_unitario' => 'sometimes|numeric|min:0',
-             'cuenta_predial' => 'nullable|string|max:255',
-             'clave_producto' => 'sometimes|string|size:8|unique:products,clave_producto,' . $product->id,
-             'clave_unidad' => 'nullable|string|max:10',
-             'objeto_imp' => 'nullable|string|max:10',
-             'no_pedimento' => 'nullable|string|max:255',
-             'impuesto_local' => 'nullable|string|max:255',
-             'iva' => 'nullable|numeric|min:0',
-             'iva_retenido' => 'nullable|numeric|min:0',
-             'ieps' => 'nullable|numeric|min:0',
-             'isr' => 'nullable|numeric|min:0',
-             'no_identificacion' => 'nullable|string|max:255|unique:products,no_identificacion,' . $product->id,
-        ]);
+        $product->update($request->validated());
 
-        $product->update($validated);
-
-        return response()->json($product);
+        return new ProductResource($product);
     }
 
     /**
@@ -97,34 +65,12 @@ class ProductController extends Controller
     {
         $product = Product::findOrFail($id);
 
+        $this->authorize('delete', $product);
+
         $product->delete();
 
         return response()->json([
-            'message' => 'Producto eliminado correctamente'
+            'message' => 'Producto eliminado correctamente',
         ]);
-    }
-
-    private function normalizeInput(Request $request): void
-    {
-        $nullableFields = [
-            'no_identificacion',
-            'cuenta_predial',
-            'clave_unidad',
-            'objeto_imp',
-            'no_pedimento',
-            'impuesto_local',
-            'iva_retenido',
-            'ieps',
-            'isr',
-        ];
-
-        $data = [];
-        foreach ($nullableFields as $field) {
-            if ($request->has($field) && $request->input($field) === '') {
-                $data[$field] = null;
-            }
-        }
-
-        $request->merge($data);
     }
 }

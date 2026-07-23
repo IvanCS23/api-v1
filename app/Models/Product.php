@@ -2,15 +2,19 @@
 
 namespace App\Models;
 
+use App\Enums\ProductType;
+use App\Models\Concerns\BelongsToCompany;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Product extends Model
 {
-    use SoftDeletes;
+    use BelongsToCompany, HasFactory, SoftDeletes;
 
     protected $fillable = [
     'name',
+    'type',
     'no_identificacion',
     'descripcion',
     'precio_unitario',
@@ -27,6 +31,7 @@ class Product extends Model
     ];
 
     protected $casts = [
+        'type' => ProductType::class,
         'precio_unitario' => 'decimal:2',
         'iva' => 'decimal:2',
         'iva_retenido' => 'decimal:2',

@@ -1,25 +1,37 @@
 <?php
 
-use Laravel\Fortify\Features;
+use App\Models\User;
 
-beforeEach(function () {
-    $this->skipUnlessFortifyFeature(Features::registration());
+/*
+|--------------------------------------------------------------------------
+| Registro público deshabilitado (decisión de arquitectura)
+|--------------------------------------------------------------------------
+|
+| users.company_id es obligatorio y todavía no existe un flujo de onboarding
+| que cree la Company y su usuario propietario. Mientras eso no exista, el
+| registro público de Fortify permanece deshabilitado (config/fortify.php),
+| y estas pruebas protegen esa decisión: si alguien reactiva la feature sin
+| resolver el onboarding, este archivo debe volver a fallar.
+|
+*/
+
+test('public registration screen is not available', function () {
+    $response = $this->get('/register');
+
+    $response->assertNotFound();
 });
 
-test('registration screen can be rendered', function () {
-    $response = $this->get(route('register'));
+test('public registration endpoint does not create a user', function () {
+    $usersBefore = User::count();
 
-    $response->assertOk();
-});
-
-test('new users can register', function () {
-    $response = $this->post(route('register.store'), [
+    $response = $this->post('/register', [
         'name' => 'Test User',
         'email' => 'test@example.com',
         'password' => 'password',
         'password_confirmation' => 'password',
     ]);
 
-    $this->assertAuthenticated();
-    $response->assertRedirect(route('dashboard', absolute: false));
+    $response->assertNotFound();
+    $this->assertGuest();
+    expect(User::count())->toBe($usersBefore);
 });
