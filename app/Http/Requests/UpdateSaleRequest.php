@@ -2,11 +2,9 @@
 
 namespace App\Http\Requests;
 
-use App\Enums\SaleStatus;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
-use Illuminate\Validation\Rules\Enum;
 
 class UpdateSaleRequest extends FormRequest
 {
@@ -16,10 +14,16 @@ class UpdateSaleRequest extends FormRequest
     }
 
     /**
-     * `status` solo acepta los 4 valores de SaleStatus (nunca Invoiced ni
-     * Paid, que no existen). Los totales NO son editables aquí — siempre
-     * los recalcula SaleCalculator a partir de las líneas. company_id
-     * nunca se lee del payload.
+     * Fase 4 §5: las transiciones de estado ya NO pasan por este
+     * endpoint genérico — solo por SaleController::submit()/confirm()/
+     * cancel() (ver SaleWorkflow). Por eso `status` fue retirado de las
+     * reglas. Igual que `company_id`, `folio`, `created_by`,
+     * `confirmed_at`, `cancelled_at`: al no declarar una regla para
+     * ellos, `validated()` nunca los incluye — un payload que los envíe
+     * los ignora en silencio (mismo contrato ya establecido para
+     * `company_id` desde Fase 1), nunca produce un 422 ni cambia el
+     * estado. Los totales tampoco son editables aquí — siempre los
+     * recalcula SaleCalculator a partir de las líneas.
      *
      * @return array<string, mixed>
      */
@@ -30,7 +34,6 @@ class UpdateSaleRequest extends FormRequest
         return [
             'client_id' => ['sometimes', 'required', 'integer', Rule::exists('clients', 'id')->where('company_id', $companyId)],
             'notes' => ['nullable', 'string', 'max:1000'],
-            'status' => ['sometimes', new Enum(SaleStatus::class)],
         ];
     }
 }

@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\QuoteStatus;
+use App\Exceptions\QuoteAlreadyConvertedException;
+use App\Exceptions\WorkflowTransitionException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreQuoteRequest;
 use App\Http\Requests\UpdateQuoteRequest;
@@ -11,6 +13,7 @@ use App\Http\Resources\SaleResource;
 use App\Models\Quote;
 use App\Services\Sales\QuoteNumberGenerator;
 use App\Services\Sales\QuoteToSaleConverter;
+use App\Services\Sales\QuoteWorkflow;
 use App\Support\Tenant\CurrentTenant;
 
 class QuoteController extends Controller
@@ -18,6 +21,7 @@ class QuoteController extends Controller
     public function __construct(
         private readonly QuoteNumberGenerator $numberGenerator,
         private readonly QuoteToSaleConverter $converter,
+        private readonly QuoteWorkflow $workflow,
     ) {}
 
     public function index()
@@ -63,7 +67,7 @@ class QuoteController extends Controller
 
         $this->authorize('update', $quote);
 
-        if (! in_array($quote->status, [QuoteStatus::Draft, QuoteStatus::Sent], true)) {
+        if (! $quote->isEditable()) {
             return response()->json(['message' => 'Esta cotización ya no se puede editar en su estado actual.'], 422);
         }
 
@@ -77,6 +81,10 @@ class QuoteController extends Controller
         $quote = Quote::findOrFail($id);
 
         $this->authorize('delete', $quote);
+
+        if (! $quote->isEditable()) {
+            return response()->json(['message' => 'Esta cotización ya no se puede eliminar en su estado actual.'], 422);
+        }
 
         $quote->delete();
 
@@ -97,8 +105,72 @@ class QuoteController extends Controller
             return response()->json(['message' => 'Solo una cotización aprobada puede convertirse en venta.'], 422);
         }
 
-        $sale = $this->converter->convert($quote);
+        try {
+            $sale = $this->converter->convert($quote);
+        } catch (QuoteAlreadyConvertedException) {
+            return response()->json(['message' => 'Esta cotización ya fue convertida previamente.'], 422);
+        }
 
         return (new SaleResource($sale->load('items')))->response()->setStatusCode(201);
+    }
+
+    public function send($id)
+    {
+        $quote = Quote::findOrFail($id);
+
+        $this->authorize('update', $quote);
+
+        try {
+            $this->workflow->send($quote);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new QuoteResource($quote->load('items'));
+    }
+
+    public function approve($id)
+    {
+        $quote = Quote::findOrFail($id);
+
+        $this->authorize('update', $quote);
+
+        try {
+            $this->workflow->approve($quote);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new QuoteResource($quote->load('items'));
+    }
+
+    public function reject($id)
+    {
+        $quote = Quote::findOrFail($id);
+
+        $this->authorize('update', $quote);
+
+        try {
+            $this->workflow->reject($quote);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new QuoteResource($quote->load('items'));
+    }
+
+    public function expire($id)
+    {
+        $quote = Quote::findOrFail($id);
+
+        $this->authorize('update', $quote);
+
+        try {
+            $this->workflow->expire($quote);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new QuoteResource($quote->load('items'));
     }
 }

@@ -26,6 +26,11 @@ class QuoteItemPolicy
         return true;
     }
 
+    public function update(User $user, QuoteItem $quoteItem): bool
+    {
+        return $user->company_id === $quoteItem->company_id;
+    }
+
     public function delete(User $user, QuoteItem $quoteItem): bool
     {
         return $user->company_id === $quoteItem->company_id;

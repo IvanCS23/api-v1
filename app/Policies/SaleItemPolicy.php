@@ -28,6 +28,11 @@ class SaleItemPolicy
         return true;
     }
 
+    public function update(User $user, SaleItem $saleItem): bool
+    {
+        return $user->company_id === $saleItem->company_id;
+    }
+
     public function delete(User $user, SaleItem $saleItem): bool
     {
         return $user->company_id === $saleItem->company_id;

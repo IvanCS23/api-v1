@@ -3,17 +3,24 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\SaleStatus;
+use App\Exceptions\WorkflowTransitionException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSaleRequest;
 use App\Http\Requests\UpdateSaleRequest;
 use App\Http\Resources\SaleResource;
 use App\Models\Sale;
+use App\Services\Billing\SaleBillingReadinessService;
 use App\Services\Sales\SaleNumberGenerator;
+use App\Services\Sales\SaleWorkflow;
 use App\Support\Tenant\CurrentTenant;
 
 class SaleController extends Controller
 {
-    public function __construct(private readonly SaleNumberGenerator $numberGenerator) {}
+    public function __construct(
+        private readonly SaleNumberGenerator $numberGenerator,
+        private readonly SaleWorkflow $workflow,
+        private readonly SaleBillingReadinessService $billingReadiness,
+    ) {}
 
     public function index()
     {
@@ -53,8 +60,8 @@ class SaleController extends Controller
 
         $this->authorize('update', $sale);
 
-        if ($sale->status === SaleStatus::Cancelled) {
-            return response()->json(['message' => 'No se puede modificar una venta cancelada.'], 422);
+        if (! $sale->isEditable()) {
+            return response()->json(['message' => 'Esta venta ya no se puede editar en su estado actual.'], 422);
         }
 
         $sale->update($request->validated());
@@ -68,8 +75,66 @@ class SaleController extends Controller
 
         $this->authorize('delete', $sale);
 
+        if (! $sale->isEditable()) {
+            return response()->json(['message' => 'Esta venta ya no se puede eliminar en su estado actual.'], 422);
+        }
+
         $sale->delete();
 
         return response()->json(null, 204);
+    }
+
+    public function submit($id)
+    {
+        $sale = Sale::findOrFail($id);
+
+        $this->authorize('update', $sale);
+
+        try {
+            $this->workflow->submit($sale);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new SaleResource($sale->load('items'));
+    }
+
+    public function confirm($id)
+    {
+        $sale = Sale::findOrFail($id);
+
+        $this->authorize('update', $sale);
+
+        try {
+            $this->workflow->confirm($sale);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new SaleResource($sale->load('items'));
+    }
+
+    public function cancel($id)
+    {
+        $sale = Sale::findOrFail($id);
+
+        $this->authorize('update', $sale);
+
+        try {
+            $this->workflow->cancel($sale);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return new SaleResource($sale->load('items'));
+    }
+
+    public function billingReadiness($id)
+    {
+        $sale = Sale::findOrFail($id);
+
+        $this->authorize('view', $sale);
+
+        return response()->json($this->billingReadiness->evaluate($sale));
     }
 }

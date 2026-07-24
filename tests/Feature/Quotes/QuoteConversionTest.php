@@ -79,6 +79,43 @@ test('una cotización convertida es inmutable: no admite ediciones ni cambios de
         ->assertStatus(422);
 });
 
+test('convertir dos veces una cotización ya convertida no crea una segunda venta y devuelve un error controlado', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+    $client = Client::factory()->create(['company_id' => $company->id]);
+    $quote = Quote::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => QuoteStatus::Approved]);
+
+    $first = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/convert");
+    $first->assertCreated();
+    $firstSaleId = $first->json('id');
+
+    $second = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/convert");
+    $second->assertStatus(422);
+
+    app(CurrentTenant::class)->set($company->id);
+    expect(Sale::withoutGlobalScope(CompanyScope::class)->where('company_id', $company->id)->count())->toBe(1);
+
+    $quote->refresh();
+    expect($quote->status)->toBe(QuoteStatus::Converted)
+        ->and($quote->converted_sale_id)->toBe($firstSaleId);
+});
+
+test('el converter rechaza directamente una segunda conversión aunque el controller no la filtrara antes (defensa en profundidad del lock)', function () {
+    $company = Company::factory()->create();
+    $client = Client::factory()->create(['company_id' => $company->id]);
+    $quote = Quote::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => QuoteStatus::Approved]);
+    app(CurrentTenant::class)->set($company->id);
+
+    $converter = app(\App\Services\Sales\QuoteToSaleConverter::class);
+    $sale = $converter->convert($quote->fresh());
+
+    expect(fn () => $converter->convert($quote->fresh()))
+        ->toThrow(\App\Exceptions\QuoteAlreadyConvertedException::class);
+
+    expect(Sale::where('company_id', $company->id)->count())->toBe(1)
+        ->and($quote->fresh()->converted_sale_id)->toBe($sale->id);
+});
+
 test('convertir preserva la cotización original sin modificaciones estructurales (solo status y converted_sale_id)', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
@@ -106,4 +143,28 @@ test('convertir preserva la cotización original sin modificaciones estructurale
         ->and($quote->folio)->toBe($folioBefore)
         ->and($quote->notes)->toBe($notesBefore)
         ->and($quote->items()->count())->toBe(1);
+});
+
+test('la venta y sus líneas resultantes de la conversión heredan el company_id de la Quote, nunca del tenant ambiental', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+    $client = Client::factory()->create(['company_id' => $company->id]);
+    $quote = Quote::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => QuoteStatus::Draft]);
+    $product = Product::factory()->create(['company_id' => $company->id, 'precio_unitario' => 10]);
+
+    $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/items", ['product_id' => $product->id, 'quantity' => 2])->assertCreated();
+    $quote->update(['status' => QuoteStatus::Approved]);
+
+    $response = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/convert");
+    $response->assertCreated();
+
+    app(CurrentTenant::class)->set($company->id);
+    $sale = Sale::withoutGlobalScope(CompanyScope::class)->with('items')->findOrFail($response->json('id'));
+
+    expect($sale->company_id)->toBe($company->id)
+        ->and($sale->items)->toHaveCount(1);
+
+    foreach ($sale->items as $item) {
+        expect($item->company_id)->toBe($sale->company_id);
+    }
 });

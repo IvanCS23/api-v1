@@ -422,4 +422,39 @@ No se implementó inventario, pagos, facturación, Facturapi ni cambios en `app-
 
 ---
 
+## 12. Addendum — Fase 4: Flujos comerciales y preparación fiscal
+
+Cierra el motor comercial antes de integrar Facturapi: edición real de líneas, workflows de estado explícitos, endpoint de "¿esta venta puede facturarse?", y esta propuesta de snapshot fiscal. Sin migraciones reales aplicadas (las 2 nuevas de esta fase, `add_workflow_timestamps_to_sales_table` y `add_workflow_timestamps_to_quotes_table`, quedan `Pending`).
+
+**Actualización de líneas**: `PUT /api/sales/{sale}/items/{item}` y `PUT /api/quotes/{quote}/items/{item}` (`UpdateSaleItemRequest`/`UpdateQuoteItemRequest`), mismos 6 campos editables que en creación (`product_id`, `description`, `quantity`, `unit_price`, `discount`, `tax_rate_id`), mismas reglas de pertenencia de empresa. El recálculo ocurre dentro de una `DB::transaction`, igual que store()/destroy(). Requiere `SaleItemPolicy::update()`/`QuoteItemPolicy::update()`, que no existían.
+
+**Workflows de estado**: `SaleWorkflow` (`submit`/`confirm`/`cancel`) y `QuoteWorkflow` (`send`/`approve`/`reject`/`expire`) son ahora la única vía para transicionar — antes se hacía a través del endpoint genérico `update()` con un campo `status` suelto. `Sale::isEditable()`/`Quote::isEditable()` (ya existentes desde la auditoría de Fase 2/3) se extendieron con el mismo criterio a las transiciones. `confirm()` exige líneas, cliente válido y totales coherentes con `LineItemCalculator` antes de permitir `Confirmed`; `Approved→Converted` sigue siendo responsabilidad exclusiva de `QuoteToSaleConverter` — `QuoteWorkflow` no expone ningún método hacia ese estado. Ambas transiciones terminales fijan su propio timestamp: `sales.confirmed_at`/`sales.cancelled_at`, `quotes.approved_at` (`quotes.converted_at` lo fija `QuoteToSaleConverter`). Las 4 columnas nacen `NULL`, son deliberadamente NO fillable (mismo criterio que `company_id`) — solo se escriben vía `forceFill()` desde el workflow/converter correspondiente.
+
+**Endpoints de acción**: `POST /sales/{id}/{submit,confirm,cancel}`, `POST /quotes/{id}/{send,approve,reject,expire}`. Los controllers son delgados: resuelven el modelo, autorizan, delegan en el workflow, y traducen `WorkflowTransitionException` a un 422 con el mensaje tal cual.
+
+**Campos bloqueados en el update genérico**: `UpdateSaleRequest`/`UpdateQuoteRequest` ya no declaran ninguna regla para `status`, `folio`, `company_id`, `created_by`, `confirmed_at`, `cancelled_at`, `approved_at`, `converted_at` ni `converted_sale_id`. **Decisión de contrato**: un payload que los incluya los ignora en silencio (200 normal sobre los campos que sí son válidos) — nunca produce un 422 propio. Es el mismo contrato que `company_id` ya tenía desde Fase 1 (`FormRequest::validated()` solo devuelve campos con regla declarada; lo demás no se valida ni se aplica). Alternativa descartada: agregar `Rule::prohibited()` para forzar un 422 — se prefirió consistencia con el patrón ya establecido en todo el proyecto antes que introducir un contrato nuevo solo para este caso.
+
+**`SaleBillingReadinessService`** (`GET /sales/{id}/billing-readiness`): evalúa, sin modificar nada ni llamar ninguna API externa, si una Sale está lista para una futura facturación. Contrato: `{ ready: bool, errors: [{code, field, message}], warnings: [...] }` — `warnings` nunca afecta `ready`. Lee las líneas siempre con `SaleItem::withoutGlobalScope(CompanyScope::class)->where('sale_id', ...)` en vez de la relación escopada: si se usara `$sale->items()` tal cual, una línea corrompida hacia otra empresa quedaría invisible (el propio `CompanyScope` la filtraría) y el chequeo de aislamiento nunca la detectaría.
+
+Códigos de error soportados: `SALE_NOT_CONFIRMED`, `SALE_CLIENT_MISSING`, `SALE_NO_ITEMS`, `SALE_INVALID_CURRENCY`, `SALE_TOTALS_MISMATCH`, `CLIENT_NAME_MISSING`, `CLIENT_RFC_MISSING`, `CLIENT_POSTAL_CODE_MISSING`, `CLIENT_FISCAL_REGIME_MISSING`, `CLIENT_CFDI_USE_MISSING`, `ITEM_PRODUCT_MISSING`, `ITEM_DESCRIPTION_MISSING`, `ITEM_INVALID_QUANTITY`, `ITEM_INVALID_UNIT_PRICE`, `ITEM_PRODUCT_SAT_KEY_MISSING`, `ITEM_PRODUCT_TYPE_INVALID`, `ITEM_TAX_RATE_INVALID`, `TENANT_MISMATCH`. Warnings (no bloquean): `CLIENT_EMAIL_MISSING`, `ITEM_PRODUCT_UNIT_KEY_MISSING`.
+
+### 12.1 Propuesta de snapshot fiscal para la futura `Invoice`
+
+**No se crea `Invoice` ni `InvoiceItem` en esta fase** — es únicamente la propuesta de diseño para cuando se aborde la integración con Facturapi. El principio rector, no negociable: **una `Invoice` ya emitida nunca debe cambiar de valor porque cambió el catálogo**. Un CFDI timbrado es un documento legal congelado en el tiempo; si después se corrige el RFC de un cliente, se renombra un producto, o se desactiva una tasa de impuesto, ninguna factura ya emitida puede reflejar ese cambio. Por eso `invoices`/`invoice_items` deben ser **snapshots por columna**, no joins en vivo hacia `clients`/`products`/`tax_rates`.
+
+**Desde `Sale`** (copiar a `invoices`, 1:1 al momento de facturar — solo se factura una Sale `Confirmed`, ya validada por `SaleBillingReadinessService`):
+`sale_id` (FK, trazabilidad — nunca fuente de verdad), `folio` de venta (referencia interna), `subtotal`, `discount_total`, `tax_total`, `total`, `currency`. Los totales de la `Invoice` nacen iguales a los de la `Sale` en ese instante; después son inmutables aunque la Sale (ya `Confirmed`, ya inmutable también) jamás debería cambiar.
+
+**Desde `Client`** (copiar como columnas de `invoices`, ej. `client_name`, `client_rfc`, `client_regimen_fiscal`, `client_uso_cfdi`, `client_codigo_postal`, `client_calle`, `client_no_exterior`, `client_no_interior`, `client_colonia`, `client_localidad`, `client_municipio`, `client_estado`, `client_pais`): son exactamente los campos fiscales auditados en §1 de esta fase. `client_id` se conserva como FK de trazabilidad, pero ningún dato fiscal de la factura debe leerse de `clients` después de emitida — si el cliente corrige su RFC mañana, esta factura sigue mostrando el RFC con el que se timbró.
+
+**Desde `Product`** (copiar como columnas de cada `invoice_item`, por línea): `description` (ya se snapshotea así en `sale_items`, se hereda tal cual), `clave_producto`, `clave_unidad`, `product_type` (`ProductType` en el momento de facturar). `product_id` se conserva nullable con `nullOnDelete` (mismo patrón que `sale_items`/`quote_items`) solo para trazabilidad histórica.
+
+**Desde `TaxRate`** (copiar como columnas por línea, o en una tabla `invoice_item_taxes` si se requiere más de un impuesto por línea — ver limitación abajo): `code`, `name`, `rate`, `tax_type`, `factor_type`, más el `base` y `amount` calculados en ese momento. `tax_rate_id` se conserva nullable con `nullOnDelete`, nunca como fuente de verdad del importe ya facturado.
+
+**Limitación conocida a resolver en su momento, no ahora**: `sale_items`/`quote_items` solo admiten **un** `tax_rate_id` por línea. Un CFDI real puede requerir traslado **y** retención simultáneos en la misma línea (ej. IVA trasladado + ISR retenido). Si al construir `Invoice` se descubre que esto es necesario, la tabla `invoice_item_taxes` (ya prevista desde el Fase 0 §3.3 original) es el lugar correcto para modelarlo — no forzar múltiples impuestos dentro de las columnas planas de `sale_items` retroactivamente.
+
+No se crea `Invoice`, `InvoiceItem` ni ninguna migración fiscal en esta fase. No se instala Facturapi. No se emite CFDI. No se implementa inventario, pagos, cuentas por cobrar ni transacciones financieras. No se modifica `app-front`.
+
+---
+
 *Fin del análisis de Fase 0. Sin aprobación explícita del usuario, no se crea ninguna migración, modelo ni controller.*

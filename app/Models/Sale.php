@@ -34,6 +34,8 @@ class Sale extends Model implements HasCalculableItems
         'discount_total' => 'decimal:2',
         'tax_total' => 'decimal:2',
         'total' => 'decimal:2',
+        'confirmed_at' => 'datetime',
+        'cancelled_at' => 'datetime',
     ];
 
     // company() ya la provee el trait BelongsToCompany.
@@ -51,5 +53,17 @@ class Sale extends Model implements HasCalculableItems
     public function items(): HasMany
     {
         return $this->hasMany(SaleItem::class);
+    }
+
+    /**
+     * Única fuente de verdad para si una venta admite mutaciones (edición,
+     * eliminación, alta/edición/baja de líneas). Draft y Pending son
+     * editables; Confirmed y Cancelled son inmutables. Los controllers
+     * (SaleController, SaleItemController) consultan este método en vez de
+     * repetir comparaciones de estado.
+     */
+    public function isEditable(): bool
+    {
+        return in_array($this->status, [SaleStatus::Draft, SaleStatus::Pending], true);
     }
 }

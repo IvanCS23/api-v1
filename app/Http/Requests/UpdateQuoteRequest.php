@@ -14,12 +14,16 @@ class UpdateQuoteRequest extends FormRequest
     }
 
     /**
-     * `status` acepta cualquier valor de QuoteStatus EXCEPTO `converted`
-     * — ese estado solo se alcanza a través de la conversión a venta
-     * (QuoteToSaleConverter), nunca por una actualización genérica. El
-     * controller además bloquea por completo cualquier update() cuando
-     * la cotización ya no está en Draft/Sent (ver QuoteController).
-     * company_id nunca se lee del payload.
+     * Fase 4 §5: las transiciones de estado ya NO pasan por este
+     * endpoint genérico — solo por QuoteController::send()/approve()/
+     * reject()/expire() (ver QuoteWorkflow), y Approved→Converted sigue
+     * siendo responsabilidad exclusiva de QuoteToSaleConverter. Por eso
+     * `status` fue retirado de las reglas. Igual que `company_id`,
+     * `folio`, `created_by`, `converted_sale_id`, `approved_at`,
+     * `converted_at`: al no declarar una regla para ellos, `validated()`
+     * nunca los incluye — un payload que los envíe los ignora en
+     * silencio (mismo contrato ya establecido para `company_id` desde
+     * Fase 1), nunca produce un 422 ni cambia el estado.
      *
      * @return array<string, mixed>
      */
@@ -30,7 +34,6 @@ class UpdateQuoteRequest extends FormRequest
         return [
             'client_id' => ['sometimes', 'required', 'integer', Rule::exists('clients', 'id')->where('company_id', $companyId)],
             'notes' => ['nullable', 'string', 'max:1000'],
-            'status' => ['sometimes', Rule::in(['draft', 'sent', 'approved', 'rejected', 'expired'])],
         ];
     }
 }

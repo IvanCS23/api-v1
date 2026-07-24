@@ -74,9 +74,18 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::get('/sales/{id}', [SaleController::class, 'show']);
     Route::delete('/sales/{id}', [SaleController::class, 'destroy']);
 
+    // Sale workflow (Fase 4 — transiciones de estado vía acciones dedicadas)
+    Route::post('/sales/{id}/submit', [SaleController::class, 'submit']);
+    Route::post('/sales/{id}/confirm', [SaleController::class, 'confirm']);
+    Route::post('/sales/{id}/cancel', [SaleController::class, 'cancel']);
+
+    // Billing readiness (Fase 4 — preparación fiscal, sin Facturapi)
+    Route::get('/sales/{id}/billing-readiness', [SaleController::class, 'billingReadiness']);
+
     // Sale items (anidados bajo una venta)
     Route::get('/sales/{sale}/items', [SaleItemController::class, 'index']);
     Route::post('/sales/{sale}/items', [SaleItemController::class, 'store']);
+    Route::put('/sales/{sale}/items/{item}', [SaleItemController::class, 'update']);
     Route::delete('/sales/{sale}/items/{item}', [SaleItemController::class, 'destroy']);
 
     // Quotes (Fase 3 — cotizaciones, sin Facturapi)
@@ -87,8 +96,15 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::delete('/quotes/{id}', [QuoteController::class, 'destroy']);
     Route::post('/quotes/{id}/convert', [QuoteController::class, 'convert']);
 
+    // Quote workflow (Fase 4 — transiciones de estado vía acciones dedicadas)
+    Route::post('/quotes/{id}/send', [QuoteController::class, 'send']);
+    Route::post('/quotes/{id}/approve', [QuoteController::class, 'approve']);
+    Route::post('/quotes/{id}/reject', [QuoteController::class, 'reject']);
+    Route::post('/quotes/{id}/expire', [QuoteController::class, 'expire']);
+
     // Quote items (anidados bajo una cotización)
     Route::get('/quotes/{quote}/items', [QuoteItemController::class, 'index']);
     Route::post('/quotes/{quote}/items', [QuoteItemController::class, 'store']);
+    Route::put('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'update']);
     Route::delete('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'destroy']);
 });

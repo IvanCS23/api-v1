@@ -78,44 +78,44 @@ test('una empresa no puede listar ni ver cotizaciones de otra empresa', function
     $this->actingAs($userB, 'api')->getJson("/api/quotes/{$quoteA->id}")->assertNotFound();
 });
 
-test('enviar una cotización (draft -> sent) es una edición válida', function () {
+test('enviar una cotización (draft -> sent) vía el endpoint de acción', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $quote = Quote::factory()->create(['company_id' => $company->id, 'status' => QuoteStatus::Draft]);
 
-    $response = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['status' => 'sent']);
+    $response = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/send");
 
     $response->assertOk()->assertJsonPath('status', 'sent');
 });
 
-test('aprobar una cotización enviada cambia su status a approved', function () {
+test('aprobar una cotización enviada vía el endpoint de acción cambia su status a approved', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $quote = Quote::factory()->create(['company_id' => $company->id, 'status' => QuoteStatus::Sent]);
 
-    $response = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['status' => 'approved']);
+    $response = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/approve");
 
     $response->assertOk()->assertJsonPath('status', 'approved');
 });
 
-test('rechazar una cotización enviada cambia su status a rejected y la vuelve de solo lectura', function () {
+test('rechazar una cotización enviada vía el endpoint de acción cambia su status a rejected y la vuelve de solo lectura', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $quote = Quote::factory()->create(['company_id' => $company->id, 'status' => QuoteStatus::Sent]);
 
-    $reject = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['status' => 'rejected']);
+    $reject = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/reject");
     $reject->assertOk()->assertJsonPath('status', 'rejected');
 
     $retry = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['notes' => 'ya no debería poder']);
     $retry->assertStatus(422);
 });
 
-test('expirar una cotización cambia su status a expired y la vuelve de solo lectura', function () {
+test('expirar una cotización vía el endpoint de acción cambia su status a expired y la vuelve de solo lectura', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $quote = Quote::factory()->create(['company_id' => $company->id, 'status' => QuoteStatus::Sent]);
 
-    $expire = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['status' => 'expired']);
+    $expire = $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/expire");
     $expire->assertOk()->assertJsonPath('status', 'expired');
 
     $retry = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['notes' => 'ya no debería poder']);
@@ -132,15 +132,25 @@ test('una cotización aprobada no puede editarse: solo puede convertirse en vent
     $response->assertStatus(422);
 });
 
-test('el status converted no se puede fijar directamente vía update', function () {
+/**
+ * Fase 4 §5: `status` fue retirado de UpdateQuoteRequest. Un payload que
+ * lo incluya (incluyendo el valor `converted`, estructuralmente
+ * inalcanzable de cualquier forma) se ignora en silencio — mismo
+ * contrato que `company_id` — nunca produce un 422 ni cambia el estado.
+ */
+test('enviar status en el PUT genérico de una cotización es ignorado: no cambia el estado', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
-    $quote = Quote::factory()->create(['company_id' => $company->id, 'status' => QuoteStatus::Approved]);
+    $quote = Quote::factory()->create(['company_id' => $company->id, 'status' => QuoteStatus::Draft]);
 
-    $response = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", ['status' => 'converted']);
+    $response = $this->actingAs($user, 'api')->putJson("/api/quotes/{$quote->id}", [
+        'notes' => 'notas nuevas',
+        'status' => 'converted',
+    ]);
 
-    // Ni siquiera llega a evaluarse la regla de "approved es solo lectura":
-    // la propia validación del Form Request ya rechaza "converted" como
-    // valor permitido para este endpoint.
-    $response->assertStatus(422)->assertJsonValidationErrors('status');
+    $response->assertOk()
+        ->assertJsonPath('notes', 'notas nuevas')
+        ->assertJsonPath('status', 'draft');
+
+    expect($quote->fresh()->status)->toBe(QuoteStatus::Draft);
 });

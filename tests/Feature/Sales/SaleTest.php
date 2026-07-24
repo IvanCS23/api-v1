@@ -92,24 +92,86 @@ test('una empresa no puede listar ni ver ventas de otra empresa', function () {
     $this->actingAs($userB, 'api')->getJson("/api/sales/{$saleA->id}")->assertNotFound();
 });
 
-test('cancelar una venta cambia su status y bloquea ediciones posteriores', function () {
+test('cancelar una venta pendiente vía el endpoint de acción cambia su status y bloquea ediciones posteriores', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
-    $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => SaleStatus::Confirmed]);
+    $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => SaleStatus::Pending]);
 
-    $cancel = $this->actingAs($user, 'api')->putJson("/api/sales/{$sale->id}", ['status' => 'cancelled']);
+    $cancel = $this->actingAs($user, 'api')->postJson("/api/sales/{$sale->id}/cancel");
     $cancel->assertOk()->assertJsonPath('status', 'cancelled');
 
     $retry = $this->actingAs($user, 'api')->putJson("/api/sales/{$sale->id}", ['notes' => 'ya no debería poder']);
     $retry->assertStatus(422);
 });
 
-test('un status inválido en la venta devuelve 422', function () {
+/**
+ * Fase 4 §5: el endpoint genérico PUT ya no acepta `status` en absoluto
+ * (fue retirado de UpdateSaleRequest). Un payload que lo incluya lo
+ * ignora en silencio — mismo contrato que ya existía para `company_id`
+ * desde Fase 1 — nunca produce un 422 ni cambia el estado. La única vía
+ * para transicionar de estado son los endpoints de acción
+ * (submit/confirm/cancel).
+ */
+test('enviar status en el PUT genérico de una venta es ignorado: no cambia el estado', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
-    $sale = Sale::factory()->create(['company_id' => $company->id]);
+    $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => SaleStatus::Draft]);
 
-    $response = $this->actingAs($user, 'api')->putJson("/api/sales/{$sale->id}", ['status' => 'invoiced']);
+    $response = $this->actingAs($user, 'api')->putJson("/api/sales/{$sale->id}", [
+        'notes' => 'notas nuevas',
+        'status' => 'confirmed',
+    ]);
 
-    $response->assertStatus(422)->assertJsonValidationErrors('status');
+    $response->assertOk()
+        ->assertJsonPath('notes', 'notas nuevas')
+        ->assertJsonPath('status', 'draft');
+
+    expect($sale->fresh()->status)->toBe(SaleStatus::Draft);
+});
+
+test('Draft y Pending son editables', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+
+    foreach ([SaleStatus::Draft, SaleStatus::Pending] as $status) {
+        $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => $status]);
+
+        $this->actingAs($user, 'api')
+            ->putJson("/api/sales/{$sale->id}", ['notes' => "editado en {$status->value}"])
+            ->assertOk()
+            ->assertJsonPath('notes', "editado en {$status->value}");
+    }
+});
+
+test('una venta confirmada no puede actualizarse', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+    $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => SaleStatus::Confirmed, 'notes' => 'original']);
+
+    $response = $this->actingAs($user, 'api')->putJson("/api/sales/{$sale->id}", ['notes' => 'intento de editar']);
+
+    $response->assertStatus(422);
+    expect($sale->fresh()->notes)->toBe('original');
+});
+
+test('una venta confirmada no puede eliminarse', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+    $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => SaleStatus::Confirmed]);
+
+    $response = $this->actingAs($user, 'api')->deleteJson("/api/sales/{$sale->id}");
+
+    $response->assertStatus(422);
+    expect(Sale::withoutGlobalScope(CompanyScope::class)->find($sale->id))->not->toBeNull();
+});
+
+test('una venta cancelada tampoco puede eliminarse', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+    $sale = Sale::factory()->create(['company_id' => $company->id, 'status' => SaleStatus::Cancelled]);
+
+    $response = $this->actingAs($user, 'api')->deleteJson("/api/sales/{$sale->id}");
+
+    $response->assertStatus(422);
+    expect(Sale::withoutGlobalScope(CompanyScope::class)->find($sale->id))->not->toBeNull();
 });
