@@ -121,7 +121,7 @@ class QuoteController extends Controller
         $this->authorize('update', $quote);
 
         try {
-            $this->workflow->send($quote);
+            $quote = $this->workflow->send($quote);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -136,7 +136,7 @@ class QuoteController extends Controller
         $this->authorize('update', $quote);
 
         try {
-            $this->workflow->approve($quote);
+            $quote = $this->workflow->approve($quote);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -151,7 +151,7 @@ class QuoteController extends Controller
         $this->authorize('update', $quote);
 
         try {
-            $this->workflow->reject($quote);
+            $quote = $this->workflow->reject($quote);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -166,7 +166,7 @@ class QuoteController extends Controller
         $this->authorize('update', $quote);
 
         try {
-            $this->workflow->expire($quote);
+            $quote = $this->workflow->expire($quote);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

@@ -34,6 +34,11 @@ use Illuminate\Support\Facades\DB;
  * lock la Quote ya no cumple las condiciones (porque otra request ganó
  * la carrera, o porque es un segundo intento sobre una Quote ya
  * convertida), se lanza QuoteAlreadyConvertedException sin crear nada.
+ * El lock también reafirma `where('company_id', $quote->company_id)`
+ * explícitamente (con el company_id de la instancia ya tenant-scoped
+ * recibida, nunca del request): `withoutGlobalScope()` por sí solo no
+ * debe ser la única barrera contra bloquear/convertir una Quote de otra
+ * empresa (endurecimiento defensivo, auditoría Fase 4 — cierre).
  *
  * Integridad de company_id: la Sale y cada SaleItem toman su company_id
  * directamente del company_id de la Quote bloqueada (asignación directa
@@ -54,6 +59,7 @@ class QuoteToSaleConverter
         return DB::transaction(function () use ($quote): Sale {
             $lockedQuote = Quote::withoutGlobalScope(CompanyScope::class)
                 ->whereKey($quote->getKey())
+                ->where('company_id', $quote->company_id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
