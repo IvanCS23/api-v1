@@ -91,7 +91,7 @@ class SaleController extends Controller
         $this->authorize('update', $sale);
 
         try {
-            $this->workflow->submit($sale);
+            $sale = $this->workflow->submit($sale);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -106,7 +106,7 @@ class SaleController extends Controller
         $this->authorize('update', $sale);
 
         try {
-            $this->workflow->confirm($sale);
+            $sale = $this->workflow->confirm($sale);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -121,7 +121,7 @@ class SaleController extends Controller
         $this->authorize('update', $sale);
 
         try {
-            $this->workflow->cancel($sale);
+            $sale = $this->workflow->cancel($sale);
         } catch (WorkflowTransitionException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

@@ -100,6 +100,21 @@ test('convertir dos veces una cotización ya convertida no crea una segunda vent
         ->and($quote->converted_sale_id)->toBe($firstSaleId);
 });
 
+test('converted_at no cambia en un reintento de conversión fallido', function () {
+    $company = Company::factory()->create();
+    $user = User::factory()->create(['company_id' => $company->id]);
+    $client = Client::factory()->create(['company_id' => $company->id]);
+    $quote = Quote::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => QuoteStatus::Approved]);
+
+    $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/convert")->assertCreated();
+    $convertedAtAfterFirst = $quote->fresh()->converted_at;
+    expect($convertedAtAfterFirst)->not->toBeNull();
+
+    $this->actingAs($user, 'api')->postJson("/api/quotes/{$quote->id}/convert")->assertStatus(422);
+
+    expect($quote->fresh()->converted_at->equalTo($convertedAtAfterFirst))->toBeTrue();
+});
+
 test('el converter rechaza directamente una segunda conversión aunque el controller no la filtrara antes (defensa en profundidad del lock)', function () {
     $company = Company::factory()->create();
     $client = Client::factory()->create(['company_id' => $company->id]);

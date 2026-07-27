@@ -125,6 +125,17 @@ class Company extends Model
         return $this->hasMany(Product::class);
     }
 
+    /**
+     * Sistema legado de tickets (ver LegacyInvoice) — sin company_id, se
+     * conserva por compatibilidad pero esta relación nunca resolvería
+     * nada (la tabla no tiene esa columna). No se corrige aquí: no forma
+     * parte del alcance de esta fase.
+     */
+    public function legacyInvoices(): HasMany
+    {
+        return $this->hasMany(LegacyInvoice::class);
+    }
+
     public function invoices(): HasMany
     {
         return $this->hasMany(Invoice::class);

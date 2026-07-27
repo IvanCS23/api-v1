@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Models\Client;
 use App\Models\Employe;
+use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use App\Models\Product;
 use App\Models\Quote;
 use App\Models\QuoteItem;
@@ -11,6 +13,8 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Policies\ClientPolicy;
 use App\Policies\EmployePolicy;
+use App\Policies\InvoiceItemPolicy;
+use App\Policies\InvoicePolicy;
 use App\Policies\ProductPolicy;
 use App\Policies\QuoteItemPolicy;
 use App\Policies\QuotePolicy;
@@ -62,6 +66,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(SaleItem::class, SaleItemPolicy::class);
         Gate::policy(Quote::class, QuotePolicy::class);
         Gate::policy(QuoteItem::class, QuoteItemPolicy::class);
+        Gate::policy(Invoice::class, InvoicePolicy::class);
+        Gate::policy(InvoiceItem::class, InvoiceItemPolicy::class);
     }
 
     /**

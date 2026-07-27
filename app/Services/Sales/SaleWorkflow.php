@@ -4,7 +4,10 @@ namespace App\Services\Sales;
 
 use App\Enums\SaleStatus;
 use App\Exceptions\WorkflowTransitionException;
+use App\Models\Client;
 use App\Models\Sale;
+use App\Models\SaleItem;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -16,6 +19,18 @@ use Illuminate\Support\Facades\DB;
  * servicio — nunca el endpoint genérico de update (ver
  * UpdateSaleRequest, Fase 4 §5).
  *
+ * Concurrencia (auditoría Fase 4 — cierre): cada transición ocurre
+ * dentro de DB::transaction(), y lo primero que hace es releer la Sale
+ * con lockForUpdate() — nunca valida sobre la instancia que recibió como
+ * parámetro (esa pudo cargarse antes de que otra request ganara una
+ * carrera). Todas las validaciones (transición permitida, líneas,
+ * cliente, totales coherentes) se evalúan sobre esa relectura bloqueada,
+ * y es esa misma instancia la que se actualiza y se retorna — así dos
+ * llamadas concurrentes a la misma acción sobre la misma Sale nunca
+ * pueden producir un doble efecto: la segunda, al adquirir el lock
+ * después de que la primera hizo commit, ve el estado ya cambiado y
+ * falla su propia validación de transición.
+ *
  * No duplica el cálculo de totales: `confirm()` solo verifica que los
  * totales ya almacenados sean coherentes con las líneas actuales
  * (deberían serlo siempre, ya que SaleItemController recalcula en cada
@@ -25,38 +40,70 @@ class SaleWorkflow
 {
     public function submit(Sale $sale): Sale
     {
-        $this->assertTransition($sale, [SaleStatus::Draft], 'enviar a revisión (Pending)');
+        return DB::transaction(function () use ($sale): Sale {
+            $locked = $this->lockedSale($sale);
 
-        $sale->update(['status' => SaleStatus::Pending]);
+            $this->assertTransition($locked, [SaleStatus::Draft], 'enviar a revisión (Pending)');
 
-        return $sale;
+            $locked->update(['status' => SaleStatus::Pending]);
+
+            return $locked;
+        });
     }
 
     public function confirm(Sale $sale): Sale
     {
-        $this->assertTransition($sale, [SaleStatus::Pending], 'confirmar');
-        $this->assertConfirmable($sale);
-
         return DB::transaction(function () use ($sale): Sale {
-            $sale->forceFill([
+            $locked = $this->lockedSale($sale);
+
+            $this->assertTransition($locked, [SaleStatus::Pending], 'confirmar');
+            $this->assertConfirmable($locked);
+
+            $locked->forceFill([
                 'status' => SaleStatus::Confirmed,
                 'confirmed_at' => now(),
             ])->save();
 
-            return $sale;
+            return $locked;
         });
     }
 
     public function cancel(Sale $sale): Sale
     {
-        $this->assertTransition($sale, [SaleStatus::Draft, SaleStatus::Pending], 'cancelar');
+        return DB::transaction(function () use ($sale): Sale {
+            $locked = $this->lockedSale($sale);
 
-        $sale->forceFill([
-            'status' => SaleStatus::Cancelled,
-            'cancelled_at' => now(),
-        ])->save();
+            $this->assertTransition($locked, [SaleStatus::Draft, SaleStatus::Pending], 'cancelar');
 
-        return $sale;
+            $locked->forceFill([
+                'status' => SaleStatus::Cancelled,
+                'cancelled_at' => now(),
+            ])->save();
+
+            return $locked;
+        });
+    }
+
+    /**
+     * Relee la Sale con lockForUpdate() dentro de la transacción activa.
+     * `withoutGlobalScope(CompanyScope::class)` porque lo que se necesita
+     * es bloquear la fila exacta sin depender de que CurrentTenant siga
+     * vigente en ese instante — pero el filtro por `company_id` NO se
+     * elimina: se reafirma explícitamente con el company_id de la propia
+     * instancia recibida (ya tenant-scoped y autorizada por el
+     * controller antes de llegar aquí, nunca desde el request). Así,
+     * aunque withoutGlobalScope() por sí solo permitiría bloquear
+     * cualquier fila de cualquier empresa, el `where('company_id', ...)`
+     * explícito impide que este método bloquee o modifique una Sale que
+     * no pertenezca a la empresa de la instancia original.
+     */
+    private function lockedSale(Sale $sale): Sale
+    {
+        return Sale::withoutGlobalScope(CompanyScope::class)
+            ->whereKey($sale->getKey())
+            ->where('company_id', $sale->company_id)
+            ->lockForUpdate()
+            ->firstOrFail();
     }
 
     /**
@@ -75,15 +122,22 @@ class SaleWorkflow
 
     private function assertConfirmable(Sale $sale): void
     {
-        if ($sale->items()->count() === 0) {
+        $items = SaleItem::withoutGlobalScope(CompanyScope::class)
+            ->where('sale_id', $sale->id)
+            ->get();
+
+        if ($items->isEmpty()) {
             throw new WorkflowTransitionException('No se puede confirmar una venta sin líneas.');
         }
 
-        if ($sale->client === null) {
+        $client = $sale->client_id !== null
+            ? Client::withoutGlobalScope(CompanyScope::class)->find($sale->client_id)
+            : null;
+
+        if ($client === null) {
             throw new WorkflowTransitionException('No se puede confirmar una venta sin un cliente válido.');
         }
 
-        $items = $sale->items()->get();
         $expectedSubtotal = round((float) $items->sum('subtotal'), 2);
         $expectedDiscount = round((float) $items->sum('discount'), 2);
         $expectedTax = round((float) $items->sum('tax_total'), 2);

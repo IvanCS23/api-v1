@@ -4,6 +4,8 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\EmployeController;
 use App\Http\Controllers\Api\InvoiceController;
+use App\Http\Controllers\Api\InvoiceItemController;
+use App\Http\Controllers\Api\LegacyInvoiceController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
@@ -60,12 +62,12 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::get('/employees/{id}', [EmployeController::class, 'show']);
     Route::delete('/employees/{id}', [EmployeController::class, 'destroy']);
 
-    // Invoices / tickets
-    Route::get('/invoices', [InvoiceController::class, 'index']);
-    Route::post('/invoices', [InvoiceController::class, 'store']);
-    Route::put('/invoices/{id}', [InvoiceController::class, 'update']);
-    Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
-    Route::delete('/invoices/{id}', [InvoiceController::class, 'destroy']);
+    // Legacy invoices / tickets (renombrado en Fase 5, ver LegacyInvoice)
+    Route::get('/legacy-invoices', [LegacyInvoiceController::class, 'index']);
+    Route::post('/legacy-invoices', [LegacyInvoiceController::class, 'store']);
+    Route::put('/legacy-invoices/{id}', [LegacyInvoiceController::class, 'update']);
+    Route::get('/legacy-invoices/{id}', [LegacyInvoiceController::class, 'show']);
+    Route::delete('/legacy-invoices/{id}', [LegacyInvoiceController::class, 'destroy']);
 
     // Sales (Fase 2 — motor comercial, sin Facturapi)
     Route::get('/sales', [SaleController::class, 'index']);
@@ -107,4 +109,20 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::post('/quotes/{quote}/items', [QuoteItemController::class, 'store']);
     Route::put('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'update']);
     Route::delete('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'destroy']);
+
+    // Invoices (Fase 5 — dominio interno de facturas, sin Facturapi/CFDI)
+    Route::get('/invoices', [InvoiceController::class, 'index']);
+    Route::post('/invoices', [InvoiceController::class, 'store']);
+    Route::put('/invoices/{id}', [InvoiceController::class, 'update']);
+    Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+    Route::delete('/invoices/{id}', [InvoiceController::class, 'destroy']);
+
+    // Invoice workflow (transiciones de estado vía acciones dedicadas)
+    Route::post('/invoices/{id}/ready', [InvoiceController::class, 'ready']);
+    Route::post('/invoices/{id}/issue', [InvoiceController::class, 'issue']);
+    Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);
+
+    // Invoice items (solo lectura, anidados bajo una factura)
+    Route::get('/invoices/{invoice}/items', [InvoiceItemController::class, 'index']);
+    Route::get('/invoices/{invoice}/items/{item}', [InvoiceItemController::class, 'show']);
 });
