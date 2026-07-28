@@ -25,8 +25,10 @@ use Illuminate\Support\Collection;
  *
  * Cada elemento de `errors` es {code, field, message}. `warnings` usa la
  * misma forma pero nunca afecta `ready` — son mejoras recomendadas, no
- * bloqueantes (ej. falta el correo del cliente, o la clave de unidad SAT
- * del producto).
+ * bloqueantes (ej. falta el correo del cliente). `clave_unidad` faltante
+ * es warning por decisión explícita (ver checkItems()) — bloqueante para
+ * el timbrado CFDI real cuando exista, no para este dominio interno.
+ * `objeto_imp` faltante SÍ es bloqueante (auditoría Fase 5 — cierre).
  *
  * Las líneas se leen SIEMPRE con `withoutGlobalScope(CompanyScope::class)`
  * filtrando por `sale_id`: si se usara la relación `$sale->items()` tal
@@ -173,6 +175,23 @@ class SaleBillingReadinessService
                     $errors[] = $this->error('ITEM_PRODUCT_SAT_KEY_MISSING', "{$prefix}.product.clave_producto", 'El producto de la línea no tiene clave de producto SAT.');
                 }
 
+                if (empty($product->objeto_imp)) {
+                    $errors[] = $this->error('ITEM_PRODUCT_OBJETO_IMP_MISSING', "{$prefix}.product.objeto_imp", 'El producto de la línea no tiene objeto de impuesto (c_ObjetoImp) SAT.');
+                }
+
+                /**
+                 * Decisión documentada (auditoría Fase 5 — cierre):
+                 * `clave_unidad` se mantiene como warning, no como error,
+                 * para el dominio Invoice interno — una Invoice Draft/Ready
+                 * es un registro fiscal propio, no un CFDI todavía, y no
+                 * bloquear por esto permite avanzar el flujo interno sin
+                 * datos catalogados al 100%. Cuando se integre Facturapi y
+                 * exista una emisión real de CFDI, `clave_unidad` faltante
+                 * SÍ deberá bloquear esa emisión (el atributo `ClaveUnidad`
+                 * es obligatorio en el nodo Concepto del CFDI) — ese cambio
+                 * pertenece a la validación previa al timbrado, no a este
+                 * servicio.
+                 */
                 if (empty($product->clave_unidad)) {
                     $warnings[] = $this->error('ITEM_PRODUCT_UNIT_KEY_MISSING', "{$prefix}.product.clave_unidad", 'El producto de la línea no tiene clave de unidad SAT.');
                 }

@@ -16,6 +16,15 @@ use Illuminate\Support\Facades\Schema;
  * Limitación conocida heredada de `sale_items`/`quote_items`: una sola
  * tasa de impuesto por línea (sin soportar traslado + retención
  * simultáneos). Documentada, no resuelta en esta fase.
+ *
+ * `product_description` (auditoría Fase 5 — cierre) es el snapshot de
+ * `products.descripcion` — independiente y distinto de `description`
+ * (el texto comercial real de la línea, heredado de `SaleItem`, que a su
+ * vez viene de `products.name`, no de `products.descripcion`; ver
+ * ERP_ARCHITECTURE_PLAN.md §12.1). Nunca se reemplaza uno por el otro.
+ * `product_no_identificacion` y `product_objeto_imp` completan el
+ * snapshot de campos reales de `products` detectados como faltantes en
+ * la auditoría anterior.
  */
 return new class extends Migration
 {
@@ -40,6 +49,9 @@ return new class extends Migration
             $table->string('product_clave_producto', 8)->nullable();
             $table->string('product_clave_unidad')->nullable();
             $table->string('product_type', 20)->nullable();
+            $table->string('product_no_identificacion')->nullable();
+            $table->text('product_description')->nullable();
+            $table->string('product_objeto_imp')->nullable();
 
             // Snapshot fiscal de la tasa de impuesto al momento de facturar.
             $table->string('tax_code', 3)->nullable();

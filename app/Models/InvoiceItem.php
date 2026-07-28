@@ -19,6 +19,13 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * SaleToInvoiceConverter al convertir. No implementa HasCalculableItems
  * ni usa LineItemCalculator — sus importes son una copia congelada de
  * los del SaleItem de origen, no un cálculo recurrente.
+ *
+ * `description` vs `product_description` (auditoría Fase 5 — cierre):
+ * son campos independientes, nunca uno reemplaza al otro. `description`
+ * es el texto comercial real de la línea (heredado del `SaleItem` de
+ * origen, que a su vez copió `products.name` al crearse, no
+ * `products.descripcion`). `product_description` es el snapshot
+ * separado de `products.descripcion` en sí.
  */
 class InvoiceItem extends Model
 {
@@ -38,6 +45,9 @@ class InvoiceItem extends Model
         'product_clave_producto',
         'product_clave_unidad',
         'product_type',
+        'product_no_identificacion',
+        'product_description',
+        'product_objeto_imp',
         'tax_code',
         'tax_name',
         'tax_rate_value',
