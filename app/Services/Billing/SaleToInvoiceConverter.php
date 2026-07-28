@@ -54,8 +54,15 @@ class SaleToInvoiceConverter
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            // Limitada explícitamente por sale_id Y company_id (auditoría
+            // Fase 5 — cierre): sale_id ya es único a nivel de esquema, así
+            // que filtrar también por company_id es redundante en la
+            // práctica, pero es la misma defensa en profundidad aplicada en
+            // el resto del dominio — nunca confiar en un solo filtro sin
+            // acotar explícitamente por la empresa de la instancia bloqueada.
             $alreadyInvoiced = Invoice::withoutGlobalScope(CompanyScope::class)
                 ->where('sale_id', $lockedSale->id)
+                ->where('company_id', $lockedSale->company_id)
                 ->exists();
 
             if ($alreadyInvoiced) {
@@ -124,6 +131,9 @@ class SaleToInvoiceConverter
                     'product_clave_producto' => $product?->clave_producto,
                     'product_clave_unidad' => $product?->clave_unidad,
                     'product_type' => $product?->type?->value,
+                    'product_no_identificacion' => $product?->no_identificacion,
+                    'product_description' => $product?->descripcion,
+                    'product_objeto_imp' => $product?->objeto_imp,
                     'tax_code' => $taxRate?->code,
                     'tax_name' => $taxRate?->name,
                     'tax_rate_value' => $taxRate?->rate,
