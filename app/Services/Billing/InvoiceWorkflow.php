@@ -21,9 +21,25 @@ use Illuminate\Support\Facades\DB;
  * explícito (con el company_id de la instancia ya tenant-scoped
  * recibida, nunca del request), y valida/actualiza sobre esa relectura
  * — nunca sobre la instancia recibida como parámetro.
+ *
+ * `issueToPac()` (Fase 6.2) es un punto de entrada adicional, distinto
+ * de `issue()`: `issue()` es la transición local Ready → Issued (sin
+ * PAC, sin cambios en esta fase); `issueToPac()` opera sobre una Invoice
+ * ya Issued y dispara el timbrado real ante el PAC activo. Se agrega
+ * aquí (en vez de un IssueInvoiceWorkflow separado) para mantener un
+ * único punto de orquestación por agregado — toda la validación y
+ * persistencia del timbrado en sí vive en IssueInvoiceService, que este
+ * método únicamente invoca.
  */
 class InvoiceWorkflow
 {
+    public function __construct(private readonly IssueInvoiceService $issueInvoiceService) {}
+
+    public function issueToPac(Invoice $invoice): Invoice
+    {
+        return $this->issueInvoiceService->issue($invoice);
+    }
+
     public function markReady(Invoice $invoice): Invoice
     {
         return DB::transaction(function () use ($invoice): Invoice {
