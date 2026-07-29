@@ -35,4 +35,23 @@ return [
         ],
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Facturapi (PAC) — Fase 6.1
+    |--------------------------------------------------------------------------
+    |
+    | Infraestructura de adaptador únicamente: en esta fase no se realiza
+    | ningún timbrado real ni llamada real al PAC. `test_key` es la llave
+    | de entorno de pruebas de Facturapi (nunca la llave live) — jamás se
+    | expone al frontend ni se registra en logs/excepciones.
+    |
+    */
+
+    'facturapi' => [
+        'base_url' => env('FACTURAPI_BASE_URL', 'https://www.facturapi.io/v2'),
+        'test_key' => env('FACTURAPI_TEST_KEY'),
+        'timeout' => (int) env('FACTURAPI_TIMEOUT', 15),
+        'connect_timeout' => (int) env('FACTURAPI_CONNECT_TIMEOUT', 5),
+    ],
+
 ];
