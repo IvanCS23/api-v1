@@ -6,6 +6,7 @@ use App\Enums\InvoiceStatus;
 use App\Exceptions\SaleAlreadyInvoicedException;
 use App\Exceptions\SaleNotBillableException;
 use App\Models\Client;
+use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Product;
@@ -37,6 +38,12 @@ use Illuminate\Support\Facades\DB;
  * (asignación directa de atributo antes de save(), el mecanismo de
  * confianza que reconoce BelongsToCompany) — nunca de CurrentTenant ni
  * de ningún dato de la petición.
+ *
+ * `payment_form`/`payment_method` (Fase 6.2.2): se copian de
+ * `Company.default_payment_form`/`default_payment_method` — la única
+ * fuente de este dato fiscal en el dominio hoy (Sale no lo posee
+ * directamente). Si la empresa no los configuró, quedan null en el
+ * snapshot; nunca se inventa un valor por defecto aquí.
  */
 class SaleToInvoiceConverter
 {
@@ -77,6 +84,16 @@ class SaleToInvoiceConverter
 
             $client = Client::withoutGlobalScope(CompanyScope::class)->findOrFail($lockedSale->client_id);
 
+            // `payment_form`/`payment_method` (Fase 6.2.2): Sale no posee
+            // este dato fiscal directamente — la única fuente en el
+            // dominio hoy es el default a nivel de Company
+            // (`default_payment_form`/`default_payment_method`, ver su
+            // migración). Company no está tenant-scoped (no usa
+            // BelongsToCompany), así que no requiere withoutGlobalScope.
+            // Si la empresa no configuró su default, el snapshot queda
+            // en null — nunca se inventa aquí un valor fijo.
+            $company = Company::findOrFail($lockedSale->company_id);
+
             $invoice = new Invoice([
                 'client_id' => $client->id,
                 'status' => InvoiceStatus::Draft,
@@ -99,6 +116,8 @@ class SaleToInvoiceConverter
                 'client_municipio' => $client->municipio,
                 'client_estado' => $client->estado,
                 'client_pais' => $client->pais,
+                'payment_form' => $company->default_payment_form,
+                'payment_method' => $company->default_payment_method,
             ]);
             $invoice->company_id = $lockedSale->company_id;
             $invoice->sale_id = $lockedSale->id;

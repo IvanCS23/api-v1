@@ -45,6 +45,8 @@ class InvoiceFactory extends Factory
             'client_codigo_postal' => fake()->numerify('#####'),
             'client_estado' => 'CDMX',
             'client_pais' => 'México',
+            'payment_form' => '03',
+            'payment_method' => 'PUE',
         ];
     }
 }

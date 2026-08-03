@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\Billing\PacProvider;
+use App\Data\Billing\PacInvoiceRequest;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -19,6 +20,15 @@ function fakeInvoiceForConfigTest(): Invoice
     return $invoice->fresh(['items']);
 }
 
+function requestForConfigTest(Invoice $invoice): PacInvoiceRequest
+{
+    return new PacInvoiceRequest(
+        invoice: $invoice,
+        idempotencyKey: "erp-invoice:{$invoice->company_id}:{$invoice->id}:v1",
+        externalId: "company-{$invoice->company_id}-invoice-{$invoice->id}",
+    );
+}
+
 test('la petición usa la URL base configurada', function () {
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
@@ -26,7 +36,8 @@ test('la petición usa la URL base configurada', function () {
     ]);
     Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'pending'], 200)]);
 
-    app(PacProvider::class)->createInvoice(fakeInvoiceForConfigTest());
+    $invoice = fakeInvoiceForConfigTest();
+    app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
 
     Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://example-pac.test/v2/invoices'));
 });
@@ -38,7 +49,8 @@ test('la petición envía Authorization Bearer con la llave configurada', functi
     ]);
     Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'pending'], 200)]);
 
-    app(PacProvider::class)->createInvoice(fakeInvoiceForConfigTest());
+    $invoice = fakeInvoiceForConfigTest();
+    app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
 
     Http::assertSent(fn ($request) => $request->hasHeader('Authorization', 'Bearer sk_test_SECRET_ABC'));
 });
@@ -65,7 +77,8 @@ test('sin API key configurada, la petición igual se envía con un Bearer vacío
     ]);
     Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'pending'], 200)]);
 
-    app(PacProvider::class)->createInvoice(fakeInvoiceForConfigTest());
+    $invoice = fakeInvoiceForConfigTest();
+    app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
 
     Http::assertSent(function ($request) {
         $auth = trim($request->header('Authorization')[0] ?? '');
@@ -84,12 +97,18 @@ test('la API key nunca aparece en el mensaje ni en el código de una excepción 
     ]);
     Http::fake(['*' => Http::response(['message' => 'No autorizado', 'code' => 'unauthorized'], 401)]);
 
+    $invoice = fakeInvoiceForConfigTest();
+
     try {
-        app(PacProvider::class)->createInvoice(fakeInvoiceForConfigTest());
+        app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
         test()->fail('Se esperaba PacAuthenticationException');
     } catch (PacAuthenticationException $e) {
         expect($e->getMessage())->not->toContain('sk_test_MUY_SECRETA_12345')
             ->and((string) $e->pacCode)->not->toContain('sk_test_MUY_SECRETA_12345')
             ->and((string) $e)->not->toContain('sk_test_MUY_SECRETA_12345');
     }
+});
+
+test('name() identifica el proveedor de forma estable, sin Reflection sobre la clase concreta', function () {
+    expect(app(PacProvider::class)->name())->toBe('facturapi');
 });

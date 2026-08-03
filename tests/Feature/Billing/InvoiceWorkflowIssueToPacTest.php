@@ -4,16 +4,18 @@ use App\Enums\InvoiceStatus;
 use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use App\Services\Billing\InvoiceWorkflow;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Support\Facades\Http;
 
 /**
- * `InvoiceWorkflow::issueToPac()` (Fase 6.2) es el único punto de
- * orquestación para el timbrado ante el PAC: delega enteramente en
- * IssueInvoiceService (toda la validación/persistencia se prueba en
- * detalle en IssueInvoiceServiceTest). Estas pruebas solo verifican la
- * delegación en sí, no repiten cada caso ya cubierto allí.
+ * `InvoiceWorkflow::issueToPac()` (Fase 6.2, mecánica endurecida en Fase
+ * 6.2.1) es el único punto de orquestación para el timbrado ante el PAC:
+ * delega enteramente en IssueInvoiceService (toda la validación/reserva/
+ * idempotencia/persistencia se prueba en detalle en
+ * IssueInvoiceServiceTest y archivos relacionados). Estas pruebas solo
+ * verifican la delegación en sí, no repiten cada caso ya cubierto allí.
  */
 beforeEach(function () {
     config([
@@ -25,6 +27,7 @@ beforeEach(function () {
 test('issueToPac delega en IssueInvoiceService y retorna la Invoice con los campos PAC persistidos', function () {
     $company = Company::factory()->create();
     $invoice = Invoice::factory()->create(['company_id' => $company->id, 'status' => InvoiceStatus::Issued]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
     Http::fake(['*' => Http::response([
@@ -36,7 +39,8 @@ test('issueToPac delega en IssueInvoiceService y retorna la Invoice con los camp
     $updated = app(InvoiceWorkflow::class)->issueToPac($invoice);
 
     expect($updated->pac_external_id)->toBe('inv_wf_1')
-        ->and($updated->cfdi_uuid)->toBe('DDDDDDDD-1111-2222-3333-444444444444');
+        ->and($updated->cfdi_uuid)->toBe('DDDDDDDD-1111-2222-3333-444444444444')
+        ->and($updated->pac_issue_status)->toBe('succeeded');
 });
 
 test('issueToPac propaga InvoiceCannotBeIssuedException para una factura que no está Issued', function () {
