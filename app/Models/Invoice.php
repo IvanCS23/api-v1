@@ -24,9 +24,29 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * aún no ejecutada): `pac_provider`, `pac_external_id`, `cfdi_uuid`,
  * `pac_status`, `cancellation_status`, `stamped_at`, `last_pac_sync_at`,
  * `pac_response`, `pac_last_error` deliberadamente NO son fillable — solo
- * un futuro servicio interno de timbrado (no implementado todavía) debe
- * poder escribirlos, vía asignación directa/forceFill(), nunca desde un
- * payload de request masivo.
+ * IssueInvoiceService debe poder escribirlos, vía asignación
+ * directa/forceFill(), nunca desde un payload de request masivo.
+ *
+ * Control de reserva/idempotencia (Fase 6.2.1, migración
+ * `add_pac_issue_control_to_invoices_table`, aún no ejecutada):
+ * `pac_idempotency_key`, `pac_issue_status`, `pac_issue_started_at`,
+ * `pac_issue_attempts`, `pac_reconciliation_required` — mismo criterio,
+ * tampoco son fillable. Describen el ciclo de vida del INTENTO de
+ * emisión (reserva, reintentos, ambigüedad ante fallos de red),
+ * separado de `pac_status` (que describe el resultado ya confirmado
+ * por el PAC).
+ *
+ * `payment_form`/`payment_method` (Fase 6.2.2, migración
+ * `add_payment_form_to_invoices_table`, aún no ejecutada): snapshot
+ * fiscal, mismo criterio que `client_*` — SÍ son fillable (los fija
+ * SaleToInvoiceConverter por asignación masiva al crear, copiándolos de
+ * `Sale->company->default_payment_form`/`default_payment_method`, la
+ * única fuente de este dato en el dominio hoy — Sale no lo posee
+ * directamente). `UpdateInvoiceRequest` no los valida, así que —igual
+ * que el resto del snapshot fiscal— tampoco son editables vía el
+ * endpoint HTTP genérico una vez creada la Invoice. Nunca se vuelven a
+ * leer desde Sale/Company después de la conversión: IssueInvoiceService
+ * y FacturapiProvider usan exclusivamente este snapshot ya congelado.
  */
 class Invoice extends Model
 {
@@ -61,6 +81,8 @@ class Invoice extends Model
         'client_municipio',
         'client_estado',
         'client_pais',
+        'payment_form',
+        'payment_method',
     ];
 
     /**
@@ -86,6 +108,9 @@ class Invoice extends Model
         'stamped_at' => 'immutable_datetime',
         'last_pac_sync_at' => 'immutable_datetime',
         'pac_response' => 'encrypted:array',
+        'pac_issue_started_at' => 'immutable_datetime',
+        'pac_issue_attempts' => 'integer',
+        'pac_reconciliation_required' => 'boolean',
     ];
 
     // company() ya la provee el trait BelongsToCompany.

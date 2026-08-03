@@ -35,6 +35,8 @@ class InvoiceItemFactory extends Factory
             'tax_total' => 0,
             'total' => 100,
             'product_clave_producto' => strtoupper(fake()->unique()->bothify('########')),
+            'product_clave_unidad' => 'H87',
+            'product_objeto_imp' => '02',
             'product_type' => 'product',
         ];
     }

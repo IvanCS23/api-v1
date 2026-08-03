@@ -1,6 +1,7 @@
 <?php
 
 use App\Contracts\Billing\PacProvider;
+use App\Data\Billing\PacInvoiceRequest;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -33,6 +34,15 @@ function fakeInvoiceForRetryTest(): Invoice
     return $invoice->fresh(['items']);
 }
 
+function requestForRetryTest(Invoice $invoice): PacInvoiceRequest
+{
+    return new PacInvoiceRequest(
+        invoice: $invoice,
+        idempotencyKey: "erp-invoice:{$invoice->company_id}:{$invoice->id}:v1",
+        externalId: "company-{$invoice->company_id}-invoice-{$invoice->id}",
+    );
+}
+
 test('createInvoice reintenta ante un fallo transitorio de conexión y tiene éxito en el segundo intento', function () {
     $attempts = 0;
 
@@ -46,7 +56,7 @@ test('createInvoice reintenta ante un fallo transitorio de conexión y tiene éx
         return Http::response(['id' => 'inv_retry_ok', 'status' => 'valid'], 200);
     });
 
-    $result = app(PacProvider::class)->createInvoice(fakeInvoiceForRetryTest());
+    $result = app(PacProvider::class)->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest()));
 
     expect($attempts)->toBe(2)
         ->and($result->externalId)->toBe('inv_retry_ok');
@@ -61,7 +71,7 @@ test('createInvoice agota los reintentos y propaga ConnectionException si todos 
         throw new ConnectionException('Connection timed out después de 5 segundos');
     });
 
-    expect(fn () => app(PacProvider::class)->createInvoice(fakeInvoiceForRetryTest()))
+    expect(fn () => app(PacProvider::class)->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest())))
         ->toThrow(ConnectionException::class);
 
     expect($attempts)->toBe(2);
@@ -76,7 +86,7 @@ test('createInvoice NO reintenta ante una respuesta HTTP de error ya recibida (5
         return Http::response(['message' => 'Error interno del PAC'], 500);
     });
 
-    expect(fn () => app(PacProvider::class)->createInvoice(fakeInvoiceForRetryTest()))
+    expect(fn () => app(PacProvider::class)->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest())))
         ->toThrow(PacUnavailableException::class);
 
     expect($attempts)->toBe(1);
