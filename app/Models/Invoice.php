@@ -47,6 +47,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * endpoint HTTP genérico una vez creada la Invoice. Nunca se vuelven a
  * leer desde Sale/Company después de la conversión: IssueInvoiceService
  * y FacturapiProvider usan exclusivamente este snapshot ya congelado.
+ *
+ * Tracking de BORRADOR remoto (Fase 6.2.4, migración
+ * `add_pac_draft_tracking_to_invoices_table`, aún no ejecutada):
+ * `pac_draft_external_id`, `pac_draft_status`, `pac_draft_ready_to_stamp`,
+ * `pac_draft_idempotency_key`, `pac_draft_created_at`,
+ * `pac_draft_last_sync_at`, `pac_draft_response` — mismo criterio, NO son
+ * fillable (solo CreatePacDraftInvoiceService/SyncPacDraftInvoiceService
+ * los escriben, vía forceFill()). Deliberadamente separadas por completo
+ * de las columnas de emisión final (`pac_external_id`/`cfdi_uuid`/
+ * `stamped_at`): un borrador es un recurso REAL en Facturapi pero nunca
+ * timbrado — mezclarlas habría hecho imposible distinguir "existe un
+ * borrador" de "existe un CFDI emitido".
  */
 class Invoice extends Model
 {
@@ -95,6 +107,7 @@ class Invoice extends Model
     protected $hidden = [
         'pac_response',
         'pac_last_error',
+        'pac_draft_response',
     ];
 
     protected $casts = [
@@ -111,6 +124,10 @@ class Invoice extends Model
         'pac_issue_started_at' => 'immutable_datetime',
         'pac_issue_attempts' => 'integer',
         'pac_reconciliation_required' => 'boolean',
+        'pac_draft_ready_to_stamp' => 'boolean',
+        'pac_draft_created_at' => 'immutable_datetime',
+        'pac_draft_last_sync_at' => 'immutable_datetime',
+        'pac_draft_response' => 'encrypted:array',
     ];
 
     // company() ya la provee el trait BelongsToCompany.
