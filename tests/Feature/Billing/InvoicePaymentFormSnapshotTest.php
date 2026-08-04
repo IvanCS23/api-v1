@@ -2,7 +2,6 @@
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
-use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Models\Client;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -135,46 +134,68 @@ test('el payload enviado a Facturapi incluye payment_form en la raíz', function
     Http::assertSent(fn ($request) => ($request->data()['payment_form'] ?? null) === '04');
 });
 
-test('payment_form ausente (null) bloquea la emisión antes de cualquier llamada HTTP', function () {
+// Nota (Fase 6.2.3): las pruebas de "payment_form ausente/formato
+// inválido bloquea" que vivían aquí se movieron a
+// tests/Feature/Billing/InvoicePacReadinessServiceTest.php —
+// FacturapiProvider ya NO valida esto (ver nota equivalente en
+// FacturapiProviderPayloadTest.php).
+
+/**
+ * Política definitiva de payment_method (Fase 6.2.3): payment_form
+ * obligatorio; payment_method nullable; si es null, NO se envía en el
+ * payload (nunca se escribe "PUE" artificialmente en el snapshot ni en
+ * el payload) — Facturapi aplica su propio default documentado.
+ */
+test('payment_method null: la propiedad payment_method está ausente del payload (Facturapi aplica su default PUE)', function () {
     $company = Company::factory()->create();
-    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'payment_form' => null]);
+    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'payment_form' => '03', 'payment_method' => null]);
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
-    Http::fake();
+    Http::fake(['*' => Http::response(['id' => 'inv_pm_null', 'status' => 'pending'], 200)]);
 
     $request = new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
         externalId: "company-{$company->id}-invoice-{$invoice->id}",
     );
+    app(PacProvider::class)->createInvoice($request);
 
-    try {
-        app(PacProvider::class)->createInvoice($request);
-        test()->fail('Se esperaba InvoiceFiscalSnapshotIncompleteException');
-    } catch (InvoiceFiscalSnapshotIncompleteException $e) {
-        expect(implode(' ', $e->missingFields))->toContain('payment_form');
-    }
-
-    Http::assertNothingSent();
+    Http::assertSent(fn ($request) => ! array_key_exists('payment_method', $request->data()));
 });
 
-test('payment_form con formato inválido (no 2 dígitos numéricos) bloquea la emisión antes de cualquier llamada HTTP', function (string $invalid) {
+test('payment_method PUE: el payload incluye "payment_method": "PUE"', function () {
     $company = Company::factory()->create();
-    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'payment_form' => $invalid]);
+    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'payment_form' => '03', 'payment_method' => 'PUE']);
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
-    Http::fake();
+    Http::fake(['*' => Http::response(['id' => 'inv_pm_pue', 'status' => 'pending'], 200)]);
 
     $request = new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
         externalId: "company-{$company->id}-invoice-{$invoice->id}",
     );
+    app(PacProvider::class)->createInvoice($request);
 
-    expect(fn () => app(PacProvider::class)->createInvoice($request))
-        ->toThrow(InvoiceFiscalSnapshotIncompleteException::class);
+    Http::assertSent(fn ($request) => ($request->data()['payment_method'] ?? null) === 'PUE');
+});
 
-    Http::assertNothingSent();
-})->with(['3', '003', 'AB', '0A', '  ']);
+test('payment_method PPD: el payload incluye "payment_method": "PPD"', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'payment_form' => '03', 'payment_method' => 'PPD']);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+    app(CurrentTenant::class)->set($company->id);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_pm_ppd', 'status' => 'pending'], 200)]);
+
+    $request = new PacInvoiceRequest(
+        invoice: $invoice->fresh(['items']),
+        idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
+        externalId: "company-{$company->id}-invoice-{$invoice->id}",
+    );
+    app(PacProvider::class)->createInvoice($request);
+
+    Http::assertSent(fn ($request) => ($request->data()['payment_method'] ?? null) === 'PPD');
+});

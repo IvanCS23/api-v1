@@ -2,6 +2,7 @@
 
 namespace App\Contracts\Billing;
 
+use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 
@@ -40,6 +41,17 @@ use App\Data\Billing\PacInvoiceResult;
  * una en silencio. Cualquier paginación del proveedor concreto se
  * normaliza dentro de la implementación — el dominio nunca recibe
  * estructuras de listado/paginación específicas del PAC.
+ *
+ * `createDraftInvoice()`/`retrieveDraftInvoice()` (Fase 6.2.4): Facturapi
+ * no documenta ningún `dry_run` para Create Invoice (confirmado contra
+ * docs.facturapi.io/api/) — su mecanismo real de prevalidación es crear
+ * un recurso con `status: "draft"`: se persiste de verdad en el PAC,
+ * nunca se timbra, y expone `is_ready_to_stamp` (ver
+ * PacInvoiceDraftResult). Deliberadamente son operaciones DISTINTAS de
+ * `createInvoice()`/`retrieveInvoice()` — nunca un booleano
+ * `$draft`/`$validate` agregado a esos métodos, que volvería ambiguo el
+ * contrato de emisión real. Ninguna implementación debe timbrar un
+ * borrador todavía (no existe `stampDraftInvoice()` en este contrato).
  */
 interface PacProvider
 {
@@ -53,6 +65,19 @@ interface PacProvider
      * @throws \App\Exceptions\Billing\PacAmbiguousInvoiceMatchException si el PAC devuelve más de una coincidencia
      */
     public function findInvoiceByExternalId(string $externalId): ?PacInvoiceResult;
+
+    /**
+     * Crea un borrador (`status: "draft"`) — un recurso REAL y
+     * persistente del lado del PAC, nunca timbrado.
+     *
+     * @throws \App\Exceptions\Billing\PacUnexpectedEnvironmentException si el PAC responde con livemode=true
+     */
+    public function createDraftInvoice(PacInvoiceRequest $request): PacInvoiceDraftResult;
+
+    /**
+     * @throws \App\Exceptions\Billing\PacUnexpectedEnvironmentException si el PAC responde con livemode=true
+     */
+    public function retrieveDraftInvoice(string $externalId): PacInvoiceDraftResult;
 
     public function cancelInvoice(
         string $externalId,

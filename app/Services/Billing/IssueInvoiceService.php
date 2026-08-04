@@ -31,11 +31,18 @@ use Throwable;
  * emisión, la envía al PAC activo mediante PacProvider, y persiste el
  * resultado.
  *
- * No conoce Facturapi ni ningún detalle de un PAC concreto: depende
- * únicamente de PacProvider (inyectado) y de la familia de excepciones
- * PacException (App\Exceptions\Billing\...), que es parte del contrato
- * PAC-agnóstico, no de Facturapi en sí. `pac_provider` se persiste
- * usando `PacProvider::name()` — ya no se deriva por Reflection.
+ * No conoce Facturapi ni ningún detalle de un PAC concreto: depende de
+ * PacProvider (inyectado), de InvoicePacReadinessService (Fase 6.2.3 —
+ * PAC-agnóstico, valida el snapshot antes de contactar al PAC) y de la
+ * familia de excepciones PacException (App\Exceptions\Billing\...), que
+ * es parte del contrato PAC-agnóstico, no de Facturapi en sí.
+ * `pac_provider` se persiste usando `PacProvider::name()` — ya no se
+ * deriva por Reflection.
+ *
+ * Arquitectura del flujo (Fase 6.2.3): IssueInvoiceService → readiness →
+ * PacProvider. FacturapiProvider ya no valida completitud del snapshot
+ * (eso vive únicamente en InvoicePacReadinessService) — se concentra en
+ * traducir el DTO ya validado al contrato externo.
  *
  * Ciclo de vida en tres transacciones cortas, con la llamada HTTP
  * siempre fuera de cualquiera de ellas (nunca se sostiene un lock de
@@ -71,7 +78,10 @@ class IssueInvoiceService
 
     private const STATUS_RECONCILIATION_REQUIRED = 'reconciliation_required';
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(
+        private readonly PacProvider $pacProvider,
+        private readonly InvoicePacReadinessService $readiness,
+    ) {}
 
     public function issue(Invoice $invoice): Invoice
     {
@@ -86,6 +96,14 @@ class IssueInvoiceService
         $startedAt = microtime(true);
 
         try {
+            // Readiness ANTES de tocar el PAC (arquitectura preferida,
+            // Fase 6.2.3): FacturapiProvider ya no valida nada de esto —
+            // solo traduce. Si falla, no se hace ninguna llamada HTTP
+            // (ver isDefinitiveFailure(): InvoiceFiscalSnapshotIncompleteException
+            // sigue siendo un fallo DEFINITIVO, reintentable con la misma
+            // idempotency_key una vez corregido el dato).
+            $this->readiness->assertReady($reserved);
+
             $result = $this->pacProvider->createInvoice($pacRequest);
         } catch (Throwable $e) {
             $elapsedMs = $this->elapsedMs($startedAt);

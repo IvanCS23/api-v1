@@ -2,7 +2,6 @@
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
-use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
@@ -188,67 +187,10 @@ test('el payload de una empresa nunca mezcla datos de otra empresa (aislamiento 
     });
 });
 
-test('campos fiscales obligatorios ausentes en el snapshot bloquean la emisión con InvoiceFiscalSnapshotIncompleteException, sin llamar al PAC', function () {
-    // `client_rfc`/`client_uso_cfdi`/`product_clave_producto` son NOT
-    // NULL a nivel de esquema (ver create_invoices_table/
-    // create_invoice_items_table) — se usa '' (cadena vacía) para
-    // simular "dato ausente" sin violar esa constraint; `blank('')` es
-    // exactamente el mismo caso que null para assertSnapshotIsComplete().
-    $company = Company::factory()->create();
-    $invoice = Invoice::factory()->create([
-        'company_id' => $company->id,
-        'client_rfc' => '',
-        'client_uso_cfdi' => '',
-    ]);
-    InvoiceItem::factory()->create([
-        'company_id' => $company->id,
-        'invoice_id' => $invoice->id,
-        'product_clave_producto' => '',
-    ]);
-
-    Http::fake();
-    app(CurrentTenant::class)->set($company->id);
-
-    try {
-        app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
-        test()->fail('Se esperaba InvoiceFiscalSnapshotIncompleteException');
-    } catch (InvoiceFiscalSnapshotIncompleteException $e) {
-        expect($e->invoiceId)->toBe($invoice->id)
-            ->and($e->missingFields)->toContain('client_rfc (customer.tax_id)')
-            ->and($e->missingFields)->toContain('client_uso_cfdi (use)')
-            ->and(implode(' ', $e->missingFields))->toContain('product_clave_producto');
-    }
-
-    Http::assertNothingSent();
-});
-
-test('una factura sin líneas bloquea la emisión con InvoiceFiscalSnapshotIncompleteException', function () {
-    $company = Company::factory()->create();
-    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
-
-    Http::fake();
-    app(CurrentTenant::class)->set($company->id);
-
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items']))))
-        ->toThrow(InvoiceFiscalSnapshotIncompleteException::class);
-
-    Http::assertNothingSent();
-});
-
-test('un tax_code no reconocido en el catálogo SAT c_Impuesto bloquea la emisión', function () {
-    $company = Company::factory()->create();
-    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
-    InvoiceItem::factory()->create([
-        'company_id' => $company->id,
-        'invoice_id' => $invoice->id,
-        'tax_code' => '999',
-    ]);
-
-    Http::fake();
-    app(CurrentTenant::class)->set($company->id);
-
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items']))))
-        ->toThrow(InvoiceFiscalSnapshotIncompleteException::class);
-
-    Http::assertNothingSent();
-});
+// Nota (Fase 6.2.3): las pruebas de "snapshot fiscal incompleto bloquea
+// la emisión" que vivían aquí se movieron a
+// tests/Feature/Billing/InvoicePacReadinessServiceTest.php —
+// FacturapiProvider ya NO valida completitud del snapshot (se
+// concentra únicamente en traducir el payload); ese concepto se
+// centralizó en InvoicePacReadinessService, invocado por
+// IssueInvoiceService ANTES de llamar a este Provider.

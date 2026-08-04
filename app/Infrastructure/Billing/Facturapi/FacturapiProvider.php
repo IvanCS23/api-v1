@@ -3,17 +3,16 @@
 namespace App\Infrastructure\Billing\Facturapi;
 
 use App\Contracts\Billing\PacProvider;
+use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
-use App\Enums\TaxType;
-use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
+use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
-use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
@@ -27,8 +26,12 @@ use Illuminate\Support\Facades\Http;
  * contra el contrato oficial (docs.facturapi.io/api/). Fase 6.2.2:
  * `payment_form`/`payment_method` agregados al payload, y
  * `findInvoiceByExternalId()` agregado usando el endpoint oficial de
- * listado (`GET /invoices?external_id=...`) — ver el reporte de entrega
- * de cada fase para el detalle completo.
+ * listado (`GET /invoices?external_id=...`). Fase 6.2.4:
+ * `createDraftInvoice()`/`retrieveDraftInvoice()` agregados
+ * (`status: "draft"`, el mecanismo real de prevalidación de
+ * Facturapi — no existe `dry_run`), con verificación explícita de
+ * `livemode === false` antes de aceptar cualquier respuesta — ver el
+ * reporte de entrega de cada fase para el detalle completo.
  *
  * No importa el SDK oficial de Facturapi (a propósito, ver PacProvider):
  * usa únicamente `Illuminate\Support\Facades\Http`.
@@ -126,6 +129,29 @@ class FacturapiProvider implements PacProvider
         return $this->mapInvoiceArray($only);
     }
 
+    /**
+     * `POST /invoices` con `status: "draft"` (Fase 6.2.4) — Facturapi no
+     * documenta `dry_run`; este es su mecanismo real de prevalidación:
+     * crea un recurso REAL y persistente (nunca timbrado). Operación
+     * deliberadamente distinta de `createInvoice()` — nunca un booleano
+     * agregado a ese método.
+     */
+    public function createDraftInvoice(PacInvoiceRequest $request): PacInvoiceDraftResult
+    {
+        $payload = $this->buildDraftInvoicePayload($request);
+
+        $response = $this->client()->post('/invoices', $payload);
+
+        return $this->mapDraftResponse($response, 'createDraftInvoice');
+    }
+
+    public function retrieveDraftInvoice(string $externalId): PacInvoiceDraftResult
+    {
+        $response = $this->client()->get("/invoices/{$externalId}");
+
+        return $this->mapDraftResponse($response, 'retrieveDraftInvoice');
+    }
+
     public function cancelInvoice(
         string $externalId,
         string $motive,
@@ -179,9 +205,7 @@ class FacturapiProvider implements PacProvider
      * OBLIGATORIO en el contrato oficial) va al nivel raíz — Fase 6.2.2
      * agregó el snapshot correspondiente en Invoice (`payment_form`,
      * copiado de `Company.default_payment_form` durante la conversión,
-     * ver SaleToInvoiceConverter). `assertSnapshotIsComplete()` bloquea
-     * si falta o tiene formato inválido, así que si el payload llega a
-     * construirse, `payment_form` siempre va presente.
+     * ver SaleToInvoiceConverter).
      *
      * `payment_method` (SAT c_MetodoPago, enum "PUE"|"PPD") SÍ está
      * documentado en el mismo endpoint, pero es OPCIONAL — Facturapi
@@ -191,14 +215,52 @@ class FacturapiProvider implements PacProvider
      * localmente, se deja que el default sea el que Facturapi ya
      * documenta y aplica de su lado.
      *
+     * Fase 6.2.3: este método YA NO valida completitud del snapshot
+     * (antes `assertSnapshotIsComplete()`, vivía aquí) — ese concepto se
+     * centralizó en `InvoicePacReadinessService`, que IssueInvoiceService/
+     * CreatePacDraftInvoiceService invocan ANTES de llamar a este
+     * Provider (arquitectura preferida: Servicio → readiness →
+     * PacProvider). Este adaptador confía en que el llamador ya validó;
+     * se concentra únicamente en traducir el snapshot al payload de
+     * Facturapi.
+     *
+     * Fase 6.2.4: se extrajo a `buildBasePayload()` (idéntica para
+     * `createInvoice()` y `createDraftInvoice()`) — el único payload que
+     * difiere entre emisión real y borrador es el campo `status`
+     * (ausente vs. `"draft"`), ver `buildDraftInvoicePayload()`.
+     *
      * @return array<string, mixed>
      */
     private function buildInvoicePayload(PacInvoiceRequest $request): array
     {
+        return $this->buildBasePayload($request);
+    }
+
+    /**
+     * Idéntico a buildInvoicePayload() salvo por `status: "draft"`
+     * (Fase 6.2.4) — el único campo que distingue "crear un borrador"
+     * de "emitir de verdad" en el contrato oficial de Facturapi.
+     * Deliberadamente NO se envía `address` (la documentación oficial
+     * confirma que es opcional y, si se omite, Facturapi usa el
+     * domicilio de la organización) ni `series` (Invoice todavía no
+     * tiene ese snapshot — ver auditoría Fase 6.2.4; Facturapi asigna
+     * `folio_number` automáticamente si se omite) ni ningún total
+     * calculado localmente.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildDraftInvoicePayload(PacInvoiceRequest $request): array
+    {
+        return array_merge($this->buildBasePayload($request), ['status' => 'draft']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function buildBasePayload(PacInvoiceRequest $request): array
+    {
         $invoice = $request->invoice;
         $invoice->loadMissing('items');
-
-        $this->assertSnapshotIsComplete($invoice);
 
         $payload = [
             'customer' => [
@@ -245,80 +307,6 @@ class FacturapiProvider implements PacProvider
         }
 
         return $payload;
-    }
-
-    /**
-     * Valida, contra columnas de snapshot que SÍ existen en Invoice/
-     * InvoiceItem, que ninguna venga vacía (ni con formato inválido)
-     * para ESTA factura en particular. Nunca inventa un default fiscal —
-     * si algo obligatorio falta, bloquea con una excepción que lista
-     * exactamente qué falta, sin llegar a llamar al PAC.
-     *
-     * `payment_form` (Fase 6.2.2): no existe un catálogo SAT c_FormaPago
-     * completo dentro de este proyecto todavía, así que solo se valida
-     * formato (exactamente 2 caracteres numéricos) — la validación
-     * semántica final (¿es un código real del catálogo?) queda del lado
-     * de Facturapi. Si en el futuro el proyecto incorpora ese catálogo,
-     * debe validarse aquí contra él en vez de solo el formato.
-     */
-    private function assertSnapshotIsComplete(Invoice $invoice): void
-    {
-        $missing = [];
-
-        if (blank($invoice->client_name)) {
-            $missing[] = 'client_name (customer.legal_name)';
-        }
-        if (blank($invoice->client_rfc)) {
-            $missing[] = 'client_rfc (customer.tax_id)';
-        }
-        if (blank($invoice->client_regimen_fiscal)) {
-            $missing[] = 'client_regimen_fiscal (customer.tax_system)';
-        }
-        if (blank($invoice->client_uso_cfdi)) {
-            $missing[] = 'client_uso_cfdi (use)';
-        }
-        if (blank($invoice->client_codigo_postal)) {
-            $missing[] = 'client_codigo_postal (customer.address.zip)';
-        }
-
-        if (blank($invoice->payment_form)) {
-            $missing[] = 'payment_form (SAT c_FormaPago; sin valor en el snapshot — ver Company.default_payment_form)';
-        } elseif (! preg_match('/^\d{2}$/', (string) $invoice->payment_form)) {
-            $missing[] = "payment_form (formato inválido: '{$invoice->payment_form}', se esperan exactamente 2 dígitos numéricos del catálogo SAT c_FormaPago)";
-        }
-
-        if ($invoice->items->isEmpty()) {
-            $missing[] = 'items (la factura no tiene líneas)';
-        }
-
-        foreach ($invoice->items as $item) {
-            $prefix = "items[{$item->id}]";
-
-            if (blank($item->description)) {
-                $missing[] = "{$prefix}.description";
-            }
-            if (blank($item->product_clave_producto)) {
-                $missing[] = "{$prefix}.product_clave_producto (product.product_key)";
-            }
-            if (blank($item->product_clave_unidad)) {
-                $missing[] = "{$prefix}.product_clave_unidad (product.unit_key)";
-            }
-            if (blank($item->product_objeto_imp)) {
-                $missing[] = "{$prefix}.product_objeto_imp (product.taxability)";
-            }
-
-            if ($item->tax_code !== null && ! array_key_exists((string) $item->tax_code, self::TAX_CODE_NAMES)) {
-                $missing[] = "{$prefix}.tax_code (código SAT c_Impuesto no reconocido: '{$item->tax_code}')";
-            }
-
-            if ($item->tax_type === TaxType::Retencion) {
-                $missing[] = "{$prefix}.tax_type=retencion (el objeto Tax documentado de Facturapi no distingue traslado/retención — ver auditoría Fase 6.2.1)";
-            }
-        }
-
-        if ($missing !== []) {
-            throw new InvoiceFiscalSnapshotIncompleteException($invoice->id, $missing);
-        }
     }
 
     private function client(): PendingRequest
@@ -385,6 +373,66 @@ class FacturapiProvider implements PacProvider
             uuid: isset($data['uuid']) ? (string) $data['uuid'] : null,
             stampedAt: isset($stamp['date']) ? CarbonImmutable::parse((string) $stamp['date']) : null,
             cancellationStatus: isset($data['cancellation_status']) ? (string) $data['cancellation_status'] : null,
+            rawResponse: $data,
+        );
+    }
+
+    /**
+     * Mapeo de un borrador (Fase 6.2.4) — nunca reutiliza mapResponse()/
+     * mapInvoiceArray(): valida explícitamente `status === "draft"`
+     * (jamás interpreta "status=valid" como un draft correcto) y
+     * `livemode === false` ANTES de construir el DTO — si llega
+     * `livemode: true`, se detiene con PacUnexpectedEnvironmentException
+     * sin persistir nada como si fuera un borrador TEST válido.
+     */
+    private function mapDraftResponse(Response $response, string $context): PacInvoiceDraftResult
+    {
+        $this->assertSuccessful($response);
+
+        $data = $response->json();
+
+        if (! is_array($data) || ! isset($data['id'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene el campo mínimo esperado (id).",
+                $response->status(),
+            );
+        }
+
+        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
+                $response->status(),
+            );
+        }
+
+        if ($data['livemode'] === true) {
+            throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
+        }
+
+        if (($data['status'] ?? null) !== 'draft') {
+            $receivedStatus = isset($data['status']) ? (string) $data['status'] : 'null';
+
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no representa un borrador (status recibido: '{$receivedStatus}', se esperaba 'draft').",
+                $response->status(),
+            );
+        }
+
+        if (! isset($data['is_ready_to_stamp']) || ! is_bool($data['is_ready_to_stamp'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene el campo is_ready_to_stamp.",
+                $response->status(),
+            );
+        }
+
+        return new PacInvoiceDraftResult(
+            externalId: (string) $data['id'],
+            status: (string) $data['status'],
+            isReadyToStamp: (bool) $data['is_ready_to_stamp'],
+            livemode: (bool) $data['livemode'],
+            idempotencyKey: isset($data['idempotency_key']) ? (string) $data['idempotency_key'] : null,
+            externalReference: isset($data['external_id']) ? (string) $data['external_id'] : null,
+            createdAt: isset($data['created_at']) ? CarbonImmutable::parse((string) $data['created_at']) : null,
             rawResponse: $data,
         );
     }
