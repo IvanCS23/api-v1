@@ -59,6 +59,16 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * `stamped_at`): un borrador es un recurso REAL en Facturapi pero nunca
  * timbrado — mezclarlas habría hecho imposible distinguir "existe un
  * borrador" de "existe un CFDI emitido".
+ *
+ * Artifacts CFDI (Fase 6.3, migración `add_cfdi_artifacts_to_invoices_table`,
+ * aún no ejecutada): `cfdi_xml_path`/`cfdi_pdf_path` (rutas relativas
+ * dentro del disk privado `local`, nunca el contenido en la DB),
+ * `cfdi_xml_sha256`/`cfdi_pdf_sha256`/`cfdi_xml_size`/`cfdi_pdf_size`
+ * (integridad), `cfdi_artifacts_downloaded_at`/`cfdi_artifacts_last_error`/
+ * `cfdi_artifacts_status` — mismo criterio: NO son fillable, solo
+ * `DownloadInvoiceArtifactsService` los escribe vía forceFill(). Las
+ * rutas quedan ocultas en `$hidden` (ver InvoiceResource) — nunca deben
+ * exponer la estructura de directorios del servidor vía API.
  */
 class Invoice extends Model
 {
@@ -108,6 +118,9 @@ class Invoice extends Model
         'pac_response',
         'pac_last_error',
         'pac_draft_response',
+        'cfdi_xml_path',
+        'cfdi_pdf_path',
+        'cfdi_artifacts_last_error',
     ];
 
     protected $casts = [
@@ -128,6 +141,9 @@ class Invoice extends Model
         'pac_draft_created_at' => 'immutable_datetime',
         'pac_draft_last_sync_at' => 'immutable_datetime',
         'pac_draft_response' => 'encrypted:array',
+        'cfdi_xml_size' => 'integer',
+        'cfdi_pdf_size' => 'integer',
+        'cfdi_artifacts_downloaded_at' => 'immutable_datetime',
     ];
 
     // company() ya la provee el trait BelongsToCompany.
