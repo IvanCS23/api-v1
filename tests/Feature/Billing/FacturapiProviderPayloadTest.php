@@ -194,3 +194,345 @@ test('el payload de una empresa nunca mezcla datos de otra empresa (aislamiento 
 // concentra únicamente en traducir el payload); ese concepto se
 // centralizó en InvoicePacReadinessService, invocado por
 // IssueInvoiceService ANTES de llamar a este Provider.
+
+// ==================== CORRECCIÓN PUNTUAL: campos opcionales nunca como null ====================
+//
+// Reproducido por primera vez con una llamada real a Facturapi TEST:
+// `items[].product.sku` se enviaba como `null` cuando el snapshot no lo
+// traía, y Facturapi lo rechazó ("tipo inválido") porque `sku` es
+// OPCIONAL (la clave puede omitirse) pero de tipo `string` (nunca acepta
+// `null`). Mismo criterio aplicado a los sub-campos opcionales de
+// `customer.address` (ver `nullableStringOrOmit()` en FacturapiProvider).
+
+test('sku ausente en el payload cuando el snapshot no lo trae, incluso si el Product vivo tiene un SKU distinto — nunca consulta el Product vivo', function () {
+    $company = Company::factory()->create();
+    $product = \App\Models\Product::factory()->create([
+        'company_id' => $company->id,
+        'no_identificacion' => 'SKU-ORIGINAL',
+    ]);
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'product_id' => $product->id,
+        'product_no_identificacion' => null,
+    ]);
+
+    // El Product se modifica DESPUÉS de que la Invoice ya congeló su
+    // snapshot (product_no_identificacion sigue null) — mismo escenario
+    // reportado con Product #14 / Invoice #1.
+    $product->update(['no_identificacion' => 'SKU-NUEVO']);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_sku_null', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    \Illuminate\Support\Facades\DB::enableQueryLog();
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    $queries = \Illuminate\Support\Facades\DB::getQueryLog();
+    \Illuminate\Support\Facades\DB::disableQueryLog();
+
+    // buildBasePayload() nunca consulta la tabla `products` — el payload
+    // se construye exclusivamente desde el snapshot de InvoiceItem.
+    expect(collect($queries)->contains(fn ($q) => str_contains(strtolower($q['query']), 'from `products`') || str_contains(strtolower($q['query']), 'from "products"')))
+        ->toBeFalse();
+
+    Http::assertSent(function ($request) {
+        $body = $request->data();
+
+        expect($body['items'][0]['product'])->not->toHaveKey('sku');
+
+        $raw = json_encode($body);
+        expect($raw)->not->toContain('SKU-NUEVO')
+            ->and($raw)->not->toContain('"sku":null')
+            ->and($raw)->not->toContain('"sku":"null"');
+
+        return true;
+    });
+});
+
+test('sku presente y exacto cuando el snapshot lo trae', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'product_no_identificacion' => 'SKU-SNAPSHOT',
+    ]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_sku_present', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $body = $request->data();
+
+        expect($body['items'][0]['product']['sku'])->toBe('SKU-SNAPSHOT');
+
+        return true;
+    });
+});
+
+test('customer.address omite las claves opcionales sin valor (nunca las envía como null); zip siempre se envía', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create([
+        'company_id' => $company->id,
+        'client_codigo_postal' => '54930',
+        'client_calle' => null,
+        'client_no_exterior' => null,
+        'client_no_interior' => null,
+        'client_colonia' => null,
+        'client_localidad' => null,
+        'client_municipio' => null,
+        'client_estado' => null,
+        'client_pais' => null,
+    ]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_addr_null', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $body = $request->data();
+        $address = $body['customer']['address'];
+
+        expect($address)->toBe(['zip' => '54930']);
+
+        $raw = json_encode($body);
+        expect($raw)->not->toContain(':null');
+
+        return true;
+    });
+});
+
+// ==================== CORRECCIÓN PUNTUAL: tax_included / semántica fiscal ====================
+//
+// Reproducido con la primera creación real de un draft en Facturapi
+// TEST: al omitir `product.tax_included`, Facturapi asumió su propio
+// default (`true`, precio CON IVA incluido) y el draft devuelto quedó
+// inconsistente con el snapshot local (subtotal=100/tax=16/total=116 —
+// `unit_price=100` es SIEMPRE precio antes de impuestos en este ERP, ver
+// SaleCalculator/InvoiceCalculator, que esta corrección NO toca).
+
+test('tax_included se envía explícitamente como false — unit_price es precio antes de impuestos, nunca se recalcula ni se deja el default de Facturapi', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create([
+        'company_id' => $company->id,
+        'subtotal' => 100,
+        'discount_total' => 0,
+        'tax_total' => 16,
+        'total' => 116,
+    ]);
+    InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'quantity' => 1,
+        'unit_price' => 100,
+        'discount' => 0,
+        'tax_code' => '002',
+        'tax_rate_value' => 0.16,
+        'tax_type' => 'traslado',
+        'tax_factor_type' => 'tasa',
+    ]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_tax_included', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $product = $request->data()['items'][0]['product'];
+
+        expect($product['tax_included'])->toBeFalse()
+            ->and($product['price'])->toBe(100.0)
+            ->and($product['taxes'][0]['type'])->toBe('IVA')
+            ->and($product['taxes'][0]['rate'])->toBe(0.16);
+
+        return true;
+    });
+
+    // El mapper preserva exactamente la interpretación fiscal ya
+    // calculada localmente (InvoiceCalculator) — nunca la recalcula:
+    // subtotal=100, tax=16, total=116 con price=100 + tax_included=false
+    // + rate=0.16 es la única combinación consistente con esos importes.
+    $fresh = $invoice->fresh();
+    expect((float) $fresh->subtotal)->toBe(100.0)
+        ->and((float) $fresh->tax_total)->toBe(16.0)
+        ->and((float) $fresh->total)->toBe(116.0);
+});
+
+test('el objeto taxes[] nunca fabrica una clave "withholding": Facturapi no documenta esa distinción (ver InvoicePacReadinessService, Fase 6.2.3) — retención ya se bloquea antes de llegar aquí', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    $item = InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'tax_code' => '002',
+        'tax_rate_value' => 0.16,
+        'tax_type' => 'traslado',
+        'tax_factor_type' => 'tasa',
+    ]);
+
+    // Garantía de dominio (no del payload): la línea que llega aquí
+    // nunca es una retención — InvoicePacReadinessService ya bloquea
+    // tax_type=retencion antes de que IssueInvoiceService/
+    // CreatePacDraftInvoiceService lleguen a llamar a este Provider.
+    expect($item->tax_type)->toBe(\App\Enums\TaxType::Traslado->value);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_no_withholding', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $taxes = $request->data()['items'][0]['product']['taxes'][0];
+
+        expect($taxes)->not->toHaveKey('withholding')
+            ->and($taxes)->toBe(['type' => 'IVA', 'rate' => 0.16]);
+
+        return true;
+    });
+});
+
+test('IVA 0% (tasa cero, ya soportado): tax_included sigue false, rate=0.0, sin regresión', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'unit_price' => 50,
+        'tax_code' => '002',
+        'tax_rate_value' => 0,
+        'tax_type' => 'traslado',
+        'tax_factor_type' => 'tasa',
+    ]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_iva_cero', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $product = $request->data()['items'][0]['product'];
+
+        expect($product['tax_included'])->toBeFalse()
+            ->and($product['taxes'][0]['type'])->toBe('IVA')
+            ->and($product['taxes'][0]['rate'])->toBe(0.0);
+
+        return true;
+    });
+});
+
+test('exento (sin tax_code): tax_included sigue false, taxes=[] vacío, sin regresión', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'unit_price' => 50,
+        'tax_code' => null,
+        'tax_rate_value' => null,
+        'tax_type' => null,
+        'tax_factor_type' => null,
+    ]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_exento', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $product = $request->data()['items'][0]['product'];
+
+        expect($product['tax_included'])->toBeFalse()
+            ->and($product['taxes'])->toBe([]);
+
+        return true;
+    });
+});
+
+test('no cambia con modificaciones del TaxRate vivo: el payload usa exclusivamente el snapshot de InvoiceItem', function () {
+    $company = Company::factory()->create();
+    $taxRate = \App\Models\TaxRate::factory()->create([
+        'rate' => 0.16,
+        'tax_type' => \App\Enums\TaxType::Traslado,
+    ]);
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    InvoiceItem::factory()->create([
+        'company_id' => $company->id,
+        'invoice_id' => $invoice->id,
+        'tax_rate_id' => $taxRate->id,
+        'tax_code' => '002',
+        'tax_rate_value' => 0.16,
+        'tax_type' => 'traslado',
+        'tax_factor_type' => 'tasa',
+    ]);
+
+    // Modifica el TaxRate REAL después de que la Invoice ya congeló su
+    // snapshot.
+    $taxRate->update(['rate' => 0.99, 'tax_type' => \App\Enums\TaxType::Retencion]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_taxrate_live', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    \Illuminate\Support\Facades\DB::enableQueryLog();
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    $queries = \Illuminate\Support\Facades\DB::getQueryLog();
+    \Illuminate\Support\Facades\DB::disableQueryLog();
+
+    expect(collect($queries)->contains(fn ($q) => str_contains(strtolower($q['query']), 'from `tax_rates`') || str_contains(strtolower($q['query']), 'from "tax_rates"')))
+        ->toBeFalse();
+
+    Http::assertSent(function ($request) {
+        $taxes = $request->data()['items'][0]['product']['taxes'][0];
+
+        // Sigue reflejando el snapshot original (0.16), nunca el 0.99
+        // recién modificado en el TaxRate vivo.
+        expect($taxes['rate'])->toBe(0.16);
+
+        return true;
+    });
+});
+
+test('customer.address incluye las claves opcionales cuando el snapshot sí las trae', function () {
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create([
+        'company_id' => $company->id,
+        'client_codigo_postal' => '54930',
+        'client_calle' => 'Av. Siempre Viva',
+        'client_no_exterior' => '123',
+        'client_no_interior' => 'B',
+        'client_colonia' => 'Centro',
+        'client_localidad' => 'Naucalpan',
+        'client_municipio' => 'Naucalpan',
+        'client_estado' => 'MEX',
+        'client_pais' => 'MEX',
+    ]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+
+    Http::fake(['*' => Http::response(['id' => 'inv_addr_full', 'status' => 'pending'], 200)]);
+    app(CurrentTenant::class)->set($company->id);
+
+    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+
+    Http::assertSent(function ($request) {
+        $body = $request->data();
+        $address = $body['customer']['address'];
+
+        expect($address)->toBe([
+            'street' => 'Av. Siempre Viva',
+            'exterior' => '123',
+            'interior' => 'B',
+            'neighborhood' => 'Centro',
+            'city' => 'Naucalpan',
+            'municipality' => 'Naucalpan',
+            'zip' => '54930',
+            'state' => 'MEX',
+            'country' => 'MEX',
+        ]);
+
+        return true;
+    });
+});

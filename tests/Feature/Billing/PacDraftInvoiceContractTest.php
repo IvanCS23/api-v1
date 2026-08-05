@@ -175,8 +175,19 @@ test('una respuesta inesperada (sin id) produce PacUnexpectedResponseException',
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
-test('status distinto de draft (ej. "valid") NUNCA se interpreta como draft correcto — PacUnexpectedResponseException', function () {
-    Http::fake(['*' => Http::response(fakeDraftResponseBody(['status' => 'valid']), 200)]);
+test('status "valid"/"pending"/"canceled" (transición ya ocurrida del lado del PAC) se aceptan y is_ready_to_stamp queda null porque solo es significativo cuando status=draft', function (string $status) {
+    $body = fakeDraftResponseBody(['status' => $status]);
+    unset($body['is_ready_to_stamp']);
+    Http::fake(['*' => Http::response($body, 200)]);
+
+    $result = app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+
+    expect($result->status)->toBe($status)
+        ->and($result->isReadyToStamp)->toBeNull();
+})->with(['valid', 'pending', 'canceled']);
+
+test('un status realmente no reconocido por el catálogo (ej. "bogus") produce PacUnexpectedResponseException', function () {
+    Http::fake(['*' => Http::response(fakeDraftResponseBody(['status' => 'bogus']), 200)]);
 
     expect(fn () => app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
         ->toThrow(PacUnexpectedResponseException::class);

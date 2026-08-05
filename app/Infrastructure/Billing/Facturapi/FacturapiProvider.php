@@ -8,6 +8,7 @@ use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
@@ -152,6 +153,87 @@ class FacturapiProvider implements PacProvider
         return $this->mapDraftResponse($response, 'retrieveDraftInvoice');
     }
 
+    /**
+     * `PUT /invoices/{invoice_id}` (Fase 6.2.7) — actualiza (reemplaza el
+     * payload de) un borrador YA EXISTENTE con el snapshot fiscal actual.
+     * Confirmado contra docs.facturapi.io/api/ (ver reporte de entrega de
+     * esta fase): solo es posible editar una Invoice con `status:
+     * "draft"`; si el body incluye `status`, el único valor permitido
+     * sigue siendo `"draft"` — exactamente lo que ya produce
+     * `buildDraftInvoicePayload()`, reutilizado aquí sin duplicar la
+     * construcción del payload.
+     *
+     * Nunca crea un recurso nuevo: usa el MISMO `$externalId` en la URL
+     * y exige que la respuesta confirme ese mismo `id` — cualquier
+     * discrepancia detiene la operación con
+     * `PacUnexpectedResponseException` en vez de persistir en silencio
+     * un posible recurso equivocado.
+     */
+    public function updateDraftInvoice(string $externalId, PacInvoiceRequest $request): PacInvoiceDraftResult
+    {
+        $payload = $this->buildDraftInvoicePayload($request);
+
+        $response = $this->client()->put("/invoices/{$externalId}", $payload);
+
+        $result = $this->mapDraftResponse($response, 'updateDraftInvoice');
+
+        if ($result->externalId !== $externalId) {
+            throw new PacUnexpectedResponseException(sprintf(
+                'updateDraftInvoice devolvió un id remoto (%s) distinto del borrador que se pidió actualizar (%s); no se persiste.',
+                $result->externalId,
+                $externalId,
+            ), $response->status());
+        }
+
+        return $result;
+    }
+
+    /**
+     * `POST /invoices/{invoice_id}/stamp` (Fase 6.2.5) — timbra el
+     * borrador ya existente identificado por `$externalId`; el recurso
+     * SE TRANSFORMA en la factura timbrada, nunca se crea uno nuevo.
+     * Deliberadamente NO se envía `async=true`: se prefiere la operación
+     * síncrona para esta primera integración controlada (draft → stamp
+     * → respuesta final en la misma llamada). El código sigue siendo
+     * defensivo ante `status: "pending"` en la respuesta (ver
+     * mapResponse()/StampPacDraftInvoiceService) por si Facturapi
+     * decidiera procesarlo de forma asíncrona igualmente.
+     *
+     * Reutiliza `mapResponse()`/`mapInvoiceArray()` (misma forma de
+     * Invoice que `createInvoice()`/`retrieveInvoice()`) — pero agrega
+     * la verificación de `livemode === false` que esos métodos no
+     * hacían: timbrar es la operación de mayor consecuencia de todo el
+     * proyecto, y esta fase la protege igual que los borradores.
+     */
+    public function stampDraftInvoice(string $externalId): PacInvoiceResult
+    {
+        $response = $this->client()->post("/invoices/{$externalId}/stamp");
+
+        $this->assertSuccessful($response);
+
+        $data = $response->json();
+
+        if (! is_array($data) || ! isset($data['id'], $data['status'])) {
+            throw new PacUnexpectedResponseException(
+                'La respuesta del PAC (stampDraftInvoice) no contiene los campos mínimos esperados (id, status).',
+                $response->status(),
+            );
+        }
+
+        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
+            throw new PacUnexpectedResponseException(
+                'La respuesta del PAC (stampDraftInvoice) no contiene el campo livemode.',
+                $response->status(),
+            );
+        }
+
+        if ($data['livemode'] === true) {
+            throw new PacUnexpectedEnvironmentException('stampDraftInvoice', (string) $data['id']);
+        }
+
+        return $this->mapInvoiceArray($data);
+    }
+
     public function cancelInvoice(
         string $externalId,
         string $motive,
@@ -168,6 +250,23 @@ class FacturapiProvider implements PacProvider
         return $this->mapResponse($response);
     }
 
+    /**
+     * `GET /invoices/{invoice_id}/pdf` / `GET /invoices/{invoice_id}/xml`
+     * (Fase 6.3) — confirmados contra el SDK oficial de Facturapi (código
+     * fuente de `facturapi-php`/`facturapi-node`, y el propio test suite
+     * del SDK PHP, que mockea exactamente estas rutas) tras encontrar que
+     * la página de referencia renderizada de docs.facturapi.io/api/ solo
+     * enumeraba un endpoint genérico `/invoices/{id}/download` sin
+     * detallar las rutas por formato — ver el reporte de entrega de esta
+     * fase para el detalle completo de la investigación y la
+     * justificación de confiar en el SDK oficial como fuente. `$response
+     * ->body()` devuelve los bytes crudos de la respuesta sin ninguna
+     * transformación — nunca se reserializa ni se reinterpreta el
+     * contenido aquí; esa responsabilidad (validar que "parezca"
+     * XML/PDF, verificar el UUID, hashear) vive en
+     * DownloadInvoiceArtifactsService, que es quien conoce la semántica
+     * de negocio de "un archivo fiscal válido".
+     */
     public function downloadPdf(string $externalId): string
     {
         $response = $this->client()->get("/invoices/{$externalId}/pdf");
@@ -229,6 +328,19 @@ class FacturapiProvider implements PacProvider
      * difiere entre emisión real y borrador es el campo `status`
      * (ausente vs. `"draft"`), ver `buildDraftInvoicePayload()`.
      *
+     * Corrección puntual (post 6.2.5): la primera llamada real contra
+     * Facturapi TEST reveló que `items[].product.sku` se enviaba como
+     * `null` cuando `InvoiceItem::product_no_identificacion` no tenía
+     * snapshot — Facturapi rechaza esto ("tipo inválido"), porque `sku`
+     * es un campo OPCIONAL con tipo `string`: opcional significa que la
+     * *clave* puede omitirse, nunca que acepte `null`. Se aplicó el mismo
+     * criterio a los sub-campos opcionales de `customer.address`
+     * (`street`/`exterior`/`interior`/`neighborhood`/`city`/
+     * `municipality`/`state`/`country` — columnas `nullable()` en
+     * `client_*` no cubiertas por `InvoicePacReadinessService`, a
+     * diferencia de `zip`/`client_codigo_postal`, que sí es obligatorio y
+     * siempre se envía). Ver `nullableStringOrOmit()`.
+     *
      * @return array<string, mixed>
      */
     private function buildInvoicePayload(PacInvoiceRequest $request): array
@@ -267,33 +379,47 @@ class FacturapiProvider implements PacProvider
                 'legal_name' => $invoice->client_name,
                 'tax_id' => $invoice->client_rfc,
                 'tax_system' => $invoice->client_regimen_fiscal,
-                'address' => [
-                    'street' => $invoice->client_calle,
-                    'exterior' => $invoice->client_no_exterior,
-                    'interior' => $invoice->client_no_interior,
-                    'neighborhood' => $invoice->client_colonia,
-                    'city' => $invoice->client_localidad,
-                    'municipality' => $invoice->client_municipio,
-                    'zip' => $invoice->client_codigo_postal,
-                    'state' => $invoice->client_estado,
-                    'country' => $invoice->client_pais,
-                ],
+                'address' => array_filter([
+                    'street' => $this->nullableStringOrOmit($invoice->client_calle),
+                    'exterior' => $this->nullableStringOrOmit($invoice->client_no_exterior),
+                    'interior' => $this->nullableStringOrOmit($invoice->client_no_interior),
+                    'neighborhood' => $this->nullableStringOrOmit($invoice->client_colonia),
+                    'city' => $this->nullableStringOrOmit($invoice->client_localidad),
+                    'municipality' => $this->nullableStringOrOmit($invoice->client_municipio),
+                    // Único sub-campo obligatorio (ver
+                    // InvoicePacReadinessService) — siempre presente,
+                    // nunca sujeto al filtro de opcionales.
+                    'zip' => (string) $invoice->client_codigo_postal,
+                    'state' => $this->nullableStringOrOmit($invoice->client_estado),
+                    'country' => $this->nullableStringOrOmit($invoice->client_pais),
+                ], fn (?string $value): bool => $value !== null),
             ],
             'items' => $invoice->items->map(fn (InvoiceItem $item): array => [
                 'quantity' => (float) $item->quantity,
                 'discount' => (float) $item->discount,
-                'product' => [
+                'product' => array_filter([
                     'description' => $item->description,
                     'product_key' => $item->product_clave_producto,
                     'price' => (float) $item->unit_price,
                     'unit_key' => $item->product_clave_unidad,
                     'taxability' => $item->product_objeto_imp,
-                    'sku' => $item->product_no_identificacion,
+                    'sku' => $this->nullableStringOrOmit($item->product_no_identificacion),
+                    // Corrección puntual (post 6.2.5): la primera llamada
+                    // real a Facturapi TEST reveló `tax_included: true` en
+                    // el draft creado — ese es el DEFAULT que Facturapi
+                    // aplica cuando esta clave se omite, y descuadra el
+                    // total (interpreta `price` como precio CON IVA
+                    // incluido). `InvoiceItem::unit_price` es, en todo
+                    // este ERP (ver SaleCalculator/InvoiceCalculator),
+                    // siempre precio ANTES de impuestos — se envía
+                    // `false` explícitamente, nunca se deja el default de
+                    // Facturapi ni se recalcula `price` para compensar.
+                    'tax_included' => false,
                     'taxes' => $item->tax_code !== null ? [[
                         'type' => self::TAX_CODE_NAMES[$item->tax_code],
                         'rate' => (float) $item->tax_rate_value,
                     ]] : [],
-                ],
+                ], fn (mixed $value): bool => $value !== null),
             ])->all(),
             'use' => $invoice->client_uso_cfdi,
             'payment_form' => $invoice->payment_form,
@@ -307,6 +433,18 @@ class FacturapiProvider implements PacProvider
         }
 
         return $payload;
+    }
+
+    /**
+     * Un campo opcional del payload Facturapi con tipo `string`: si el
+     * snapshot trae `null` o cadena vacía, la CLAVE se omite del arreglo
+     * (vía `array_filter` en el llamador) — nunca se envía `null` en su
+     * lugar, que Facturapi rechaza como tipo inválido para un campo que
+     * documenta como `string`.
+     */
+    private function nullableStringOrOmit(?string $value): ?string
+    {
+        return $value === null || $value === '' ? null : $value;
     }
 
     private function client(): PendingRequest
@@ -378,12 +516,26 @@ class FacturapiProvider implements PacProvider
     }
 
     /**
-     * Mapeo de un borrador (Fase 6.2.4) — nunca reutiliza mapResponse()/
-     * mapInvoiceArray(): valida explícitamente `status === "draft"`
-     * (jamás interpreta "status=valid" como un draft correcto) y
-     * `livemode === false` ANTES de construir el DTO — si llega
-     * `livemode: true`, se detiene con PacUnexpectedEnvironmentException
-     * sin persistir nada como si fuera un borrador TEST válido.
+     * Estados aceptados al recuperar/crear un borrador. Fase 6.2.4: solo
+     * "draft". Fase 6.2.5 relajó esto — `retrieveDraftInvoice()` puede
+     * legítimamente encontrar un recurso que YA transicionó a "pending"
+     * o "valid" (si ya se timbró, por esta integración o por fuera de
+     * ella); StampPacDraftInvoiceService necesita poder distinguir esos
+     * casos ANTES de decidir si timbra, no recibir un error genérico.
+     * Cualquier otro valor no reconocido sigue bloqueando.
+     */
+    private const ACCEPTED_INVOICE_STATUSES = ['draft', 'pending', 'valid', 'canceled'];
+
+    /**
+     * Mapeo de un borrador — nunca reutiliza mapResponse()/
+     * mapInvoiceArray() (Fase 6.2.4/6.2.5: forma normalizada distinta,
+     * ver PacInvoiceDraftResult). Valida `livemode === false` ANTES de
+     * construir el DTO — si llega `livemode: true`, se detiene con
+     * PacUnexpectedEnvironmentException sin persistir nada como si fuera
+     * un recurso TEST válido. `is_ready_to_stamp` solo se exige cuando
+     * `status === "draft"` (única condición documentada en la que el
+     * campo tiene sentido) — para cualquier otro status puede estar
+     * ausente sin que eso sea un error.
      */
     private function mapDraftResponse(Response $response, string $context): PacInvoiceDraftResult
     {
@@ -409,30 +561,48 @@ class FacturapiProvider implements PacProvider
             throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
         }
 
-        if (($data['status'] ?? null) !== 'draft') {
+        $status = $data['status'] ?? null;
+
+        if (! is_string($status) || ! in_array($status, self::ACCEPTED_INVOICE_STATUSES, true)) {
             $receivedStatus = isset($data['status']) ? (string) $data['status'] : 'null';
 
             throw new PacUnexpectedResponseException(
-                "La respuesta del PAC ({$context}) no representa un borrador (status recibido: '{$receivedStatus}', se esperaba 'draft').",
+                "La respuesta del PAC ({$context}) trae un status no reconocido: '{$receivedStatus}'.",
                 $response->status(),
             );
         }
 
-        if (! isset($data['is_ready_to_stamp']) || ! is_bool($data['is_ready_to_stamp'])) {
-            throw new PacUnexpectedResponseException(
-                "La respuesta del PAC ({$context}) no contiene el campo is_ready_to_stamp.",
-                $response->status(),
-            );
+        $isReadyToStamp = null;
+
+        if ($status === 'draft') {
+            if (! isset($data['is_ready_to_stamp']) || ! is_bool($data['is_ready_to_stamp'])) {
+                throw new PacUnexpectedResponseException(
+                    "La respuesta del PAC ({$context}) no contiene el campo is_ready_to_stamp para un borrador.",
+                    $response->status(),
+                );
+            }
+
+            $isReadyToStamp = (bool) $data['is_ready_to_stamp'];
+        } elseif (isset($data['is_ready_to_stamp'])) {
+            if (! is_bool($data['is_ready_to_stamp'])) {
+                throw new PacUnexpectedResponseException(
+                    "La respuesta del PAC ({$context}) trae is_ready_to_stamp con un tipo inválido.",
+                    $response->status(),
+                );
+            }
+
+            $isReadyToStamp = (bool) $data['is_ready_to_stamp'];
         }
 
         return new PacInvoiceDraftResult(
             externalId: (string) $data['id'],
-            status: (string) $data['status'],
-            isReadyToStamp: (bool) $data['is_ready_to_stamp'],
+            status: $status,
+            isReadyToStamp: $isReadyToStamp,
             livemode: (bool) $data['livemode'],
             idempotencyKey: isset($data['idempotency_key']) ? (string) $data['idempotency_key'] : null,
             externalReference: isset($data['external_id']) ? (string) $data['external_id'] : null,
             createdAt: isset($data['created_at']) ? CarbonImmutable::parse((string) $data['created_at']) : null,
+            total: isset($data['total']) && is_numeric($data['total']) ? (float) $data['total'] : null,
             rawResponse: $data,
         );
     }
@@ -456,6 +626,7 @@ class FacturapiProvider implements PacProvider
         throw match (true) {
             $status === 401 || $status === 403 => new PacAuthenticationException($message, $status, $code),
             $status === 400 || $status === 422 => new PacValidationException($message, $status, $code),
+            $status === 409 => new PacConflictException($message, $status, $code),
             $status === 429 => new PacRateLimitException($message, $status, $code),
             $status >= 500 && $status <= 599 => new PacUnavailableException($message, $status, $code),
             default => new PacUnexpectedResponseException($message, $status, $code),
