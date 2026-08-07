@@ -6,6 +6,7 @@ use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
+use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConflictException;
@@ -76,7 +77,7 @@ class FacturapiProvider implements PacProvider
     {
         $response = $this->client()->get("/invoices/{$externalId}");
 
-        return $this->mapResponse($response);
+        return $this->mapTestInvoiceResponse($response, 'retrieveInvoice');
     }
 
     /**
@@ -239,15 +240,19 @@ class FacturapiProvider implements PacProvider
         string $motive,
         ?string $substitutionUuid = null,
     ): PacInvoiceResult {
-        $payload = ['motive' => $motive];
+        // Contrato oficial: DELETE /invoices/{invoice_id} con `motive` y
+        // `substitution` como query parameters, nunca como body JSON.
+        $query = ['motive' => $motive];
 
         if ($substitutionUuid !== null) {
-            $payload['substitution'] = $substitutionUuid;
+            $query['substitution'] = $substitutionUuid;
         }
 
-        $response = $this->client()->delete("/invoices/{$externalId}", $payload);
+        $response = $this->client()
+            ->withQueryParameters($query)
+            ->delete("/invoices/{$externalId}");
 
-        return $this->mapResponse($response);
+        return $this->mapTestInvoiceResponse($response, 'cancelInvoice');
     }
 
     /**
@@ -278,6 +283,28 @@ class FacturapiProvider implements PacProvider
     public function downloadXml(string $externalId): string
     {
         $response = $this->client()->get("/invoices/{$externalId}/xml");
+        $this->assertSuccessful($response);
+
+        return $response->body();
+    }
+
+    /**
+     * Endpoints oficiales Facturapi (Fase 6.6):
+     * GET /invoices/{invoice_id}/cancellation_receipt/{xml|pdf}.
+     * Devuelve los bytes exactos; la validacion y Storage pertenecen al
+     * servicio de artifacts, nunca al adaptador HTTP.
+     */
+    public function downloadCancellationReceiptXml(string $externalId): string
+    {
+        $response = $this->client()->get("/invoices/{$externalId}/cancellation_receipt/xml");
+        $this->assertSuccessful($response);
+
+        return $response->body();
+    }
+
+    public function downloadCancellationReceiptPdf(string $externalId): string
+    {
+        $response = $this->client()->get("/invoices/{$externalId}/cancellation_receipt/pdf");
         $this->assertSuccessful($response);
 
         return $response->body();
@@ -462,11 +489,11 @@ class FacturapiProvider implements PacProvider
                 // un timbrado parcial o una operación no garantizada idempotente.
                 return $exception instanceof ConnectionException;
             }, throw: false);
-            // throw:false es obligatorio aquí: por defecto, retry() lanza su
-            // propia RequestException genérica cuando la respuesta final no
-            // es exitosa, sin pasar por assertSuccessful() — eso reemplazaría
-            // el mapeo fino a PacValidationException/PacAuthenticationException/
-            // etc. por una excepción genérica de Guzzle/Laravel.
+        // throw:false es obligatorio aquí: por defecto, retry() lanza su
+        // propia RequestException genérica cuando la respuesta final no
+        // es exitosa, sin pasar por assertSuccessful() — eso reemplazaría
+        // el mapeo fino a PacValidationException/PacAuthenticationException/
+        // etc. por una excepción genérica de Guzzle/Laravel.
     }
 
     /**
@@ -487,6 +514,38 @@ class FacturapiProvider implements PacProvider
                 'La respuesta del PAC no contiene los campos mínimos esperados (id, status).',
                 $response->status(),
             );
+        }
+
+        return $this->mapInvoiceArray($data);
+    }
+
+    /**
+     * Mapea respuestas de operaciones que este proyecto permite únicamente
+     * contra Facturapi TEST. `livemode` es obligatorio en el objeto Invoice
+     * oficial; nunca se asume false cuando falta o tiene un tipo inesperado.
+     */
+    private function mapTestInvoiceResponse(Response $response, string $context): PacInvoiceResult
+    {
+        $this->assertSuccessful($response);
+
+        $data = $response->json();
+
+        if (! is_array($data) || ! isset($data['id'], $data['status'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene los campos mínimos esperados (id, status).",
+                $response->status(),
+            );
+        }
+
+        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
+                $response->status(),
+            );
+        }
+
+        if ($data['livemode'] === true) {
+            throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
         }
 
         return $this->mapInvoiceArray($data);
@@ -624,6 +683,7 @@ class FacturapiProvider implements PacProvider
         $message = isset($body['message']) ? (string) $body['message'] : "El PAC respondió con estado HTTP {$status}.";
 
         throw match (true) {
+            $code === 'invoice_cancellation_receipt_unavailable' => new CancellationReceiptUnavailableException($message, $status, $code),
             $status === 401 || $status === 403 => new PacAuthenticationException($message, $status, $code),
             $status === 400 || $status === 422 => new PacValidationException($message, $status, $code),
             $status === 409 => new PacConflictException($message, $status, $code),

@@ -5,6 +5,10 @@ namespace App\Contracts\Billing;
 use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
+use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
+use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
+use App\Exceptions\Billing\PacUnexpectedResponseException;
 
 /**
  * Contrato de integración con un PAC (Proveedor Autorizado de
@@ -88,7 +92,7 @@ interface PacProvider
     public function retrieveInvoice(string $externalId): PacInvoiceResult;
 
     /**
-     * @throws \App\Exceptions\Billing\PacAmbiguousInvoiceMatchException si el PAC devuelve más de una coincidencia
+     * @throws PacAmbiguousInvoiceMatchException si el PAC devuelve más de una coincidencia
      */
     public function findInvoiceByExternalId(string $externalId): ?PacInvoiceResult;
 
@@ -96,12 +100,12 @@ interface PacProvider
      * Crea un borrador (`status: "draft"`) — un recurso REAL y
      * persistente del lado del PAC, nunca timbrado.
      *
-     * @throws \App\Exceptions\Billing\PacUnexpectedEnvironmentException si el PAC responde con livemode=true
+     * @throws PacUnexpectedEnvironmentException si el PAC responde con livemode=true
      */
     public function createDraftInvoice(PacInvoiceRequest $request): PacInvoiceDraftResult;
 
     /**
-     * @throws \App\Exceptions\Billing\PacUnexpectedEnvironmentException si el PAC responde con livemode=true
+     * @throws PacUnexpectedEnvironmentException si el PAC responde con livemode=true
      */
     public function retrieveDraftInvoice(string $externalId): PacInvoiceDraftResult;
 
@@ -110,8 +114,8 @@ interface PacProvider
      * payload fiscal actual — nunca crea un segundo recurso. Solo válido
      * mientras el borrador siga en `status: "draft"` del lado del PAC.
      *
-     * @throws \App\Exceptions\Billing\PacUnexpectedEnvironmentException si el PAC responde con livemode=true
-     * @throws \App\Exceptions\Billing\PacUnexpectedResponseException si la respuesta confirma un `id` distinto de `$externalId`
+     * @throws PacUnexpectedEnvironmentException si el PAC responde con livemode=true
+     * @throws PacUnexpectedResponseException si la respuesta confirma un `id` distinto de `$externalId`
      */
     public function updateDraftInvoice(string $externalId, PacInvoiceRequest $request): PacInvoiceDraftResult;
 
@@ -120,11 +124,16 @@ interface PacProvider
      * PAC le asignó al crearlo) — nunca crea un CFDI nuevo mediante
      * `createInvoice()`.
      *
-     * @throws \App\Exceptions\Billing\PacUnexpectedEnvironmentException si el PAC responde con livemode=true
-     * @throws \App\Exceptions\Billing\PacConflictException si el PAC responde 409 (ambiguo — nunca reintentar a ciegas)
+     * @throws PacUnexpectedEnvironmentException si el PAC responde con livemode=true
+     * @throws PacConflictException si el PAC responde 409 (ambiguo — nunca reintentar a ciegas)
      */
     public function stampDraftInvoice(string $externalId): PacInvoiceResult;
 
+    /**
+     * Solicita la cancelación fiscal de una Invoice ya timbrada. El adaptador
+     * concreto normaliza el transporte; para Facturapi, motive/substitution
+     * son query parameters de DELETE /invoices/{invoice_id}.
+     */
     public function cancelInvoice(
         string $externalId,
         string $motive,
@@ -134,4 +143,16 @@ interface PacProvider
     public function downloadPdf(string $externalId): string;
 
     public function downloadXml(string $externalId): string;
+
+    /**
+     * Descarga el XML del acuse de cancelacion. Es un artifact distinto
+     * del XML original del CFDI expuesto por downloadXml().
+     */
+    public function downloadCancellationReceiptXml(string $externalId): string;
+
+    /**
+     * Descarga el PDF del acuse de cancelacion. Es un artifact distinto
+     * de la representacion impresa original expuesta por downloadPdf().
+     */
+    public function downloadCancellationReceiptPdf(string $externalId): string;
 }
