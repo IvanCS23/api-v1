@@ -2,6 +2,7 @@
 
 namespace App\Services\Billing;
 
+use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\WorkflowTransitionException;
 use App\Models\Invoice;
@@ -33,11 +34,28 @@ use Illuminate\Support\Facades\DB;
  */
 class InvoiceWorkflow
 {
-    public function __construct(private readonly IssueInvoiceService $issueInvoiceService) {}
+    public function __construct(
+        private readonly IssueInvoiceService $issueInvoiceService,
+        private readonly ReconcileInvoiceWithPacService $reconcileInvoiceWithPacService,
+        private readonly CancelInvoiceWithPacService $cancelInvoiceWithPacService,
+    ) {}
 
     public function issueToPac(Invoice $invoice): Invoice
     {
         return $this->issueInvoiceService->issue($invoice);
+    }
+
+    public function reconcileWithPac(Invoice $invoice): Invoice
+    {
+        return $this->reconcileInvoiceWithPacService->reconcile($invoice);
+    }
+
+    public function cancelWithPac(
+        Invoice $invoice,
+        CfdiCancellationMotive $motive,
+        ?string $substitutionUuid = null,
+    ): Invoice {
+        return $this->cancelInvoiceWithPacService->cancel($invoice, $motive, $substitutionUuid);
     }
 
     public function markReady(Invoice $invoice): Invoice

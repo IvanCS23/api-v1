@@ -3,8 +3,11 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Data\Billing\PacInvoiceResult;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
+use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
+use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacIdentifiers;
@@ -12,64 +15,42 @@ use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 use RuntimeException;
 use Throwable;
 
 /**
- * Recuperación (Fase 6.2.1, funcional desde Fase 6.2.2) para Invoices
- * marcadas `pac_reconciliation_required=true` por IssueInvoiceService o
- * StampPacDraftInvoiceService (Fase 6.2.5), tras una respuesta ambigua
- * del PAC (timeout, conexión interrumpida, 5xx, 409, respuesta no
- * parseable) donde no se sabe con certeza si Facturapi llegó a
- * crear/timbrar la factura. Nunca vuelve a emitir (nunca llama
- * `createInvoice()`/`stampDraftInvoice()`) ni crea una factura nueva —
- * solo intenta AVERIGUAR el estado real y sincronizarlo.
+ * Consulta el recurso remoto existente y sincroniza únicamente metadata
+ * PAC/fiscal. Nunca emite, timbra, cancela ni descarga artifacts.
  *
- * Aislamiento del PAC (sin cambios desde Fase 6.2.1): esta clase solo
- * conoce `PacProvider` (contrato) y sus DTOs/excepciones — nunca
- * `FacturapiProvider`, URLs, el facade `Http`, el Bearer token, ni la
- * forma JSON específica de un proveedor concreto.
- *
- * Flujo (Fase 6.2.5 agrega una tercera fuente de identificador — ver
- * §7/§14 del reporte de entrega de esa fase):
- *   1. valida tenant;
- *   2. si `pac_external_id` es conocido -> `retrieveInvoice()`;
- *   3. si no, pero `pac_draft_external_id` es conocido (el draft pudo
- *      haberse timbrado por esta integración o por fuera de ella) ->
- *      `retrieveInvoice(pac_draft_external_id)` — el mismo recurso
- *      remoto, consultado con su forma completa de Invoice (con `uuid`),
- *      no con la forma de borrador;
- *   4. si tampoco -> reconstruye `external_id` determinista de emisión
- *      directa con PacIdentifiers y usa `findInvoiceByExternalId()`;
- *   5. encontrada -> persiste transaccionalmente; `pac_issue_status`
- *      solo pasa a `succeeded` si `status === "valid"` y trae `uuid` —
- *      cualquier otro caso (ej. "pending") se conserva como ambiguo, sin
- *      inventar un éxito que la respuesta no confirma; dispara
- *      `InvoiceIssued` tras el commit ÚNICAMENTE si `cfdi_uuid` pasó de
- *      null a un valor real en ESTA operación (nunca dos veces — ver
- *      Fase 6.2.5 §15);
- *   6. no encontrada (null) -> mantiene reconciliation_required=true,
- *      log sanitizado, sin crear nada;
- *   7. ambigua (>1 coincidencia) o error de red/5xx/409 -> mantiene
- *      reconciliation_required=true, nunca modifica datos PAC válidos
- *      ya existentes, log sanitizado (nunca secretos ni respuesta
- *      completa).
+ * El HTTP ocurre antes de la transacción. Después de recibir la respuesta,
+ * la Invoice se relee bajo lock y se vuelven a comprobar tenant e identidad
+ * antes de persistir. El fallback por external_id se conserva exclusivamente
+ * para recuperar intentos ambiguos de fases anteriores que todavía no tienen
+ * pac_external_id; una Invoice ya identificada siempre usa retrieveInvoice().
  */
 class ReconcileInvoiceWithPacService
 {
+    private const REMOTE_STATUSES = ['draft', 'pending', 'valid', 'canceled'];
+
     public function __construct(private readonly PacProvider $pacProvider) {}
 
     public function reconcile(Invoice $invoice): Invoice
     {
-        $current = $this->requireCurrentTenantInvoice($invoice);
+        $tenantId = app(CurrentTenant::class)->id();
+        $current = $this->requireCurrentTenantInvoice($invoice, $tenantId);
 
-        if ($current->pac_idempotency_key === null && $current->pac_draft_idempotency_key === null) {
+        if ($current->pac_external_id === null
+            && $current->pac_draft_external_id === null
+            && $current->pac_idempotency_key === null
+            && $current->pac_draft_idempotency_key === null) {
             throw new RuntimeException(sprintf(
-                'La factura [%d] no tiene contexto de emisión ni de borrador ante el PAC; no hay nada que reconciliar.',
+                'La factura [%d] no tiene pac_external_id ni contexto previo de emisión ante el PAC; no hay nada que reconciliar.',
                 $current->id,
             ));
         }
 
+        $requestedRemoteId = $current->pac_external_id ?? $current->pac_draft_external_id;
         $startedAt = microtime(true);
 
         try {
@@ -77,21 +58,19 @@ class ReconcileInvoiceWithPacService
                 $current->pac_external_id !== null => $this->pacProvider->retrieveInvoice($current->pac_external_id),
                 $current->pac_draft_external_id !== null => $this->pacProvider->retrieveInvoice($current->pac_draft_external_id),
                 default => $this->pacProvider->findInvoiceByExternalId(
-                    PacIdentifiers::externalId($current->company_id, $current->id),
+                    PacIdentifiers::externalId($tenantId, $current->id),
                 ),
             };
+        } catch (PacUnexpectedEnvironmentException $e) {
+            $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_reconciliation_wrong_environment');
+
+            throw $e;
         } catch (PacAmbiguousInvoiceMatchException $e) {
-            // Facturapi no garantiza unicidad de external_id — nunca se
-            // elige una coincidencia en silencio. Se deja
-            // reconciliation_required=true para revisión manual.
-            $this->recordReconciliationFailure($current, $e, 'billing.invoice.pac_reconciliation_ambiguous');
+            $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_reconciliation_ambiguous');
 
             return $current->fresh();
         } catch (Throwable $e) {
-            // Error de red/5xx/409/respuesta no parseable al consultar:
-            // sigue sin saberse el estado real. Nunca se toca ningún
-            // dato PAC ya persistido.
-            $this->recordReconciliationFailure($current, $e, 'billing.invoice.pac_reconciliation_failed');
+            $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_reconciliation_failed');
 
             return $current->fresh();
         }
@@ -99,60 +78,105 @@ class ReconcileInvoiceWithPacService
         $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
         if ($result === null) {
-            // No encontrada: no se asume automáticamente que nunca
-            // existió — se mantiene reconciliation_required=true para
-            // reintentar la reconciliación más adelante.
-            Log::info('billing.invoice.pac_reconciliation_not_found', [
-                'invoice_id' => $current->id,
-                'company_id' => $current->company_id,
-                'pac_provider' => $current->pac_provider,
-                'pac_issue_status' => $current->pac_issue_status,
-                'elapsed_ms' => $elapsedMs,
-            ]);
+            Log::info('billing.invoice.pac_reconciliation_not_found', $this->safeLogContext($current, $elapsedMs));
 
             return $current;
         }
 
-        $providerSlug = $this->pacProvider->name();
+        if ($requestedRemoteId !== null && $result->externalId !== $requestedRemoteId) {
+            $exception = $this->remoteIdMismatch($current, $requestedRemoteId, $result->externalId);
+            $this->recordReconciliationFailure($current, $tenantId, $exception, 'billing.invoice.pac_reconciliation_identity_mismatch');
 
-        $updated = DB::transaction(function () use ($current, $result, $providerSlug): Invoice {
+            throw $exception;
+        }
+
+        if ($exception = $this->uuidException($current, $result)) {
+            $this->recordReconciliationFailure($current, $tenantId, $exception, 'billing.invoice.pac_reconciliation_uuid_mismatch');
+
+            throw $exception;
+        }
+
+        $providerSlug = $this->pacProvider->name();
+        $postCommitException = null;
+
+        $updated = DB::transaction(function () use (
+            $current,
+            $tenantId,
+            $requestedRemoteId,
+            $result,
+            $providerSlug,
+            &$postCommitException,
+        ): Invoice {
+            if (app(CurrentTenant::class)->id() !== $tenantId) {
+                throw (new ModelNotFoundException)->setModel(Invoice::class, [$current->getKey()]);
+            }
+
             $locked = Invoice::withoutGlobalScope(CompanyScope::class)
                 ->whereKey($current->getKey())
-                ->where('company_id', $current->company_id)
+                ->where('company_id', $tenantId)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            // Nunca sobrescribe una Invoice ya reconciliada/emitida por
-            // otra ejecución concurrente (ej. dos llamadas a reconcile()
-            // en paralelo, o una emisión que terminó de resolverse justo
-            // antes de este lock).
-            if ($locked->cfdi_uuid !== null) {
+            // Otra ejecución resolvió/cambió la identidad mientras ocurría el
+            // HTTP. La respuesta tardía se descarta sin pisar al ganador.
+            if ($requestedRemoteId === null && $locked->pac_external_id !== null) {
                 return $locked;
             }
 
-            // "succeeded" únicamente si la respuesta confirma un CFDI
-            // real (status=valid + uuid) — un "pending" encontrado aquí
-            // sigue sin ser una emisión exitosa, aunque ya no sea 404.
-            $isValid = $result->status === 'valid' && $result->uuid !== null;
+            if ($requestedRemoteId !== null
+                && $locked->pac_external_id !== null
+                && $locked->pac_external_id !== $requestedRemoteId) {
+                return $locked;
+            }
+
+            $expectedRemoteId = $locked->pac_external_id ?? $locked->pac_draft_external_id;
+
+            if ($expectedRemoteId !== null && $result->externalId !== $expectedRemoteId) {
+                $postCommitException = $this->remoteIdMismatch($locked, $expectedRemoteId, $result->externalId);
+
+                return $this->markRequiredUnderLock($locked, $postCommitException);
+            }
+
+            if ($exception = $this->uuidException($locked, $result)) {
+                $postCommitException = $exception;
+
+                return $this->markRequiredUnderLock($locked, $exception);
+            }
+
             $hadCfdiBefore = $locked->cfdi_uuid !== null;
+            $isKnownStatus = in_array($result->status, self::REMOTE_STATUSES, true);
+            $isValid = $result->status === 'valid';
+            $artifactsStored = $locked->cfdi_artifacts_status === 'stored';
 
             $attributes = [
-                'pac_provider' => $providerSlug,
-                'pac_external_id' => $result->externalId,
-                'cfdi_uuid' => $result->uuid,
+                'pac_provider' => $locked->pac_provider ?? $providerSlug,
+                'pac_external_id' => $locked->pac_external_id ?? $result->externalId,
                 'pac_status' => $result->status,
-                'stamped_at' => $result->stampedAt,
+                'cancellation_status' => $result->cancellationStatus,
                 'last_pac_sync_at' => now(),
                 'pac_response' => $result->rawResponse,
                 'pac_last_error' => null,
-                'pac_issue_status' => $isValid ? 'succeeded' : 'pending',
-                'pac_reconciliation_required' => ! $isValid,
+                'pac_reconciliation_required' => match ($result->status) {
+                    'valid' => ! $artifactsStored,
+                    'canceled' => false,
+                    default => true,
+                },
             ];
 
-            // El draft (si existía) se transforma en la factura
-            // timbrada — nunca se borra su rastro histórico
-            // (pac_draft_external_id/pac_draft_idempotency_key), solo se
-            // refleja su status remoto más reciente.
+            if ($isValid && $locked->cfdi_uuid === null) {
+                $attributes['cfdi_uuid'] = $result->uuid;
+            }
+
+            if ($isValid && $locked->stamped_at === null && $result->stampedAt !== null) {
+                $attributes['stamped_at'] = $result->stampedAt;
+            }
+
+            if ($isValid) {
+                $attributes['pac_issue_status'] = 'succeeded';
+            } elseif ($locked->pac_issue_status !== 'succeeded' && $isKnownStatus) {
+                $attributes['pac_issue_status'] = 'pending';
+            }
+
             if ($locked->pac_draft_external_id === $result->externalId) {
                 $attributes['pac_draft_status'] = $result->status;
             }
@@ -168,48 +192,93 @@ class ReconcileInvoiceWithPacService
             return $locked;
         });
 
-        Log::info('billing.invoice.pac_reconciled', [
-            'invoice_id' => $updated->id,
-            'company_id' => $updated->company_id,
-            'pac_provider' => $updated->pac_provider,
-            'pac_external_id' => $updated->pac_external_id,
-            'elapsed_ms' => $elapsedMs,
-        ]);
+        if ($postCommitException !== null) {
+            throw $postCommitException;
+        }
+
+        Log::info('billing.invoice.pac_reconciled', $this->safeLogContext($updated, $elapsedMs));
 
         return $updated;
     }
 
-    private function recordReconciliationFailure(Invoice $invoice, Throwable $e, string $logEvent): void
+    private function uuidException(Invoice $invoice, PacInvoiceResult $result): ?PacUnexpectedResponseException
     {
-        DB::transaction(function () use ($invoice, $e): void {
+        if ($result->uuid !== null && ! Str::isUuid($result->uuid)) {
+            return new PacUnexpectedResponseException(sprintf(
+                'El PAC devolvió un UUID inválido al reconciliar la factura [%d]; no se modifica el UUID local.',
+                $invoice->id,
+            ));
+        }
+
+        if ($invoice->cfdi_uuid !== null
+            && $result->uuid !== null
+            && strcasecmp($invoice->cfdi_uuid, $result->uuid) !== 0) {
+            return new PacUnexpectedResponseException(sprintf(
+                'El UUID remoto no coincide con cfdi_uuid para la factura [%d]; no se sobrescribe el UUID local.',
+                $invoice->id,
+            ));
+        }
+
+        if ($result->status === 'valid' && $result->uuid === null) {
+            return new PacUnexpectedResponseException(sprintf(
+                'El PAC devolvió status valid sin UUID para la factura [%d]; no se persiste la respuesta como válida.',
+                $invoice->id,
+            ));
+        }
+
+        if ($invoice->cfdi_uuid === null
+            && $result->status === 'valid'
+            && ($result->rawResponse['livemode'] ?? null) !== false) {
+            return new PacUnexpectedResponseException(sprintf(
+                'No se puede recuperar cfdi_uuid para la factura [%d] sin confirmar livemode=false.',
+                $invoice->id,
+            ));
+        }
+
+        return null;
+    }
+
+    private function remoteIdMismatch(Invoice $invoice, string $expected, string $received): PacUnexpectedResponseException
+    {
+        return new PacUnexpectedResponseException(sprintf(
+            'El PAC devolvió un id remoto distinto al pac_external_id esperado para la factura [%d] (esperado: %s; recibido: %s).',
+            $invoice->id,
+            $expected,
+            $received,
+        ));
+    }
+
+    private function markRequiredUnderLock(Invoice $invoice, Throwable $e): Invoice
+    {
+        $invoice->forceFill([
+            'pac_reconciliation_required' => true,
+            'pac_last_error' => $this->sanitizeErrorMessage($e),
+        ])->save();
+
+        return $invoice;
+    }
+
+    private function recordReconciliationFailure(Invoice $invoice, int $tenantId, Throwable $e, string $logEvent): void
+    {
+        DB::transaction(function () use ($invoice, $tenantId, $e): void {
             $locked = Invoice::withoutGlobalScope(CompanyScope::class)
                 ->whereKey($invoice->getKey())
-                ->where('company_id', $invoice->company_id)
+                ->where('company_id', $tenantId)
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            // No pisa el pac_last_error de una Invoice que otra ejecución
-            // ya resolvió mientras tanto.
-            if ($locked->cfdi_uuid !== null) {
-                return;
-            }
-
-            $locked->forceFill([
-                'pac_last_error' => mb_substr($e->getMessage(), 0, 500),
-            ])->save();
+            $this->markRequiredUnderLock($locked, $e);
         });
 
         Log::info($logEvent, [
             'invoice_id' => $invoice->id,
-            'company_id' => $invoice->company_id,
+            'company_id' => $tenantId,
             'pac_provider' => $invoice->pac_provider,
         ]);
     }
 
-    private function requireCurrentTenantInvoice(Invoice $invoice): Invoice
+    private function requireCurrentTenantInvoice(Invoice $invoice, ?int $tenantId): Invoice
     {
-        $tenantId = app(CurrentTenant::class)->id();
-
         $fresh = $tenantId !== null
             ? Invoice::withoutGlobalScope(CompanyScope::class)
                 ->whereKey($invoice->getKey())
@@ -218,9 +287,33 @@ class ReconcileInvoiceWithPacService
             : null;
 
         if ($fresh === null) {
-            throw (new ModelNotFoundException())->setModel(Invoice::class, [$invoice->getKey()]);
+            throw (new ModelNotFoundException)->setModel(Invoice::class, [$invoice->getKey()]);
         }
 
         return $fresh;
+    }
+
+    /** @return array<string, int|string|null> */
+    private function safeLogContext(Invoice $invoice, int $elapsedMs): array
+    {
+        return [
+            'invoice_id' => $invoice->id,
+            'company_id' => $invoice->company_id,
+            'pac_provider' => $invoice->pac_provider,
+            'pac_issue_status' => $invoice->pac_issue_status,
+            'elapsed_ms' => $elapsedMs,
+        ];
+    }
+
+    private function sanitizeErrorMessage(Throwable $e): string
+    {
+        $message = $e->getMessage();
+        $apiKey = (string) config('services.facturapi.test_key');
+
+        if ($apiKey !== '') {
+            $message = str_replace($apiKey, '[redacted]', $message);
+        }
+
+        return mb_substr($message, 0, 500);
     }
 }

@@ -121,6 +121,9 @@ class Invoice extends Model
         'cfdi_xml_path',
         'cfdi_pdf_path',
         'cfdi_artifacts_last_error',
+        'cancellation_receipt_xml_path',
+        'cancellation_receipt_pdf_path',
+        'cancellation_receipt_last_error',
     ];
 
     protected $casts = [
@@ -144,6 +147,9 @@ class Invoice extends Model
         'cfdi_xml_size' => 'integer',
         'cfdi_pdf_size' => 'integer',
         'cfdi_artifacts_downloaded_at' => 'immutable_datetime',
+        'cancellation_receipt_xml_size' => 'integer',
+        'cancellation_receipt_pdf_size' => 'integer',
+        'cancellation_receipt_downloaded_at' => 'immutable_datetime',
     ];
 
     // company() ya la provee el trait BelongsToCompany.

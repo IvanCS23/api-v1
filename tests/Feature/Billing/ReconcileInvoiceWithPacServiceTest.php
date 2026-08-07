@@ -22,6 +22,8 @@ beforeEach(function () {
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_RECONCILE',
     ]);
+
+    Http::preventStrayRequests();
 });
 
 function reconciliationRequiredInvoice(Company $company): Invoice
@@ -33,6 +35,7 @@ function reconciliationRequiredInvoice(Company $company): Invoice
         'pac_issue_status' => 'reconciliation_required',
         'pac_reconciliation_required' => true,
         'pac_issue_attempts' => 1,
+        'cfdi_artifacts_status' => 'stored',
     ])->save();
 
     return $invoice->fresh();
@@ -66,6 +69,7 @@ test('con pac_external_id conocido, usa retrieveInvoice() (consulta directa por 
 
     Http::fake(['*' => Http::response([
         'id' => 'inv_found_manually',
+        'livemode' => false,
         'status' => 'valid',
         'uuid' => 'EEEEEEEE-1111-2222-3333-444444444444',
         'stamp' => ['date' => '2026-07-30T10:00:00Z'],
@@ -95,6 +99,7 @@ test('con pac_external_id desconocido, reconstruye external_id determinista y us
         'total_results' => 1,
         'data' => [[
             'id' => 'inv_via_search',
+            'livemode' => false,
             'status' => 'valid',
             'uuid' => 'FFFFFFFF-1111-2222-3333-444444444444',
         ]],
@@ -191,7 +196,12 @@ test('con pac_external_id presente, nunca crea una Invoice nueva — solo actual
 
     $countBefore = Invoice::count();
 
-    Http::fake(['*' => Http::response(['id' => 'inv_count_check', 'status' => 'valid'], 200)]);
+    Http::fake(['*' => Http::response([
+        'id' => 'inv_count_check',
+        'livemode' => false,
+        'status' => 'valid',
+        'uuid' => '11111111-2222-3333-4444-555555555555',
+    ], 200)]);
 
     app(ReconcileInvoiceWithPacService::class)->reconcile($invoice->fresh());
 
@@ -229,7 +239,12 @@ test('no sobrescribe una Invoice ya reconciliada/emitida por otra ejecución con
 
         return Http::response([
             'page' => 1, 'total_pages' => 1, 'total_results' => 1,
-            'data' => [['id' => 'inv_late_response', 'status' => 'valid']],
+            'data' => [[
+                'id' => 'inv_late_response',
+                'livemode' => false,
+                'status' => 'valid',
+                'uuid' => 'BBBBBBBB-1111-2222-3333-444444444444',
+            ]],
         ], 200);
     });
 
@@ -252,7 +267,12 @@ test('persistencia con rollback: si la escritura del resultado encontrado falla,
     // viola erp_invoices_pac_provider_external_unique al guardar.
     Http::fake(['*' => Http::response([
         'page' => 1, 'total_pages' => 1, 'total_results' => 1,
-        'data' => [['id' => 'inv_conflict', 'status' => 'valid']],
+        'data' => [[
+            'id' => 'inv_conflict',
+            'livemode' => false,
+            'status' => 'valid',
+            'uuid' => 'CCCCCCCC-1111-2222-3333-444444444444',
+        ]],
     ], 200)]);
 
     expect(fn () => app(ReconcileInvoiceWithPacService::class)->reconcile($invoice))
