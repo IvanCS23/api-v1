@@ -1,13 +1,17 @@
 <?php
 
 use App\Data\Billing\InvoiceArtifactsResult;
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
+use App\Exceptions\Billing\PacUnavailableException;
+use App\Exceptions\Billing\PacValidationException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Services\Billing\DownloadInvoiceArtifactsService;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -149,8 +153,11 @@ test('Invoice válida con pac_status=valid: descarga, valida y almacena XML/PDF 
     expect($fresh->cfdi_artifacts_status)->toBe('stored')
         ->and($fresh->cfdi_xml_path)->toBe($result->xmlPath)
         ->and($fresh->cfdi_pdf_path)->toBe($result->pdfPath)
-        ->and($fresh->cfdi_artifacts_downloaded_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
-        ->and($fresh->cfdi_artifacts_last_error)->toBeNull();
+        ->and($fresh->cfdi_artifacts_downloaded_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($fresh->cfdi_artifacts_last_error)->toBeNull()
+        ->and($fresh->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::ArtifactsStored,
+        ]);
 });
 
 test('el XML almacenado es byte-for-byte el recibido del PAC (nunca reserializado)', function () {
@@ -292,7 +299,7 @@ test('un intento de XXE (entidad externa apuntando a un archivo local) nunca res
 
     try {
         app(DownloadInvoiceArtifactsService::class)->download($invoice);
-    } catch (\Throwable $e) {
+    } catch (Throwable $e) {
         expect($e->getMessage())->not->toContain('SECRETO_QUE_NUNCA_DEBE_APARECER_EN_NINGUN_LADO');
     }
 
@@ -430,7 +437,7 @@ test('si el PAC falla al descargar el XML, no deja ningún artifact parcial y ma
     ]);
 
     expect(fn () => app(DownloadInvoiceArtifactsService::class)->download($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacValidationException::class);
+        ->toThrow(PacValidationException::class);
 
     $fresh = $invoice->fresh();
     expect($fresh->cfdi_artifacts_status)->toBe('failed')
@@ -448,9 +455,12 @@ test('un 5xx del PAC al descargar es AMBIGUO: cfdi_artifacts_status=reconciliati
     ]);
 
     expect(fn () => app(DownloadInvoiceArtifactsService::class)->download($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacUnavailableException::class);
+        ->toThrow(PacUnavailableException::class);
 
-    expect($invoice->fresh()->cfdi_artifacts_status)->toBe('reconciliation_required');
+    expect($invoice->fresh()->cfdi_artifacts_status)->toBe('reconciliation_required')
+        ->and($invoice->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::ArtifactsFailed,
+        ]);
 });
 
 test('cfdi_artifacts_last_error nunca contiene la API key, Authorization ni Bearer', function () {
@@ -464,7 +474,7 @@ test('cfdi_artifacts_last_error nunca contiene la API key, Authorization ni Bear
 
     try {
         app(DownloadInvoiceArtifactsService::class)->download($invoice);
-    } catch (\App\Exceptions\Billing\PacValidationException) {
+    } catch (PacValidationException) {
         // esperado
     }
 

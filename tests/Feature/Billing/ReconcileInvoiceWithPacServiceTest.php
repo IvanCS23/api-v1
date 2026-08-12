@@ -1,12 +1,14 @@
 <?php
 
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
-use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\ReconcileInvoiceWithPacService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -84,7 +86,16 @@ test('con pac_external_id conocido, usa retrieveInvoice() (consulta directa por 
         ->and($result->pac_status)->toBe('valid')
         ->and($result->pac_issue_status)->toBe('succeeded')
         ->and($result->pac_reconciliation_required)->toBeFalse()
-        ->and($result->pac_last_error)->toBeNull();
+        ->and($result->pac_last_error)->toBeNull()
+        ->and($result->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::Reconciled,
+        ]);
+
+    app(ReconcileInvoiceWithPacService::class)->reconcile($result->fresh());
+
+    expect($result->pacEvents()->pluck('event_type')->all())->toBe([
+        InvoicePacEventType::Reconciled,
+    ]);
 });
 
 test('con pac_external_id desconocido, reconstruye external_id determinista y usa findInvoiceByExternalId()', function () {
@@ -134,7 +145,10 @@ test('no encontrada: sigue reconciliation_required, no se asume que nunca existi
     expect($result->pac_reconciliation_required)->toBeTrue()
         ->and($result->pac_issue_status)->toBe('reconciliation_required')
         ->and($result->cfdi_uuid)->toBeNull()
-        ->and(Invoice::count())->toBe($countBefore);
+        ->and(Invoice::count())->toBe($countBefore)
+        ->and($result->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::ReconciliationRequired,
+        ]);
 });
 
 test('múltiples coincidencias de external_id: sigue reconciliation_required, nunca elige una en silencio', function () {
@@ -230,7 +244,7 @@ test('no sobrescribe una Invoice ya reconciliada/emitida por otra ejecución con
     Http::fake(function () use ($invoice) {
         // Simula que otra ejecución (reconciliación o emisión) ya
         // resolvió esta misma Invoice justo antes de nuestro lock.
-        Invoice::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)->whereKey($invoice->id)->update([
+        Invoice::withoutGlobalScope(CompanyScope::class)->whereKey($invoice->id)->update([
             'pac_external_id' => 'inv_winner',
             'cfdi_uuid' => 'AAAAAAAA-0000-0000-0000-000000000000',
             'pac_issue_status' => 'succeeded',
@@ -276,7 +290,7 @@ test('persistencia con rollback: si la escritura del resultado encontrado falla,
     ], 200)]);
 
     expect(fn () => app(ReconcileInvoiceWithPacService::class)->reconcile($invoice))
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 
     $fresh = $invoice->fresh();
     expect($fresh->pac_external_id)->toBeNull()

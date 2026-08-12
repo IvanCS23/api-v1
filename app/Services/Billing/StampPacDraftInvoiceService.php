@@ -4,6 +4,7 @@ namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceResult;
+use App\Enums\InvoicePacEventType;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
@@ -71,6 +72,7 @@ class StampPacDraftInvoiceService
         private readonly PacProvider $pacProvider,
         private readonly SyncPacDraftInvoiceService $syncDraft,
         private readonly ReconcileInvoiceWithPacService $reconcile,
+        private readonly InvoicePacAuditService $audit,
     ) {}
 
     public function stamp(Invoice $invoice): Invoice
@@ -111,6 +113,12 @@ class StampPacDraftInvoiceService
 
         $reserved = $this->reserve($synced);
 
+        $this->audit->appendSafely($reserved, InvoicePacEventType::StampAttempted, [
+            'attempt' => $reserved->pac_issue_attempts,
+            'pac_draft_external_id_masked' => $this->audit->maskIdentifier($reserved->pac_draft_external_id),
+            'is_ready_to_stamp' => $reserved->pac_draft_ready_to_stamp,
+        ]);
+
         $startedAt = microtime(true);
 
         try {
@@ -119,6 +127,18 @@ class StampPacDraftInvoiceService
             $elapsedMs = $this->elapsedMs($startedAt);
             $failed = $this->recordStampFailure($reserved, $e);
             $this->logAttempt($failed, $elapsedMs, $e);
+            $this->audit->appendSafely(
+                $failed,
+                $failed->pac_issue_status === 'failed'
+                    ? InvoicePacEventType::StampFailed
+                    : InvoicePacEventType::ReconciliationRequired,
+                [
+                    'attempt' => $failed->pac_issue_attempts,
+                    'elapsed_ms' => $elapsedMs,
+                    'reason' => $e::class,
+                ],
+                $this->pacCode($e),
+            );
 
             throw $e;
         }
@@ -128,6 +148,18 @@ class StampPacDraftInvoiceService
         $updated = $this->persistStampResult($reserved, $result);
 
         $this->logAttempt($updated, $elapsedMs, null);
+        $this->audit->appendSafely(
+            $updated,
+            $updated->pac_issue_status === 'succeeded'
+                ? InvoicePacEventType::StampSucceeded
+                : InvoicePacEventType::ReconciliationRequired,
+            [
+                'attempt' => $updated->pac_issue_attempts,
+                'elapsed_ms' => $elapsedMs,
+                'stamped_at' => $updated->stamped_at,
+                'result_status' => $updated->pac_status,
+            ],
+        );
 
         return $updated;
     }
@@ -312,6 +344,11 @@ class StampPacDraftInvoiceService
         return (int) round((microtime(true) - $startedAt) * 1000);
     }
 
+    private function pacCode(Throwable $e): ?string
+    {
+        return $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null;
+    }
+
     private function assertHasDraft(Invoice $invoice): void
     {
         if ($invoice->pac_draft_external_id === null) {
@@ -341,7 +378,7 @@ class StampPacDraftInvoiceService
             : null;
 
         if ($fresh === null) {
-            throw (new ModelNotFoundException())->setModel(Invoice::class, [$invoice->getKey()]);
+            throw (new ModelNotFoundException)->setModel(Invoice::class, [$invoice->getKey()]);
         }
 
         return $fresh;

@@ -5,6 +5,7 @@ namespace App\Services\Billing;
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
@@ -81,11 +82,16 @@ class IssueInvoiceService
     public function __construct(
         private readonly PacProvider $pacProvider,
         private readonly InvoicePacReadinessService $readiness,
+        private readonly InvoicePacAuditService $audit,
     ) {}
 
     public function issue(Invoice $invoice): Invoice
     {
         $reserved = $this->reserve($invoice);
+
+        $this->audit->appendSafely($reserved, InvoicePacEventType::IssueAttempted, [
+            'attempt' => $reserved->pac_issue_attempts,
+        ]);
 
         $pacRequest = new PacInvoiceRequest(
             invoice: $reserved,
@@ -109,6 +115,18 @@ class IssueInvoiceService
             $elapsedMs = $this->elapsedMs($startedAt);
             $failed = $this->recordIssuanceFailure($reserved, $e);
             $this->logAttempt($failed, $elapsedMs, $e);
+            $this->audit->appendSafely(
+                $failed,
+                $failed->pac_issue_status === self::STATUS_FAILED
+                    ? InvoicePacEventType::IssueFailed
+                    : InvoicePacEventType::ReconciliationRequired,
+                [
+                    'attempt' => $failed->pac_issue_attempts,
+                    'elapsed_ms' => $elapsedMs,
+                    'reason' => $e::class,
+                ],
+                $this->pacCode($e),
+            );
 
             throw $e;
         }
@@ -163,11 +181,22 @@ class IssueInvoiceService
             // corta (la que falló ya se revirtió por completo).
             $failed = $this->recordAmbiguousPersistenceFailure($reserved, $result, $e);
             $this->logAttempt($failed, $elapsedMs, $e);
+            $this->audit->appendSafely($failed, InvoicePacEventType::ReconciliationRequired, [
+                'attempt' => $failed->pac_issue_attempts,
+                'elapsed_ms' => $elapsedMs,
+                'reason' => 'local_persistence_failed_after_pac_success',
+                'pac_external_id_masked' => $this->audit->maskIdentifier($result->externalId),
+            ], $this->pacCode($e));
 
             throw $e;
         }
 
         $this->logAttempt($updated, $elapsedMs, null);
+        $this->audit->appendSafely($updated, InvoicePacEventType::IssueSucceeded, [
+            'attempt' => $updated->pac_issue_attempts,
+            'elapsed_ms' => $elapsedMs,
+            'stamped_at' => $updated->stamped_at,
+        ]);
 
         return $updated;
     }
@@ -195,7 +224,7 @@ class IssueInvoiceService
                 : null;
 
             if ($locked === null) {
-                throw (new ModelNotFoundException())->setModel(Invoice::class, [$invoice->getKey()]);
+                throw (new ModelNotFoundException)->setModel(Invoice::class, [$invoice->getKey()]);
             }
 
             $this->assertIssuable($locked);
@@ -338,6 +367,11 @@ class IssueInvoiceService
     private function elapsedMs(float $startedAt): int
     {
         return (int) round((microtime(true) - $startedAt) * 1000);
+    }
+
+    private function pacCode(Throwable $e): ?string
+    {
+        return $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null;
     }
 
     private function assertIssuable(Invoice $invoice): void

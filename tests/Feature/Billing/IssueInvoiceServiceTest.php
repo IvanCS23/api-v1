@@ -1,14 +1,18 @@
 <?php
 
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Events\Billing\InvoiceIssued;
+use App\Exceptions\Billing\PacValidationException;
 use App\Exceptions\InvoiceAlreadyIssuedException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\InvoiceItem;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\IssueInvoiceService;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -39,7 +43,7 @@ function issuedInvoiceForIssueServiceTest(?Company $company = null): Invoice
         'company_id' => $company->id,
         'status' => InvoiceStatus::Issued,
     ]);
-    \App\Models\InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
 
     app(CurrentTenant::class)->set($company->id);
 
@@ -62,25 +66,29 @@ test('emisión exitosa: persiste todos los campos PAC y de control de reserva, y
         ->and($updated->pac_external_id)->toBe('inv_success_1')
         ->and($updated->cfdi_uuid)->toBe('AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE')
         ->and($updated->pac_status)->toBe('valid')
-        ->and($updated->stamped_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
-        ->and($updated->last_pac_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($updated->stamped_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($updated->last_pac_sync_at)->toBeInstanceOf(CarbonImmutable::class)
         ->and($updated->pac_last_error)->toBeNull()
         ->and($updated->pac_response)->toBeArray()
         ->and($updated->pac_idempotency_key)->toBe("erp-invoice:{$invoice->company_id}:{$invoice->id}:v1")
         ->and($updated->pac_issue_status)->toBe('succeeded')
         ->and($updated->pac_issue_attempts)->toBe(1)
-        ->and($updated->pac_issue_started_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($updated->pac_issue_started_at)->toBeInstanceOf(CarbonImmutable::class)
         ->and($updated->pac_reconciliation_required)->toBeFalse();
 
     $fresh = $invoice->fresh();
     expect($fresh->pac_external_id)->toBe('inv_success_1')
-        ->and($fresh->status)->toBe(InvoiceStatus::Issued);
+        ->and($fresh->status)->toBe(InvoiceStatus::Issued)
+        ->and($fresh->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::IssueAttempted,
+            InvoicePacEventType::IssueSucceeded,
+        ]);
 });
 
 test('InvoiceCannotBeIssuedException: no se puede emitir una factura que no está en estado Issued, y no se llama al PAC ni se reserva nada', function (InvoiceStatus $status) {
     $company = Company::factory()->create();
     $invoice = Invoice::factory()->create(['company_id' => $company->id, 'status' => $status]);
-    \App\Models\InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
     Http::fake();
@@ -144,7 +152,7 @@ test('multi-tenant: la validación se hace contra CurrentTenant, no contra el co
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
     $invoice = Invoice::factory()->create(['company_id' => $companyA->id, 'status' => InvoiceStatus::Issued]);
-    \App\Models\InvoiceItem::factory()->create(['company_id' => $companyA->id, 'invoice_id' => $invoice->id]);
+    InvoiceItem::factory()->create(['company_id' => $companyA->id, 'invoice_id' => $invoice->id]);
 
     $tampered = Invoice::withoutGlobalScope(CompanyScope::class)->find($invoice->id);
     $tampered->company_id = $companyB->id;
@@ -189,11 +197,15 @@ test('dispatch: InvoiceIssued NO se despacha cuando la emisión falla (error de 
 
     try {
         app(IssueInvoiceService::class)->issue($invoice);
-    } catch (\App\Exceptions\Billing\PacValidationException) {
+    } catch (PacValidationException) {
         // esperado
     }
 
     Event::assertNotDispatched(InvoiceIssued::class);
+    expect($invoice->pacEvents()->pluck('event_type')->all())->toBe([
+        InvoicePacEventType::IssueAttempted,
+        InvoicePacEventType::IssueFailed,
+    ]);
 });
 
 test('dispatch: InvoiceIssued NO se despacha si la reserva bloquea la emisión (InvoiceCannotBeIssuedException)', function () {

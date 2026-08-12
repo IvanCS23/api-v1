@@ -4,7 +4,9 @@ namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\CancellationReceiptResult;
+use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
+use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
@@ -37,7 +39,10 @@ class DownloadCancellationReceiptService
 {
     private const DISK = 'local';
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(
+        private readonly PacProvider $pacProvider,
+        private readonly InvoicePacAuditService $audit,
+    ) {}
 
     public function download(Invoice $invoice): CancellationReceiptResult
     {
@@ -64,6 +69,10 @@ class DownloadCancellationReceiptService
         try {
             $reserved = $this->reserve($current);
 
+            $this->audit->appendSafely($reserved, InvoicePacEventType::CancellationReceiptAttempted, [
+                'cancellation_receipt_status' => $reserved->cancellation_receipt_status,
+            ]);
+
             $xml = $this->pacProvider->downloadCancellationReceiptXml((string) $reserved->pac_external_id);
             $this->assertValidXml($reserved, $xml);
 
@@ -84,6 +93,14 @@ class DownloadCancellationReceiptService
                 null,
                 'stored',
             );
+            $this->audit->appendSafely($updated, InvoicePacEventType::CancellationReceiptStored, [
+                'xml_size' => $result->xmlSize,
+                'pdf_size' => $result->pdfSize,
+                'xml_sha256' => $result->xmlHash,
+                'pdf_sha256' => $result->pdfHash,
+                'downloaded_at' => $result->downloadedAt,
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            ]);
 
             return $result;
         } catch (Throwable $e) {
@@ -93,6 +110,7 @@ class DownloadCancellationReceiptService
             }
 
             $this->traceFailure($reserved, $e, $startedAt);
+            $this->auditReceiptFailure($reserved, $e, $startedAt);
 
             throw $e;
         }
@@ -318,7 +336,7 @@ class DownloadCancellationReceiptService
         }
 
         if (! $matches) {
-            throw new RuntimeException(sprintf('La factura [%d]: el UUID del acuse XML no coincide con el CFDI local.', $invoice->id));
+            throw new CancellationReceiptIdentityMismatchException($invoice->id, $nodes->length);
         }
     }
 
@@ -378,7 +396,8 @@ class DownloadCancellationReceiptService
 
     private function failureStatus(Throwable $e): string
     {
-        if ($e instanceof CancellationReceiptUnavailableException) {
+        if ($e instanceof CancellationReceiptUnavailableException
+            || $e instanceof CancellationReceiptIdentityMismatchException) {
             return 'reconciliation_required';
         }
 
@@ -391,6 +410,10 @@ class DownloadCancellationReceiptService
 
     private function sanitizeErrorMessage(Throwable $e): string
     {
+        if ($e instanceof CancellationReceiptIdentityMismatchException) {
+            return $e->getMessage();
+        }
+
         $code = $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null;
         $prefix = $code !== null && $code !== '' ? "[{$code}] " : '';
         $message = $prefix.$e->getMessage();
@@ -437,6 +460,72 @@ class DownloadCancellationReceiptService
             // El fallo del canal de log nunca reemplaza el error original ni
             // revierte una descarga ya persistida correctamente.
         }
+
+        if ($error instanceof CancellationReceiptIdentityMismatchException) {
+            $this->logIdentityMismatchSafely($invoice, $error, $startedAt);
+        }
+    }
+
+    private function logIdentityMismatchSafely(
+        Invoice $invoice,
+        CancellationReceiptIdentityMismatchException $error,
+        float $startedAt,
+    ): void {
+        try {
+            Log::warning('billing.invoice.cancellation_receipt_identity_mismatch', [
+                'invoice_id' => $invoice->id,
+                'company_id' => $invoice->company_id,
+                'pac_provider' => $invoice->pac_provider,
+                'pac_external_id' => $this->maskIdentifier((string) $invoice->pac_external_id),
+                'expected_uuid' => $this->maskUuid((string) $invoice->cfdi_uuid),
+                'receipt_uuid_count' => $error->receiptUuidCount,
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            ]);
+        } catch (Throwable) {
+            // El fallo del canal de log nunca oculta el mismatch original.
+        }
+    }
+
+    private function maskIdentifier(string $identifier): string
+    {
+        return mb_strlen($identifier) <= 12
+            ? '[masked]'
+            : mb_substr($identifier, 0, 8).'...'.mb_substr($identifier, -4);
+    }
+
+    private function maskUuid(string $uuid): string
+    {
+        return mb_substr($uuid, 0, 8).'...'.mb_substr($uuid, -4);
+    }
+
+    private function auditReceiptFailure(Invoice $invoice, Throwable $error, float $startedAt): void
+    {
+        $fresh = $invoice->fresh() ?? $invoice;
+        $context = [
+            'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+            'cancellation_receipt_status' => $fresh->cancellation_receipt_status,
+        ];
+
+        $type = match (true) {
+            $error instanceof CancellationReceiptIdentityMismatchException => InvoicePacEventType::CancellationReceiptIdentityMismatch,
+            $error instanceof CancellationReceiptUnavailableException => InvoicePacEventType::CancellationReceiptUnavailable,
+            default => InvoicePacEventType::ReconciliationRequired,
+        };
+
+        if ($error instanceof CancellationReceiptIdentityMismatchException) {
+            $context += [
+                'receipt_uuid_count' => $error->receiptUuidCount,
+                'expected_uuid_masked' => $this->maskUuid((string) $fresh->cfdi_uuid),
+                'pac_external_id_masked' => $this->maskIdentifier((string) $fresh->pac_external_id),
+            ];
+        }
+
+        $this->audit->appendSafely(
+            $fresh,
+            $type,
+            $context,
+            $error instanceof PacException ? ($error->pacCode ?? (string) $error->httpStatus) : null,
+        );
     }
 
     private function assertPersistenceSchemaIsReady(): void

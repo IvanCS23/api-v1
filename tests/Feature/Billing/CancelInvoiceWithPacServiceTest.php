@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\CfdiCancellationMotive;
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConflictException;
@@ -210,7 +211,7 @@ test('motivo 01 envía substitution y motivos 02 03 04 nunca la envían', functi
     '04' => [CfdiCancellationMotive::GlobalInvoiceRelatedOperation, false],
 ]);
 
-test('política por cancellation_status persiste estados finales y ambiguos correctamente', function (string $status, string $cancellationStatus, bool $required) {
+test('política por cancellation_status persiste estados finales y ambiguos correctamente', function (string $status, string $cancellationStatus, bool $required, InvoicePacEventType $eventType) {
     $invoice = phase65CancelableInvoice();
     fakePhase65Cancellation($invoice, [
         'status' => $status,
@@ -228,13 +229,17 @@ test('política por cancellation_status persiste estados finales y ambiguos corr
         ->and($result->last_pac_sync_at)->not->toBeNull()
         ->and($result->pac_response['livemode'])->toBeFalse()
         ->and($result->pac_last_error)->toBeNull()
-        ->and($result->status)->toBe(InvoiceStatus::Issued);
+        ->and($result->status)->toBe(InvoiceStatus::Issued)
+        ->and($result->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::CancellationRequested,
+            $eventType,
+        ]);
 })->with([
-    'accepted' => ['canceled', 'accepted', false],
-    'pending' => ['valid', 'pending', true],
-    'verifying' => ['valid', 'verifying', true],
-    'rejected' => ['valid', 'rejected', false],
-    'expired' => ['valid', 'expired', false],
+    'accepted' => ['canceled', 'accepted', false, InvoicePacEventType::CancellationAccepted],
+    'pending' => ['valid', 'pending', true, InvoicePacEventType::CancellationPending],
+    'verifying' => ['valid', 'verifying', true, InvoicePacEventType::CancellationPending],
+    'rejected' => ['valid', 'rejected', false, InvoicePacEventType::CancellationRejected],
+    'expired' => ['valid', 'expired', false, InvoicePacEventType::CancellationExpired],
 ]);
 
 test('respuesta accepted incoherente o cancellation_status desconocido exige reconciliación', function (string $status, ?string $cancellationStatus) {

@@ -4,6 +4,7 @@ namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
+use App\Enums\InvoicePacEventType;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacIdentifiers;
@@ -39,6 +40,7 @@ class CreatePacDraftInvoiceService
         private readonly PacProvider $pacProvider,
         private readonly InvoicePacReadinessService $readiness,
         private readonly SyncPacDraftInvoiceService $sync,
+        private readonly InvoicePacAuditService $audit,
     ) {}
 
     public function createOrSync(Invoice $invoice): Invoice
@@ -116,6 +118,14 @@ class CreatePacDraftInvoiceService
             'elapsed_ms' => $elapsedMs,
         ]);
 
+        $this->audit->appendSafely($updated, InvoicePacEventType::DraftCreated, [
+            'pac_draft_external_id_masked' => $this->audit->maskIdentifier($updated->pac_draft_external_id),
+            'pac_draft_status' => $updated->pac_draft_status,
+            'is_ready_to_stamp' => $updated->pac_draft_ready_to_stamp,
+            'remote_total' => $result->total,
+            'elapsed_ms' => $elapsedMs,
+        ]);
+
         return $updated;
     }
 
@@ -160,7 +170,7 @@ class CreatePacDraftInvoiceService
             : null;
 
         if ($fresh === null) {
-            throw (new ModelNotFoundException())->setModel(Invoice::class, [$invoice->getKey()]);
+            throw (new ModelNotFoundException)->setModel(Invoice::class, [$invoice->getKey()]);
         }
 
         return $fresh;

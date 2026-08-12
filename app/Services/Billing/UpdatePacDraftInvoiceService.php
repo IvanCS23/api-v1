@@ -4,6 +4,7 @@ namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
+use App\Enums\InvoicePacEventType;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
@@ -60,6 +61,7 @@ class UpdatePacDraftInvoiceService
         private readonly PacProvider $pacProvider,
         private readonly SyncPacDraftInvoiceService $syncDraft,
         private readonly ReconcileInvoiceWithPacService $reconcile,
+        private readonly InvoicePacAuditService $audit,
     ) {}
 
     public function update(Invoice $invoice): Invoice
@@ -143,6 +145,16 @@ class UpdatePacDraftInvoiceService
             ]);
         }
 
+        $this->audit->appendSafely($updated, InvoicePacEventType::DraftUpdated, [
+            'pac_draft_external_id_masked' => $this->audit->maskIdentifier($updated->pac_draft_external_id),
+            'pac_draft_status' => $updated->pac_draft_status,
+            'is_ready_to_stamp' => $updated->pac_draft_ready_to_stamp,
+            'local_total' => $localTotal,
+            'remote_total' => $result->total,
+            'totals_match' => $totalsMatch,
+            'elapsed_ms' => $elapsedMs,
+        ]);
+
         return $updated;
     }
 
@@ -168,7 +180,7 @@ class UpdatePacDraftInvoiceService
             : null;
 
         if ($fresh === null) {
-            throw (new ModelNotFoundException())->setModel(Invoice::class, [$invoice->getKey()]);
+            throw (new ModelNotFoundException)->setModel(Invoice::class, [$invoice->getKey()]);
         }
 
         return $fresh;
