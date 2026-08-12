@@ -1,14 +1,17 @@
 <?php
 
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
+use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\CreatePacDraftInvoiceService;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -60,14 +63,17 @@ test('crea el borrador una sola vez: persiste pac_draft_* sin tocar cfdi_uuid/st
         ->and($updated->pac_draft_status)->toBe('draft')
         ->and($updated->pac_draft_ready_to_stamp)->toBeTrue()
         ->and($updated->pac_draft_idempotency_key)->toBe("erp-invoice-draft:{$invoice->company_id}:{$invoice->id}:v1")
-        ->and($updated->pac_draft_created_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
-        ->and($updated->pac_draft_last_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($updated->pac_draft_created_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($updated->pac_draft_last_sync_at)->toBeInstanceOf(CarbonImmutable::class)
         ->and($updated->pac_provider)->toBe('facturapi')
         // nunca se toca nada de emisión final:
         ->and($updated->cfdi_uuid)->toBeNull()
         ->and($updated->stamped_at)->toBeNull()
         ->and($updated->pac_external_id)->toBeNull()
-        ->and($updated->pac_issue_status)->toBeNull();
+        ->and($updated->pac_issue_status)->toBeNull()
+        ->and($updated->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::DraftCreated,
+        ]);
 });
 
 test('idempotencia local: un draft ya existente NO genera un segundo POST — se sincroniza en su lugar', function () {
@@ -107,7 +113,7 @@ test('retry (misma Invoice, sin draft creado aún) reutiliza exactamente la mism
     try {
         app(CreatePacDraftInvoiceService::class)->createOrSync($invoice);
         test()->fail('Se esperaba una excepción');
-    } catch (\Throwable) {
+    } catch (Throwable) {
         // esperado
     }
 
@@ -157,7 +163,7 @@ test('rollback: si la persistencia final falla, no queda escritura parcial de pa
     ], 200)]);
 
     expect(fn () => app(CreatePacDraftInvoiceService::class)->createOrSync($invoice->fresh(['items'])))
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 
     $fresh = $invoice->fresh();
     expect($fresh->pac_draft_external_id)->toBeNull()
@@ -178,7 +184,7 @@ test('readiness local bloquea antes de cualquier HTTP si la Invoice no está lis
     Http::fake();
 
     expect(fn () => app(CreatePacDraftInvoiceService::class)->createOrSync($invoice->fresh(['items'])))
-        ->toThrow(\App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException::class);
+        ->toThrow(InvoiceFiscalSnapshotIncompleteException::class);
 
     Http::assertNothingSent();
 });

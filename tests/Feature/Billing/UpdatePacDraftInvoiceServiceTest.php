@@ -3,7 +3,9 @@
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
+use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Company;
@@ -13,6 +15,7 @@ use App\Models\Product;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\UpdatePacDraftInvoiceService;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
@@ -178,7 +181,7 @@ test('livemode=true bloquea con PacUnexpectedEnvironmentException', function () 
         invoice: $invoice->fresh(['items']),
         idempotencyKey: 'k',
         externalId: 'e',
-    )))->toThrow(\App\Exceptions\Billing\PacUnexpectedEnvironmentException::class);
+    )))->toThrow(PacUnexpectedEnvironmentException::class);
 });
 
 // ==================== SERVICE: PRECONDICIONES / TENANT ====================
@@ -300,7 +303,7 @@ test('persiste pac_draft_status/ready_to_stamp/last_sync_at/response tras un upd
 
     expect($updated->pac_draft_status)->toBe('draft')
         ->and($updated->pac_draft_ready_to_stamp)->toBeTrue()
-        ->and($updated->pac_draft_last_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($updated->pac_draft_last_sync_at)->toBeInstanceOf(CarbonImmutable::class)
         ->and($updated->pac_draft_response)->toBeArray()
         // conservados sin cambios:
         ->and($updated->pac_draft_external_id)->toBe($invoice->pac_draft_external_id)
@@ -309,7 +312,11 @@ test('persiste pac_draft_status/ready_to_stamp/last_sync_at/response tras un upd
         ->and($updated->cfdi_uuid)->toBeNull()
         ->and($updated->pac_external_id)->toBeNull()
         ->and($updated->stamped_at)->toBeNull()
-        ->and($updated->pac_issue_status)->toBeNull();
+        ->and($updated->pac_issue_status)->toBeNull()
+        ->and($updated->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::DraftSynced,
+            InvoicePacEventType::DraftUpdated,
+        ]);
 });
 
 test('consistencia de totales: registra el total remoto (116) y confirma que coincide con subtotal/tax_total/total locales', function () {
@@ -353,7 +360,7 @@ test('si Facturapi devuelve un total remoto distinto, lo reporta (log warning) y
     expect((float) $updated->total)->toBe(116.0);
 
     Log::shouldHaveReceived('warning')
-        ->with('billing.invoice.pac_draft_total_mismatch', \Mockery::on(function (array $context) {
+        ->with('billing.invoice.pac_draft_total_mismatch', Mockery::on(function (array $context) {
             return $context['local_total'] === 116.0 && $context['remote_total'] === 100.0;
         }))
         ->once();

@@ -4,8 +4,10 @@ namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceResult;
+use App\Enums\InvoicePacEventType;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
+use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Models\Invoice;
@@ -33,7 +35,10 @@ class ReconcileInvoiceWithPacService
 {
     private const REMOTE_STATUSES = ['draft', 'pending', 'valid', 'canceled'];
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(
+        private readonly PacProvider $pacProvider,
+        private readonly InvoicePacAuditService $audit,
+    ) {}
 
     public function reconcile(Invoice $invoice): Invoice
     {
@@ -79,6 +84,10 @@ class ReconcileInvoiceWithPacService
 
         if ($result === null) {
             Log::info('billing.invoice.pac_reconciliation_not_found', $this->safeLogContext($current, $elapsedMs));
+            $this->audit->appendSafely($current, InvoicePacEventType::ReconciliationRequired, [
+                'elapsed_ms' => $elapsedMs,
+                'reason' => 'remote_invoice_not_found',
+            ]);
 
             return $current;
         }
@@ -193,10 +202,24 @@ class ReconcileInvoiceWithPacService
         });
 
         if ($postCommitException !== null) {
+            $this->audit->appendSafely($updated, InvoicePacEventType::ReconciliationRequired, [
+                'elapsed_ms' => $elapsedMs,
+                'reason' => $postCommitException::class,
+            ]);
+
             throw $postCommitException;
         }
 
         Log::info('billing.invoice.pac_reconciled', $this->safeLogContext($updated, $elapsedMs));
+
+        $changedFields = $this->relevantChanges($current, $updated);
+
+        if ($changedFields !== []) {
+            $this->audit->appendSafely($updated, InvoicePacEventType::Reconciled, [
+                'elapsed_ms' => $elapsedMs,
+                'changed_fields' => $changedFields,
+            ]);
+        }
 
         return $updated;
     }
@@ -275,6 +298,11 @@ class ReconcileInvoiceWithPacService
             'company_id' => $tenantId,
             'pac_provider' => $invoice->pac_provider,
         ]);
+
+        $fresh = $invoice->fresh() ?? $invoice;
+        $this->audit->appendSafely($fresh, InvoicePacEventType::ReconciliationRequired, [
+            'reason' => $logEvent,
+        ], $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null);
     }
 
     private function requireCurrentTenantInvoice(Invoice $invoice, ?int $tenantId): Invoice
@@ -315,5 +343,23 @@ class ReconcileInvoiceWithPacService
         }
 
         return mb_substr($message, 0, 500);
+    }
+
+    /** @return list<string> */
+    private function relevantChanges(Invoice $before, Invoice $after): array
+    {
+        $fields = [
+            'pac_status',
+            'cancellation_status',
+            'cfdi_uuid',
+            'pac_external_id',
+            'pac_issue_status',
+            'pac_reconciliation_required',
+        ];
+
+        return array_values(array_filter(
+            $fields,
+            fn (string $field): bool => $before->getAttribute($field) !== $after->getAttribute($field),
+        ));
     }
 }

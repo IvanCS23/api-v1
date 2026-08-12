@@ -2,6 +2,7 @@
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceResult;
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\PacAuthenticationException;
@@ -16,9 +17,12 @@ use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\InvoicePacEvent;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Billing\InvoicePacAuditService;
 use App\Services\Billing\StampPacDraftInvoiceService;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
@@ -314,8 +318,8 @@ test('timbrado exitoso: el borrador se transforma en la factura timbrada (pac_ex
     expect($updated->pac_external_id)->toBe($invoice->pac_draft_external_id)
         ->and($updated->cfdi_uuid)->toBe('BBBBBBBB-1111-2222-3333-444444444444')
         ->and($updated->pac_status)->toBe('valid')
-        ->and($updated->stamped_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
-        ->and($updated->last_pac_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($updated->stamped_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($updated->last_pac_sync_at)->toBeInstanceOf(CarbonImmutable::class)
         ->and($updated->pac_response)->toBeArray()
         ->and($updated->pac_last_error)->toBeNull()
         ->and($updated->pac_issue_status)->toBe('succeeded')
@@ -325,7 +329,47 @@ test('timbrado exitoso: el borrador se transforma en la factura timbrada (pac_ex
         // trazabilidad: el rastro del draft nunca se borra
         ->and($updated->pac_draft_external_id)->toBe($invoice->pac_draft_external_id)
         ->and($updated->pac_draft_idempotency_key)->not->toBeNull()
-        ->and($updated->pac_draft_status)->toBe('valid');
+        ->and($updated->pac_draft_status)->toBe('valid')
+        ->and($updated->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::DraftSynced,
+            InvoicePacEventType::StampAttempted,
+            InvoicePacEventType::StampSucceeded,
+        ]);
+});
+
+test('un fallo de auditoría no repite stamp ni convierte un éxito remoto persistido en fallo', function () {
+    $company = Company::factory()->create();
+    $invoice = draftReadyInvoiceForStampTest($company);
+    app(CurrentTenant::class)->set($company->id);
+
+    Http::fake([
+        "*/invoices/{$invoice->pac_draft_external_id}" => Http::response(fakeSyncedReadyDraftBody($invoice), 200),
+        "*/invoices/{$invoice->pac_draft_external_id}/stamp" => Http::response(fakeStampSuccessBody($invoice), 200),
+    ]);
+
+    app()->instance(
+        InvoicePacAuditService::class,
+        new class extends InvoicePacAuditService
+        {
+            public function append(
+                Invoice $invoice,
+                InvoicePacEventType $type,
+                array $context = [],
+                ?string $pacCode = null,
+            ): InvoicePacEvent {
+                throw new RuntimeException('Fallo simulado de auditoría.');
+            }
+        },
+    );
+
+    $updated = app(StampPacDraftInvoiceService::class)->stamp($invoice);
+
+    expect($updated->cfdi_uuid)->toBe('BBBBBBBB-1111-2222-3333-444444444444')
+        ->and($updated->pac_issue_status)->toBe('succeeded')
+        ->and($updated->pacEvents()->count())->toBe(0);
+
+    Http::assertSentCount(2);
+    Http::assertSent(fn ($request): bool => str_ends_with($request->url(), '/stamp'));
 });
 
 test('nunca crea un CFDI nuevo: solo se envían un GET (sync) y un POST .../stamp, nunca un POST /invoices (createInvoice)', function () {
@@ -455,7 +499,12 @@ test('error de validación (400/422) en /stamp es DEFINITIVO: pac_issue_status=f
         ->and($fresh->pac_reconciliation_required)->toBeFalse()
         ->and($fresh->pac_last_error)->toContain('invalid_draft')
         ->and($fresh->cfdi_uuid)->toBeNull()
-        ->and($fresh->pac_draft_external_id)->toBe($invoice->pac_draft_external_id);
+        ->and($fresh->pac_draft_external_id)->toBe($invoice->pac_draft_external_id)
+        ->and($fresh->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::DraftSynced,
+            InvoicePacEventType::StampAttempted,
+            InvoicePacEventType::StampFailed,
+        ]);
 })->with([400, 422]);
 
 test('error de autenticación (401/403) en /stamp es DEFINITIVO: pac_issue_status=failed', function (int $status) {

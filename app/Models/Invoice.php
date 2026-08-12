@@ -174,6 +174,11 @@ class Invoice extends Model
         return $this->hasMany(InvoiceItem::class);
     }
 
+    public function pacEvents(): HasMany
+    {
+        return $this->hasMany(InvoicePacEvent::class);
+    }
+
     /**
      * Draft y Ready admiten cambios de datos propios (ej. notes) y
      * eliminación. Issued y Cancelled son terminales — Issued en

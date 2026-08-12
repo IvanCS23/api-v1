@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacException;
 use App\Models\Invoice;
@@ -129,6 +130,12 @@ class FacturapiTestDownloadCancellationReceipt extends Command
             );
 
             return self::SUCCESS;
+        } catch (CancellationReceiptIdentityMismatchException) {
+            $this->error('ACUSE INCONSISTENTE: Facturapi devolvió un acuse cuyo UUID fiscal no corresponde al CFDI solicitado.');
+            $this->error('No se almacenó ningún archivo.');
+            $this->line('Código interno: '.CancellationReceiptIdentityMismatchException::ERROR_CODE);
+
+            return self::FAILURE;
         } catch (CancellationReceiptUnavailableException $e) {
             $this->error('ACUSE NO DISPONIBLE AÚN. Facturapi todavía no expone el acuse; la Invoice quedó marcada para reconciliación.');
             $this->line('Código PAC seguro: '.$e->pacCode);

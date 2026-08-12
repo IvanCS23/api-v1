@@ -1,8 +1,10 @@
 <?php
 
 use App\Data\Billing\CancellationReceiptResult;
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
+use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Models\Company;
@@ -87,7 +89,11 @@ test('tenant correcto y cancelacion accepted+canceled permiten descargar el acus
     $result = app(DownloadCancellationReceiptService::class)->download($invoice);
 
     expect($result)->toBeInstanceOf(CancellationReceiptResult::class)
-        ->and($invoice->fresh()->cancellation_receipt_status)->toBe('stored');
+        ->and($invoice->fresh()->cancellation_receipt_status)->toBe('stored')
+        ->and($invoice->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::CancellationReceiptAttempted,
+            InvoicePacEventType::CancellationReceiptStored,
+        ]);
 });
 
 test('sin tenant rechaza antes de HTTP', function () {
@@ -243,15 +249,135 @@ test('XXE y DOCTYPE se rechazan sin resolver contenido externo', function () {
     expect(Storage::disk('local')->allFiles())->toBe([]);
 });
 
-test('UUID del Acuse debe coincidir con Invoice cfdi_uuid', function () {
+test('UUID inconsistente usa excepcion y codigo estables sin descargar PDF ni escribir Storage', function () {
+    Log::spy();
+    $company = Company::factory()->create();
+    $invoice = canceledInvoiceForReceiptTest($company, [
+        'cfdi_xml_path' => 'cfdi/original.xml',
+        'cfdi_pdf_path' => 'cfdi/original.pdf',
+        'cfdi_xml_sha256' => str_repeat('a', 64),
+        'cfdi_pdf_sha256' => str_repeat('b', 64),
+        'cfdi_artifacts_status' => 'stored',
+    ]);
+    app(CurrentTenant::class)->set($company->id);
+    $before = $invoice->only([
+        'cfdi_uuid', 'pac_external_id', 'pac_status', 'cancellation_status',
+        'cfdi_xml_path', 'cfdi_pdf_path', 'cfdi_xml_sha256', 'cfdi_pdf_sha256',
+        'cfdi_artifacts_status', 'status', 'subtotal', 'tax_total', 'total',
+    ]);
+    $receiptUuid = 'cf5138a2-1111-2222-3333-444444442e90';
+    fakeCancellationReceiptHttp($invoice, cancellationReceiptXml($receiptUuid));
+
+    expect(fn () => app(DownloadCancellationReceiptService::class)->download($invoice))
+        ->toThrow(CancellationReceiptIdentityMismatchException::class, CancellationReceiptIdentityMismatchException::ERROR_CODE);
+
+    $fresh = $invoice->fresh();
+    expect(Storage::disk('local')->allFiles())->toBe([])
+        ->and($fresh->cancellation_receipt_status)->toBe('reconciliation_required')
+        ->and($fresh->cancellation_receipt_last_error)->toBe(
+            '[CANCELLATION_RECEIPT_UUID_MISMATCH] El UUID fiscal identificado en el acuse no corresponde al CFDI local para la factura ['.$invoice->id.'].'
+        )
+        ->and($fresh->only(array_keys($before)))->toBe($before)
+        ->and($fresh->cancellation_receipt_last_error)->not->toContain((string) $invoice->cfdi_uuid)
+        ->not->toContain($receiptUuid)
+        ->and($fresh->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::CancellationReceiptAttempted,
+            InvoicePacEventType::CancellationReceiptIdentityMismatch,
+        ])
+        ->and($fresh->pacEvents()->latest('id')->first()->context)->toMatchArray([
+            'receipt_uuid_count' => 1,
+            'expected_uuid_masked' => '96013e83...e560',
+        ]);
+
+    Http::assertSentCount(1);
+    Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/cancellation_receipt/pdf'));
+
+    Log::shouldHaveReceived('warning')
+        ->withArgs(function (string $event, array $context) use ($invoice): bool {
+            expect($event)->toBe('billing.invoice.cancellation_receipt_identity_mismatch')
+                ->and($context)->toBe([
+                    'invoice_id' => $invoice->id,
+                    'company_id' => $invoice->company_id,
+                    'pac_provider' => 'facturapi',
+                    'pac_external_id' => 'inv_canc...'.mb_substr((string) $invoice->pac_external_id, -4),
+                    'expected_uuid' => '96013e83...e560',
+                    'receipt_uuid_count' => 1,
+                    'elapsed_ms' => $context['elapsed_ms'],
+                ])
+                ->and($context['elapsed_ms'])->toBeInt()->toBeGreaterThanOrEqual(0)
+                ->and(json_encode($context))->not->toContain((string) $invoice->cfdi_uuid)
+                ->not->toContain((string) $invoice->pac_external_id)
+                ->not->toContain('cf5138a2-1111-2222-3333-444444442e90')
+                ->not->toContain('<Acuse');
+
+            return true;
+        })
+        ->once();
+});
+
+test('varios Folios sin UUID esperado se rechazan y reportan el conteo', function () {
+    Log::spy();
     $company = Company::factory()->create();
     $invoice = canceledInvoiceForReceiptTest($company);
     app(CurrentTenant::class)->set($company->id);
-    fakeCancellationReceiptHttp($invoice, cancellationReceiptXml('00000000-0000-0000-0000-000000000000'));
+    $xml = '<Acuse xmlns="http://cancelacfd.sat.gob.mx">'
+        .'<Folios><UUID>11111111-1111-1111-1111-111111111111</UUID></Folios>'
+        .'<Folios><UUID>22222222-2222-2222-2222-222222222222</UUID></Folios>'
+        .'</Acuse>';
+    fakeCancellationReceiptHttp($invoice, $xml);
 
-    expect(fn () => app(DownloadCancellationReceiptService::class)->download($invoice))
-        ->toThrow(RuntimeException::class, 'UUID del acuse XML no coincide');
+    try {
+        app(DownloadCancellationReceiptService::class)->download($invoice);
+        $this->fail('Se esperaba CancellationReceiptIdentityMismatchException.');
+    } catch (CancellationReceiptIdentityMismatchException $e) {
+        expect($e->receiptUuidCount)->toBe(2)
+            ->and($e->getMessage())->not->toContain('11111111-1111-1111-1111-111111111111')
+            ->not->toContain('22222222-2222-2222-2222-222222222222');
+    }
+
+    Http::assertSentCount(1);
     expect(Storage::disk('local')->allFiles())->toBe([]);
+    Log::shouldHaveReceived('warning')
+        ->withArgs(fn (string $event, array $context): bool => $event === 'billing.invoice.cancellation_receipt_identity_mismatch'
+            && $context['receipt_uuid_count'] === 2)
+        ->once();
+});
+
+test('varios Folios aceptan UUID esperado en segundo lugar y casing distinto', function () {
+    $company = Company::factory()->create();
+    $invoice = canceledInvoiceForReceiptTest($company);
+    app(CurrentTenant::class)->set($company->id);
+    $xml = '<Acuse xmlns="http://cancelacfd.sat.gob.mx">'
+        .'<Folios><UUID>11111111-1111-1111-1111-111111111111</UUID></Folios>'
+        .'<Folios><UUID>'.strtoupper((string) $invoice->cfdi_uuid).'</UUID></Folios>'
+        .'</Acuse>';
+    fakeCancellationReceiptHttp($invoice, $xml);
+
+    $result = app(DownloadCancellationReceiptService::class)->download($invoice);
+
+    expect($invoice->fresh()->cancellation_receipt_status)->toBe('stored')
+        ->and(Storage::disk('local')->exists($result->xmlPath))->toBeTrue()
+        ->and(Storage::disk('local')->exists($result->pdfPath))->toBeTrue();
+    Http::assertSentCount(2);
+});
+
+test('reintento explicito de mismatch vuelve a consultar solo XML y conserva rechazo', function () {
+    $company = Company::factory()->create();
+    $invoice = canceledInvoiceForReceiptTest($company);
+    app(CurrentTenant::class)->set($company->id);
+    fakeCancellationReceiptHttp($invoice, cancellationReceiptXml('cf5138a2-1111-2222-3333-444444442e90'));
+
+    foreach (range(1, 2) as $_attempt) {
+        expect(fn () => app(DownloadCancellationReceiptService::class)->download($invoice->fresh()))
+            ->toThrow(CancellationReceiptIdentityMismatchException::class);
+    }
+
+    $fresh = $invoice->fresh();
+    expect($fresh->cancellation_receipt_status)->toBe('reconciliation_required')
+        ->and($fresh->cancellation_receipt_last_error)->toContain(CancellationReceiptIdentityMismatchException::ERROR_CODE)
+        ->and(Storage::disk('local')->allFiles())->toBe([]);
+    Http::assertSentCount(2);
+    Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/cancellation_receipt/pdf'));
 });
 
 test('PDF vacio o sin encabezado PDF se rechaza sin dejar XML parcial', function (string $pdf) {
@@ -419,7 +545,11 @@ test('receipt unavailable marca reconciliation_required y usa excepcion de domin
 
     $fresh = $invoice->fresh();
     expect($fresh->cancellation_receipt_status)->toBe('reconciliation_required')
-        ->and($fresh->cancellation_receipt_last_error)->toContain('invoice_cancellation_receipt_unavailable');
+        ->and($fresh->cancellation_receipt_last_error)->toContain('invoice_cancellation_receipt_unavailable')
+        ->and($fresh->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::CancellationReceiptAttempted,
+            InvoicePacEventType::CancellationReceiptUnavailable,
+        ]);
 });
 
 test('logs y last_error no filtran bytes, API key ni Authorization', function () {

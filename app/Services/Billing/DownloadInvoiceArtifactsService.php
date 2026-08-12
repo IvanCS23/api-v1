@@ -4,6 +4,7 @@ namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\InvoiceArtifactsResult;
+use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
 use App\Exceptions\Billing\PacAuthenticationException;
@@ -72,7 +73,10 @@ class DownloadInvoiceArtifactsService
 {
     private const DISK = 'local';
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(
+        private readonly PacProvider $pacProvider,
+        private readonly InvoicePacAuditService $audit,
+    ) {}
 
     public function download(Invoice $invoice, bool $forceRefresh = false): InvoiceArtifactsResult
     {
@@ -97,6 +101,7 @@ class DownloadInvoiceArtifactsService
         } catch (Throwable $e) {
             $this->recordFailure($reserved, $e);
             $this->logAttempt($reserved, null, $this->elapsedMs($startedAt), $e);
+            $this->auditFailure($reserved, $e, $this->elapsedMs($startedAt));
 
             throw $e;
         }
@@ -108,6 +113,7 @@ class DownloadInvoiceArtifactsService
         } catch (Throwable $e) {
             $this->recordFailure($reserved, $e);
             $this->logAttempt($reserved, null, $this->elapsedMs($startedAt), $e);
+            $this->auditFailure($reserved, $e, $this->elapsedMs($startedAt));
 
             throw $e;
         }
@@ -122,6 +128,7 @@ class DownloadInvoiceArtifactsService
             $this->deleteQuietly($paths['pdfFinal']);
             $this->recordFailure($reserved, $e);
             $this->logAttempt($reserved, null, $this->elapsedMs($startedAt), $e);
+            $this->auditFailure($reserved, $e, $this->elapsedMs($startedAt));
 
             throw $e;
         }
@@ -129,6 +136,14 @@ class DownloadInvoiceArtifactsService
         $result = $this->toResult($updated, $xml, $pdf);
 
         $this->logAttempt($updated, $result, $this->elapsedMs($startedAt), null);
+        $this->audit->appendSafely($updated, InvoicePacEventType::ArtifactsStored, [
+            'xml_size' => $result->xmlSize,
+            'pdf_size' => $result->pdfSize,
+            'xml_sha256' => $result->xmlHash,
+            'pdf_sha256' => $result->pdfHash,
+            'downloaded_at' => $result->downloadedAt,
+            'elapsed_ms' => $this->elapsedMs($startedAt),
+        ]);
 
         return $result;
     }
@@ -181,6 +196,11 @@ class DownloadInvoiceArtifactsService
         Log::warning('billing.invoice.cfdi_artifact_missing', [
             'invoice_id' => $invoice->id,
             'company_id' => $invoice->company_id,
+        ]);
+
+        $this->audit->appendSafely($invoice->fresh() ?? $invoice, InvoicePacEventType::ArtifactsFailed, [
+            'artifact_status' => 'reconciliation_required',
+            'reason' => 'stored_artifact_missing_or_hash_mismatch',
         ]);
 
         throw new CfdiArtifactMissingException($invoice->id, $missingPath);
@@ -350,7 +370,7 @@ class DownloadInvoiceArtifactsService
 
         libxml_use_internal_errors(true);
 
-        $dom = new DOMDocument();
+        $dom = new DOMDocument;
         // Defensa XXE explícita: nunca resolver ni sustituir entidades
         // (externas o no), y LIBXML_NONET bloquea cualquier acceso de
         // red durante el parseo — incluso aunque libxml2 moderno ya
@@ -470,6 +490,16 @@ class DownloadInvoiceArtifactsService
         return (int) round((microtime(true) - $startedAt) * 1000);
     }
 
+    private function auditFailure(Invoice $invoice, Throwable $error, int $elapsedMs): void
+    {
+        $fresh = $invoice->fresh() ?? $invoice;
+        $this->audit->appendSafely($fresh, InvoicePacEventType::ArtifactsFailed, [
+            'artifact_status' => $fresh->cfdi_artifacts_status,
+            'elapsed_ms' => $elapsedMs,
+            'reason' => $error::class,
+        ], $error instanceof PacException ? ($error->pacCode ?? (string) $error->httpStatus) : null);
+    }
+
     private function assertIsStampedCfdi(Invoice $invoice): void
     {
         if ($invoice->pac_external_id === null || $invoice->cfdi_uuid === null || $invoice->pac_status !== 'valid') {
@@ -495,7 +525,7 @@ class DownloadInvoiceArtifactsService
             : null;
 
         if ($fresh === null) {
-            throw (new ModelNotFoundException())->setModel(Invoice::class, [$invoice->getKey()]);
+            throw (new ModelNotFoundException)->setModel(Invoice::class, [$invoice->getKey()]);
         }
 
         return $fresh;

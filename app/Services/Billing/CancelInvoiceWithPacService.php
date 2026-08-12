@@ -5,6 +5,7 @@ namespace App\Services\Billing;
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\CfdiCancellationMotive;
+use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacRateLimitException;
@@ -28,7 +29,10 @@ class CancelInvoiceWithPacService
 {
     private const CANCELLABLE_STATUSES = [null, 'none', 'rejected', 'expired'];
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(
+        private readonly PacProvider $pacProvider,
+        private readonly InvoicePacAuditService $audit,
+    ) {}
 
     public function cancel(
         Invoice $invoice,
@@ -47,6 +51,11 @@ class CancelInvoiceWithPacService
         $initialCancellationStatus = $current->cancellation_status;
         $startedAt = microtime(true);
 
+        $this->audit->appendSafely($current, InvoicePacEventType::CancellationRequested, array_filter([
+            'motive' => $motive->value,
+            'substitution_uuid_hash' => $substitutionUuid !== null ? hash('sha256', $substitutionUuid) : null,
+        ], static fn (mixed $value): bool => $value !== null));
+
         try {
             $result = $this->pacProvider->cancelInvoice(
                 $expectedExternalId,
@@ -57,12 +66,17 @@ class CancelInvoiceWithPacService
             $this->recordFailure($current, $tenantId, $e, $this->isAmbiguous($e));
             $this->logResult($current, $motive, null, $startedAt, $e);
 
+            if ($this->isAmbiguous($e)) {
+                $this->auditReconciliationRequired($current, $motive, $e, $startedAt);
+            }
+
             throw $e;
         }
 
         if ($exception = $this->identityException($current, $result)) {
             $this->recordFailure($current, $tenantId, $exception, true);
             $this->logResult($current, $motive, null, $startedAt, $exception);
+            $this->auditReconciliationRequired($current, $motive, $exception, $startedAt);
 
             throw $exception;
         }
@@ -119,11 +133,23 @@ class CancelInvoiceWithPacService
         } catch (Throwable $e) {
             $this->recordFailure($current, $tenantId, $e, true);
             $this->logResult($current, $motive, null, $startedAt, $e);
+            $this->auditReconciliationRequired($current, $motive, $e, $startedAt);
 
             throw $e;
         }
 
         $this->logResult($updated, $motive, $result, $startedAt, null);
+
+        $this->audit->appendSafely(
+            $updated,
+            $this->cancellationEventType($result),
+            [
+                'motive' => $motive->value,
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'result_status' => $result->status,
+                'cancellation_status' => $result->cancellationStatus,
+            ],
+        );
 
         return $updated;
     }
@@ -314,5 +340,34 @@ class CancelInvoiceWithPacService
         }
 
         return mb_substr($message, 0, 500);
+    }
+
+    private function cancellationEventType(PacInvoiceResult $result): InvoicePacEventType
+    {
+        return match ($result->cancellationStatus) {
+            'accepted' => InvoicePacEventType::CancellationAccepted,
+            'pending', 'verifying' => InvoicePacEventType::CancellationPending,
+            'rejected' => InvoicePacEventType::CancellationRejected,
+            'expired' => InvoicePacEventType::CancellationExpired,
+            default => InvoicePacEventType::ReconciliationRequired,
+        };
+    }
+
+    private function auditReconciliationRequired(
+        Invoice $invoice,
+        CfdiCancellationMotive $motive,
+        Throwable $error,
+        float $startedAt,
+    ): void {
+        $this->audit->appendSafely(
+            $invoice->fresh() ?? $invoice,
+            InvoicePacEventType::ReconciliationRequired,
+            [
+                'motive' => $motive->value,
+                'elapsed_ms' => (int) round((microtime(true) - $startedAt) * 1000),
+                'reason' => $error::class,
+            ],
+            $error instanceof PacException ? ($error->pacCode ?? (string) $error->httpStatus) : null,
+        );
     }
 }

@@ -290,6 +290,32 @@ test('errores locales XML y PDF capturados por el comando dejan DB y log trazabl
         ->once();
 })->with(['xml', 'pdf']);
 
+test('mismatch de identidad muestra mensaje explicito y no descarga PDF ni guarda archivos', function () {
+    $invoice = invoiceForCancellationReceiptCommand();
+    Http::fake([
+        "*/invoices/{$invoice->pac_external_id}/cancellation_receipt/xml" => Http::response(
+            '<?xml version="1.0"?><Acuse><Folios><UUID>cf5138a2-1111-2222-3333-444444442e90</UUID></Folios></Acuse>',
+            200,
+        ),
+    ]);
+
+    $this->artisan('billing:facturapi-test-cancellation-receipt', ['invoice' => $invoice->id])
+        ->expectsConfirmation(cancellationReceiptConfirmation($invoice), 'yes')
+        ->expectsOutputToContain('ACUSE INCONSISTENTE')
+        ->expectsOutputToContain('No se almacenó ningún archivo')
+        ->expectsOutputToContain('CANCELLATION_RECEIPT_UUID_MISMATCH')
+        ->doesntExpectOutputToContain((string) $invoice->cfdi_uuid)
+        ->doesntExpectOutputToContain('cf5138a2-1111-2222-3333-444444442e90')
+        ->assertExitCode(1);
+
+    $fresh = $invoice->fresh();
+    expect($fresh->cancellation_receipt_status)->toBe('reconciliation_required')
+        ->and($fresh->cancellation_receipt_last_error)->toContain('CANCELLATION_RECEIPT_UUID_MISMATCH')
+        ->and(Storage::disk('local')->allFiles())->toBe([]);
+    Http::assertSentCount(1);
+    Http::assertNotSent(fn ($request): bool => str_ends_with($request->url(), '/cancellation_receipt/pdf'));
+});
+
 test('error Storage capturado por el comando deja DB y log trazables', function () {
     Log::spy();
     $invoice = invoiceForCancellationReceiptCommand();

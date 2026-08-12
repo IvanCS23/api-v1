@@ -1,10 +1,13 @@
 <?php
 
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
+use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Services\Billing\SyncPacDraftInvoiceService;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\Http;
 
@@ -56,7 +59,10 @@ test('sincroniza el estado real del draft: status, is_ready_to_stamp y last_sync
 
     expect($updated->pac_draft_ready_to_stamp)->toBeTrue()
         ->and($updated->pac_draft_status)->toBe('draft')
-        ->and($updated->pac_draft_last_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class);
+        ->and($updated->pac_draft_last_sync_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($updated->pacEvents()->pluck('event_type')->all())->toBe([
+            InvoicePacEventType::DraftSynced,
+        ]);
 });
 
 test('nunca timbra: is_ready_to_stamp=true solo se refleja localmente, sin tocar cfdi_uuid/pac_issue_status', function () {
@@ -123,7 +129,7 @@ test('livemode=true durante la sincronización bloquea y no persiste el resultad
     ], 200)]);
 
     expect(fn () => app(SyncPacDraftInvoiceService::class)->sync($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacUnexpectedEnvironmentException::class);
+        ->toThrow(PacUnexpectedEnvironmentException::class);
 
     $fresh = $invoice->fresh();
     expect($fresh->pac_draft_ready_to_stamp)->toBeFalse() // valor original, sin cambios
