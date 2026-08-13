@@ -2,6 +2,7 @@
 
 namespace App\Policies;
 
+use App\Enums\UserRole;
 use App\Models\Invoice;
 use App\Models\User;
 
@@ -34,5 +35,31 @@ class InvoicePolicy
     public function delete(User $user, Invoice $invoice): bool
     {
         return $user->company_id === $invoice->company_id;
+    }
+
+    public function reconcilePac(User $user, Invoice $invoice): bool
+    {
+        return $this->canManagePac($user, $invoice);
+    }
+
+    public function issuePac(User $user, Invoice $invoice): bool
+    {
+        return $this->canManagePac($user, $invoice);
+    }
+
+    public function managePacArtifacts(User $user, Invoice $invoice): bool
+    {
+        return $this->canManagePac($user, $invoice);
+    }
+
+    public function cancelPac(User $user, Invoice $invoice): bool
+    {
+        return $this->canManagePac($user, $invoice);
+    }
+
+    private function canManagePac(User $user, Invoice $invoice): bool
+    {
+        return $user->company_id === $invoice->company_id
+            && in_array($user->role, [UserRole::Admin, UserRole::Accountant], true);
     }
 }

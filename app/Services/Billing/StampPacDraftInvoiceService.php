@@ -145,7 +145,22 @@ class StampPacDraftInvoiceService
 
         $elapsedMs = $this->elapsedMs($startedAt);
 
-        $updated = $this->persistStampResult($reserved, $result);
+        try {
+            $updated = $this->persistStampResult($reserved, $result);
+        } catch (Throwable $e) {
+            // El PAC ya respondió al intento de stamp, pero su identidad o
+            // la persistencia local no pudo aceptarse con certeza. Igual que
+            // un 5xx/timeout, nunca se vuelve a timbrar a ciegas.
+            $failed = $this->recordStampFailure($reserved, $e);
+            $this->logAttempt($failed, $elapsedMs, $e);
+            $this->audit->appendSafely($failed, InvoicePacEventType::ReconciliationRequired, [
+                'attempt' => $failed->pac_issue_attempts,
+                'elapsed_ms' => $elapsedMs,
+                'reason' => $e::class,
+            ], $this->pacCode($e));
+
+            throw $e;
+        }
 
         $this->logAttempt($updated, $elapsedMs, null);
         $this->audit->appendSafely(
@@ -321,8 +336,18 @@ class StampPacDraftInvoiceService
     {
         $code = $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null;
         $prefix = $code !== null && $code !== '' ? "[{$code}] " : '';
+        $message = $prefix.$e->getMessage();
+        $apiKey = (string) config('services.facturapi.test_key');
 
-        return mb_substr($prefix.$e->getMessage(), 0, 500);
+        if ($apiKey !== '') {
+            $message = str_replace($apiKey, '[redacted]', $message);
+        }
+
+        return mb_substr(
+            preg_replace('/\b(?:Authorization|Bearer)(?:\s+[^\s]+)?/i', '[redacted]', $message) ?? '[redacted]',
+            0,
+            500,
+        );
     }
 
     private function logAttempt(Invoice $invoice, int $elapsedMs, ?Throwable $error): void

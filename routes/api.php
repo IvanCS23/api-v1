@@ -3,8 +3,11 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\EmployeController;
+use App\Http\Controllers\Api\InvoiceArtifactController;
+use App\Http\Controllers\Api\InvoiceBillingController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\InvoiceItemController;
+use App\Http\Controllers\Api\InvoicePacActionController;
 use App\Http\Controllers\Api\LegacyInvoiceController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
@@ -115,6 +118,26 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::post('/invoices', [InvoiceController::class, 'store']);
     Route::put('/invoices/{id}', [InvoiceController::class, 'update']);
     Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
+    Route::get('/invoices/{invoice}/billing', InvoiceBillingController::class)
+        ->whereNumber('invoice');
+    Route::get('/invoices/{invoice}/cfdi/xml', [InvoiceArtifactController::class, 'cfdiXml'])
+        ->whereNumber('invoice');
+    Route::get('/invoices/{invoice}/cfdi/pdf', [InvoiceArtifactController::class, 'cfdiPdf'])
+        ->whereNumber('invoice');
+    Route::get('/invoices/{invoice}/cancellation-receipt/xml', [InvoiceArtifactController::class, 'cancellationReceiptXml'])
+        ->whereNumber('invoice');
+    Route::get('/invoices/{invoice}/cancellation-receipt/pdf', [InvoiceArtifactController::class, 'cancellationReceiptPdf'])
+        ->whereNumber('invoice');
+    Route::post('/invoices/{invoice}/pac/reconcile', [InvoicePacActionController::class, 'reconcile'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
+    Route::post('/invoices/{invoice}/pac/issue', [InvoicePacActionController::class, 'issue'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
+    Route::post('/invoices/{invoice}/pac/artifacts', [InvoicePacActionController::class, 'artifacts'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
+    Route::post('/invoices/{invoice}/pac/cancel', [InvoicePacActionController::class, 'cancel'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
+    Route::post('/invoices/{invoice}/pac/cancellation-receipt', [InvoicePacActionController::class, 'cancellationReceipt'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
     Route::delete('/invoices/{id}', [InvoiceController::class, 'destroy']);
 
     // Invoice workflow (transiciones de estado vía acciones dedicadas)

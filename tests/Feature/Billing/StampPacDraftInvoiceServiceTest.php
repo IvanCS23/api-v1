@@ -628,7 +628,9 @@ test('si /stamp devuelve un id remoto distinto del borrador solicitado, se detie
 
     $fresh = $invoice->fresh();
     expect($fresh->cfdi_uuid)->toBeNull()
-        ->and($fresh->pac_external_id)->toBeNull();
+        ->and($fresh->pac_external_id)->toBeNull()
+        ->and($fresh->pac_issue_status)->toBe('reconciliation_required')
+        ->and($fresh->pac_reconciliation_required)->toBeTrue();
 });
 
 test('pac_last_error nunca contiene la API key, Authorization ni Bearer', function () {
