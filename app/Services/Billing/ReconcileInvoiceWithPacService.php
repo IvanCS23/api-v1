@@ -40,7 +40,7 @@ class ReconcileInvoiceWithPacService
         private readonly InvoicePacAuditService $audit,
     ) {}
 
-    public function reconcile(Invoice $invoice): Invoice
+    public function reconcile(Invoice $invoice, bool $throwOnFailure = false): Invoice
     {
         $tenantId = app(CurrentTenant::class)->id();
         $current = $this->requireCurrentTenantInvoice($invoice, $tenantId);
@@ -73,9 +73,17 @@ class ReconcileInvoiceWithPacService
         } catch (PacAmbiguousInvoiceMatchException $e) {
             $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_reconciliation_ambiguous');
 
+            if ($throwOnFailure) {
+                throw $e;
+            }
+
             return $current->fresh();
         } catch (Throwable $e) {
             $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_reconciliation_failed');
+
+            if ($throwOnFailure) {
+                throw $e;
+            }
 
             return $current->fresh();
         }

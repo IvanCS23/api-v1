@@ -45,9 +45,9 @@ class InvoiceWorkflow
         return $this->issueInvoiceService->issue($invoice);
     }
 
-    public function reconcileWithPac(Invoice $invoice): Invoice
+    public function reconcileWithPac(Invoice $invoice, bool $throwOnFailure = false): Invoice
     {
-        return $this->reconcileInvoiceWithPacService->reconcile($invoice);
+        return $this->reconcileInvoiceWithPacService->reconcile($invoice, $throwOnFailure);
     }
 
     public function cancelWithPac(

@@ -22,10 +22,13 @@ use App\Policies\SaleItemPolicy;
 use App\Policies\SalePolicy;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
+use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 
@@ -46,6 +49,7 @@ class AppServiceProvider extends ServiceProvider
     {
         $this->configureDefaults();
         $this->configurePolicies();
+        $this->configureRateLimiting();
 
         // Sin este flag, cualquier API Resource devuelta directamente se
         // envuelve en {"data": ...}, lo que rompería el contrato JSON plano
@@ -68,6 +72,17 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(QuoteItem::class, QuoteItemPolicy::class);
         Gate::policy(Invoice::class, InvoicePolicy::class);
         Gate::policy(InvoiceItem::class, InvoiceItemPolicy::class);
+    }
+
+    /** Limita acciones PAC por usuario y factura, además del throttle API general. */
+    protected function configureRateLimiting(): void
+    {
+        RateLimiter::for('pac-actions', function (Request $request): Limit {
+            $actor = $request->user()?->getAuthIdentifier() ?? $request->ip();
+            $invoice = (string) $request->route('invoice');
+
+            return Limit::perMinute(10)->by($actor.'|'.$invoice);
+        });
     }
 
     /**
