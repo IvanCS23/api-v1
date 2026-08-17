@@ -47,6 +47,22 @@ class InvoicePolicy
         return $this->canManagePac($user, $invoice);
     }
 
+    public function issueBusiness(User $user, Invoice $invoice): bool
+    {
+        return $this->canManagePac($user, $invoice);
+    }
+
+    public function cancelBusiness(User $user, Invoice $invoice): bool
+    {
+        if ($user->company_id !== $invoice->company_id) {
+            return false;
+        }
+
+        $hasAnyFiscalIdentity = filled($invoice->pac_external_id) || filled($invoice->cfdi_uuid);
+
+        return ! $hasAnyFiscalIdentity || $this->canManagePac($user, $invoice);
+    }
+
     public function managePacArtifacts(User $user, Invoice $invoice): bool
     {
         return $this->canManagePac($user, $invoice);

@@ -23,7 +23,15 @@ return [
         env('FRONTEND_URL', 'http://localhost:3000'),
     ],
 
-    'allowed_origins_patterns' => [],
+    // En desarrollo también se accede mediante la IP privada de Tailscale.
+    // La excepción queda limitada a APP_ENV=local; producción continúa
+    // aceptando únicamente FRONTEND_URL.
+    'allowed_origins_patterns' => env('APP_ENV') === 'local'
+        ? [
+            '#^https?://(?:localhost|127\.0\.0\.1)(?::\d+)?$#',
+            '#^https?://100\.(?:6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.\d{1,3}\.\d{1,3}(?::\d+)?$#',
+        ]
+        : [],
 
     'allowed_headers' => ['Content-Type', 'Accept', 'Authorization', 'X-Requested-With'],
 
