@@ -3,6 +3,7 @@
 use App\Enums\InvoiceStatus;
 use App\Enums\TaxFactorType;
 use App\Enums\TaxType;
+use App\Exceptions\SaleAlreadyInvoicedException;
 use App\Models\Client;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -11,6 +12,7 @@ use App\Models\Sale;
 use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
 use App\Models\User;
+use App\Services\Billing\SaleToInvoiceConverter;
 use App\Support\Tenant\CurrentTenant;
 
 /**
@@ -205,7 +207,7 @@ test('una empresa no puede listar ni ver facturas de otra empresa', function () 
 
     $index = $this->actingAs($userB, 'api')->getJson('/api/invoices');
     $index->assertOk();
-    expect($index->json())->toHaveCount(1);
+    expect($index->json('data'))->toHaveCount(1);
 
     $this->actingAs($userB, 'api')->getJson("/api/invoices/{$invoiceA->id}")->assertNotFound();
 });
@@ -236,11 +238,11 @@ test('el converter rechaza directamente una segunda conversión bajo el lock (de
     $product = Product::factory()->create(['company_id' => $company->id]);
     $sale = billableSale($user, $client, $product);
 
-    $converter = app(\App\Services\Billing\SaleToInvoiceConverter::class);
+    $converter = app(SaleToInvoiceConverter::class);
     $invoice = $converter->convert($sale->fresh());
 
     expect(fn () => $converter->convert($sale->fresh()))
-        ->toThrow(\App\Exceptions\SaleAlreadyInvoicedException::class);
+        ->toThrow(SaleAlreadyInvoicedException::class);
 
     expect(Invoice::where('sale_id', $sale->id)->count())->toBe(1)
         ->and(Invoice::where('sale_id', $sale->id)->first()->id)->toBe($invoice->id);

@@ -5,6 +5,7 @@ use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\EmployeController;
 use App\Http\Controllers\Api\InvoiceArtifactController;
 use App\Http\Controllers\Api\InvoiceBillingController;
+use App\Http\Controllers\Api\InvoiceBusinessActionController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\InvoiceItemController;
 use App\Http\Controllers\Api\InvoicePacActionController;
@@ -120,6 +121,10 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::get('/invoices/{id}', [InvoiceController::class, 'show']);
     Route::get('/invoices/{invoice}/billing', InvoiceBillingController::class)
         ->whereNumber('invoice');
+    Route::post('/invoices/{invoice}/operations/issue', [InvoiceBusinessActionController::class, 'issue'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
+    Route::post('/invoices/{invoice}/operations/cancel', [InvoiceBusinessActionController::class, 'cancel'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
     Route::get('/invoices/{invoice}/cfdi/xml', [InvoiceArtifactController::class, 'cfdiXml'])
         ->whereNumber('invoice');
     Route::get('/invoices/{invoice}/cfdi/pdf', [InvoiceArtifactController::class, 'cfdiPdf'])
@@ -140,7 +145,8 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
         ->whereNumber('invoice')->middleware('throttle:pac-actions');
     Route::delete('/invoices/{id}', [InvoiceController::class, 'destroy']);
 
-    // Invoice workflow (transiciones de estado vía acciones dedicadas)
+    // Invoice workflow legacy: transiciones ERP locales, NO contactan al PAC.
+    // Se conservan por compatibilidad; consumidores nuevos deben usar /operations/*.
     Route::post('/invoices/{id}/ready', [InvoiceController::class, 'ready']);
     Route::post('/invoices/{id}/issue', [InvoiceController::class, 'issue']);
     Route::post('/invoices/{id}/cancel', [InvoiceController::class, 'cancel']);

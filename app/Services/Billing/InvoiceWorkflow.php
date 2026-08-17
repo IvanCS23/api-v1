@@ -71,6 +71,77 @@ class InvoiceWorkflow
         });
     }
 
+    /**
+     * Preparación idempotente para la operación empresarial de emisión.
+     * El lock sólo protege la transición ERP; ningún HTTP ocurre aquí.
+     */
+    public function prepareForOrchestratedIssue(Invoice $invoice): Invoice
+    {
+        return DB::transaction(function () use ($invoice): Invoice {
+            $locked = $this->lockedInvoice($invoice);
+
+            if ($locked->status === InvoiceStatus::Issued) {
+                return $locked;
+            }
+
+            $this->assertTransition($locked, [InvoiceStatus::Ready], 'preparar para emisión');
+
+            $locked->forceFill([
+                'status' => InvoiceStatus::Issued,
+                'issued_at' => $locked->issued_at ?? now(),
+            ])->save();
+
+            return $locked;
+        });
+    }
+
+    /**
+     * Converge el ERP sólo cuando no existe identidad CFDI o cuando el
+     * PAC ya confirmó pac_status=canceled. Nunca convierte silently un
+     * CFDI valid en una cancelación ERP final.
+     */
+    public function convergeOrchestratedCancellation(Invoice $invoice): Invoice
+    {
+        return DB::transaction(function () use ($invoice): Invoice {
+            $locked = $this->lockedInvoice($invoice);
+            $hasNoFiscalIdentity = blank($locked->pac_external_id)
+                && blank($locked->cfdi_uuid)
+                && $locked->pac_status === null
+                && $locked->pac_issue_status !== 'succeeded'
+                && $locked->pac_issue_status !== 'pending'
+                && $locked->pac_issue_status !== 'reconciliation_required'
+                && ! $locked->pac_reconciliation_required;
+            $hasConfirmedFiscalCancellation = filled($locked->pac_external_id)
+                && filled($locked->cfdi_uuid)
+                && $locked->pac_status === 'canceled';
+
+            if (! $hasNoFiscalIdentity && ! $hasConfirmedFiscalCancellation) {
+                throw new WorkflowTransitionException(sprintf(
+                    'No se puede converger la cancelación de la factura [%d] sin confirmación fiscal segura.',
+                    $locked->id,
+                ));
+            }
+
+            if ($locked->status === InvoiceStatus::Cancelled) {
+                return $locked;
+            }
+
+            if (! in_array($locked->status, [InvoiceStatus::Draft, InvoiceStatus::Ready, InvoiceStatus::Issued], true)) {
+                throw new WorkflowTransitionException(sprintf(
+                    'No se puede converger la cancelación de una factura en estado "%s".',
+                    $locked->status->value,
+                ));
+            }
+
+            $locked->forceFill([
+                'status' => InvoiceStatus::Cancelled,
+                'cancelled_at' => $locked->cancelled_at ?? now(),
+            ])->save();
+
+            return $locked;
+        });
+    }
+
     public function issue(Invoice $invoice): Invoice
     {
         return DB::transaction(function () use ($invoice): Invoice {

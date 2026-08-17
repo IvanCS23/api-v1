@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\Billing;
 
+use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -21,6 +22,7 @@ class InvoiceBillingResource extends JsonResource
             'id' => $this->id,
             'folio' => $this->folio,
             'status' => $this->status?->value,
+            'actions' => app(InvoiceBusinessCapabilitiesService::class)->for($this->resource, $request->user()),
             'pac' => [
                 'provider' => $this->pac_provider,
                 'status' => $this->pac_status,

@@ -8,6 +8,8 @@ use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
 use App\Exceptions\Billing\InvoiceNotReadyForPacException;
+use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
+use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConflictException;
@@ -42,6 +44,16 @@ class InvoicePacActionExceptionResponder
         }
 
         [$status, $code, $message] = match (true) {
+            $error instanceof InvoiceBusinessCancellationIncompleteException => [
+                409,
+                'INVOICE_CANCELLATION_NOT_COMPLETED',
+                'La cancelación fiscal no fue aceptada; la factura ERP permanece activa.',
+            ],
+            $error instanceof InvoiceLifecycleInconsistentException => [
+                409,
+                'INVOICE_LIFECYCLE_INCONSISTENT',
+                'Los estados ERP y fiscal requieren revisión antes de continuar.',
+            ],
             $error instanceof CancellationReceiptIdentityMismatchException => [
                 409,
                 CancellationReceiptIdentityMismatchException::ERROR_CODE,
