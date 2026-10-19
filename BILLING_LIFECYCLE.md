@@ -96,6 +96,13 @@ Los comandos `billing:facturapi-test-*` usan el trait
 `GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test` y llave
 con el prefijo del modo; nunca imprimen la llave.
 
+### Logs
+
+Los logs estructurados `billing.invoice.*` nunca contienen `pac_external_id`
+completo: `pac_issue_attempt`, `pac_stamp_attempt` y `pac_cancellation` lo
+enmascaran (`8 caracteres...4 caracteres`). Tampoco contienen UUID, payloads,
+llaves ni errores crudos del PAC.
+
 ### Política de reintentos
 
 | Operación | `idempotency_key` | Reintento ante `ConnectionException` |

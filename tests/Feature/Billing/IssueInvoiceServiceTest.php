@@ -229,7 +229,7 @@ test('logging: registra invoice_id, company_id, pac_provider, pac_issue_status, 
 
     $invoice = issuedInvoiceForIssueServiceTest();
 
-    Http::fake(['*' => Http::response(['id' => 'inv_log', 'status' => 'valid'], 200)]);
+    Http::fake(['*' => Http::response(['id' => 'inv_log_masking_0001', 'status' => 'valid'], 200)]);
 
     $updated = app(IssueInvoiceService::class)->issue($invoice);
 
@@ -241,7 +241,8 @@ test('logging: registra invoice_id, company_id, pac_provider, pac_issue_status, 
                 ->and($context['company_id'])->toBe($updated->company_id)
                 ->and($context['pac_provider'])->toBe('facturapi')
                 ->and($context['pac_issue_status'])->toBe('succeeded')
-                ->and($context['pac_external_id'])->toBe('inv_log')
+                // Fase 6.19: el identificador remoto se enmascara en logs.
+                ->and($context['pac_external_id'])->toBe('inv_log_...0001')
                 ->and($context['attempt'])->toBe(1)
                 ->and($context)->not->toHaveKey('pac_response')
                 ->and($context)->not->toHaveKey('cfdi_uuid')
@@ -249,6 +250,7 @@ test('logging: registra invoice_id, company_id, pac_provider, pac_issue_status, 
 
             $serialized = json_encode($context);
             expect($serialized)->not->toContain('sk_test_ISSUE_SERVICE')
+                ->and($serialized)->not->toContain('inv_log_masking_0001')
                 ->and($serialized)->not->toContain('Bearer')
                 ->and($serialized)->not->toContain('Authorization');
 

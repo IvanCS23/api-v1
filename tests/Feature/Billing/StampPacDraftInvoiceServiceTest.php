@@ -28,6 +28,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * StampPacDraftInvoiceService (Fase 6.2.5): timbrado explícito de un
@@ -743,4 +744,28 @@ test('una respuesta atrasada de /stamp nunca sobrescribe una emisión ya finaliz
     // Nuestra propia llamada "perdedora" nunca vuelve a disparar el evento
     // — ya se resolvió por la otra vía antes de nuestro commit.
     Event::assertNotDispatched(InvoiceIssued::class);
+});
+
+test('el log de intento de timbrado enmascara pac_external_id (Fase 6.19)', function () {
+    $company = Company::factory()->create();
+    $invoice = draftReadyInvoiceForStampTest($company);
+    app(CurrentTenant::class)->set($company->id);
+    $raw = (string) $invoice->pac_draft_external_id;
+    $logged = [];
+    Log::listen(function ($message) use (&$logged) {
+        if ($message->message === 'billing.invoice.pac_stamp_attempt') {
+            $logged[] = $message->context;
+        }
+    });
+
+    Http::fake([
+        "*/invoices/{$raw}" => Http::response(fakeSyncedReadyDraftBody($invoice), 200),
+        "*/invoices/{$raw}/stamp" => Http::response(fakeStampSuccessBody($invoice), 200),
+    ]);
+
+    app(StampPacDraftInvoiceService::class)->stamp($invoice);
+
+    expect($logged)->toHaveCount(1)
+        ->and($logged[0]['pac_external_id'])->toBe(mb_substr($raw, 0, 8).'...'.mb_substr($raw, -4))
+        ->and(json_encode($logged[0]))->not->toContain($raw);
 });
