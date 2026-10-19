@@ -101,6 +101,15 @@ class InvoiceHealthEvaluator
                 : new Finding('cancellation_pending_stale', Health::Recoverable, Action::Reconcile, $age);
         }
 
+        // Fase 6.19: DELETE reservado cuya respuesta aún no se persiste. Más
+        // allá de billing.cancel_in_flight_minutes se asume proceso caído.
+        if ($invoice->pac_cancel_request_status === CancelInvoiceWithPacService::REQUEST_IN_FLIGHT) {
+            $age = $this->ageInMinutes($invoice->pac_cancel_started_at, $now);
+            $findings[] = $age !== null && $age < (int) config('billing.cancel_in_flight_minutes')
+                ? new Finding('cancellation_request_in_flight', Health::Transient, Action::Wait, $age)
+                : new Finding('cancellation_request_in_flight_stale', Health::Recoverable, Action::Reconcile, $age);
+        }
+
         if ($invoice->cancellation_status === 'accepted' && $invoice->pac_status !== 'canceled') {
             $findings[] = new Finding('cancellation_accepted_not_canceled', Health::Recoverable, Action::Reconcile);
         }

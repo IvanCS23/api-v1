@@ -116,6 +116,32 @@ Los códigos estables de error de Facturapi (`body.code`) incluyen
 `idempotency_key_in_use` (docs.facturapi.io, "Error handling"); su HTTP status
 no está documentado y todavía no se mapean de forma específica.
 
+### Reserva de cancelación
+
+`CancelInvoiceWithPacService` reserva la solicitud bajo `lockForUpdate` antes
+del DELETE (mismo patrón que la reserva de timbrado):
+
+1. revalida `assertCancellable()` sobre la fila bloqueada;
+2. rechaza `pac_cancel_request_status=in_flight`
+   (`409 PAC_CANCELLATION_IN_PROGRESS`) o `reconciliation_required`
+   (`409 PAC_RECONCILIATION_REQUIRED`);
+3. marca `in_flight`, `pac_cancel_started_at` y `pac_cancel_attempts`, y hace
+   commit antes de la red; recién entonces registra `CancellationRequested`.
+
+Desenlace: respuesta del PAC → `completed` (aunque la cancelación quede
+`pending`); fallo definitivo → `failed` (permite una nueva solicitud
+explícita); fallo ambiguo o timeout → `reconciliation_required` +
+`pac_reconciliation_required`.
+
+`pac_cancel_request_status` describe la solicitud local, no
+`cancellation_status`. `actions.cancellation_mode` es `null` mientras la
+solicitud está `in_flight` o `reconciliation_required`, y
+`actions.can_reconcile` la libera: si el PAC registra la solicitud o el CFDI
+está cancelado queda `completed`; si no, se limpia, salvo una `in_flight` más
+reciente que `billing.cancel_in_flight_minutes` (5 min), que puede seguir en
+curso. `billing:health` reporta `cancellation_request_in_flight`
+(transient) y `cancellation_request_in_flight_stale` (recoverable).
+
 ## Salud del ciclo (diagnóstico)
 
 `php artisan billing:health` clasifica cada Invoice comparando el estado ERP
@@ -147,6 +173,7 @@ estado de la factura ni dispara `--fail-on`.
 | `reconciliation_required` | recoverable | reconcile |
 | `issue_failed`, `erp_issued_without_cfdi` | recoverable | operations_issue |
 | `cfdi_canceled_erp_not_converged` | recoverable | operations_cancel |
+| `cancellation_request_in_flight` / `cancellation_request_in_flight_stale` | transient / recoverable | wait / reconcile |
 | `erp_cancelled_cfdi_valid` (ERP `cancelled`, CFDI `valid`, sin cancelación en curso; incluye rechazo/expiración) | recoverable | manual_review |
 | `cancellation_accepted_not_canceled`, `identity_incomplete`, `remote_draft_valid_unlinked` | recoverable | reconcile |
 | `cfdi_artifacts_missing` | valid (informativo) | fetch_artifacts |

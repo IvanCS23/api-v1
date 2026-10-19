@@ -36,6 +36,11 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * separado de `pac_status` (que describe el resultado ya confirmado
  * por el PAC).
  *
+ * Reserva de cancelación (Fase 6.19, migración
+ * `add_pac_cancel_control_to_invoices_table`): `pac_cancel_request_status`,
+ * `pac_cancel_started_at`, `pac_cancel_attempts` — tampoco fillable;
+ * describen la SOLICITUD local de DELETE, no `cancellation_status`.
+ *
  * `payment_form`/`payment_method` (Fase 6.2.2, migración
  * `add_payment_form_to_invoices_table`, aún no ejecutada): snapshot
  * fiscal, mismo criterio que `client_*` — SÍ son fillable (los fija
@@ -140,6 +145,8 @@ class Invoice extends Model
         'pac_issue_started_at' => 'immutable_datetime',
         'pac_issue_attempts' => 'integer',
         'pac_reconciliation_required' => 'boolean',
+        'pac_cancel_started_at' => 'immutable_datetime',
+        'pac_cancel_attempts' => 'integer',
         'pac_draft_ready_to_stamp' => 'boolean',
         'pac_draft_created_at' => 'immutable_datetime',
         'pac_draft_last_sync_at' => 'immutable_datetime',

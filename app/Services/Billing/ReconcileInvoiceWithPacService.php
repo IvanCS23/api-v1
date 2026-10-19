@@ -198,6 +198,12 @@ class ReconcileInvoiceWithPacService
                 $attributes['pac_draft_status'] = $result->status;
             }
 
+            $cancelRequestStatus = $this->resolvedCancelRequestStatus($locked, $result);
+
+            if ($cancelRequestStatus !== $locked->pac_cancel_request_status) {
+                $attributes['pac_cancel_request_status'] = $cancelRequestStatus;
+            }
+
             $locked->forceFill($attributes)->save();
 
             if ($isValid && ! $hadCfdiBefore) {
@@ -353,6 +359,41 @@ class ReconcileInvoiceWithPacService
         return mb_substr($message, 0, 500);
     }
 
+    /**
+     * Fase 6.19: resuelve la reserva local de cancelación con el estado
+     * remoto. Si el PAC ya registra la solicitud (o el CFDI está
+     * cancelado) la solicitud quedó `completed`. Si no la registra, se
+     * libera (null) sólo cuando era ambigua o una reserva `in_flight`
+     * abandonada; una `in_flight` reciente puede seguir en curso y se
+     * conserva para no habilitar un segundo DELETE.
+     */
+    private function resolvedCancelRequestStatus(Invoice $locked, PacInvoiceResult $result): ?string
+    {
+        $current = $locked->pac_cancel_request_status;
+
+        if (! in_array($current, [
+            CancelInvoiceWithPacService::REQUEST_IN_FLIGHT,
+            CancelInvoiceWithPacService::REQUEST_RECONCILIATION_REQUIRED,
+        ], true)) {
+            return $current;
+        }
+
+        if ($result->status === 'canceled'
+            || in_array($result->cancellationStatus, ['pending', 'verifying', 'accepted', 'rejected', 'expired'], true)) {
+            return CancelInvoiceWithPacService::REQUEST_COMPLETED;
+        }
+
+        if ($current === CancelInvoiceWithPacService::REQUEST_RECONCILIATION_REQUIRED) {
+            return null;
+        }
+
+        $abandonedBefore = now()->subMinutes((int) config('billing.cancel_in_flight_minutes'));
+
+        return $locked->pac_cancel_started_at === null || $locked->pac_cancel_started_at->lessThanOrEqualTo($abandonedBefore)
+            ? null
+            : $current;
+    }
+
     /** @return list<string> */
     private function relevantChanges(Invoice $before, Invoice $after): array
     {
@@ -363,6 +404,7 @@ class ReconcileInvoiceWithPacService
             'pac_external_id',
             'pac_issue_status',
             'pac_reconciliation_required',
+            'pac_cancel_request_status',
         ];
 
         return array_values(array_filter(

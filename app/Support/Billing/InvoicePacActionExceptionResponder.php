@@ -22,6 +22,7 @@ use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Exceptions\InvoiceAlreadyIssuedException;
+use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
@@ -90,6 +91,11 @@ class InvoicePacActionExceptionResponder
                 409,
                 'INVOICE_ALREADY_ISSUED',
                 'La factura ya cuenta con una emisión fiscal.',
+            ],
+            $error instanceof InvoiceCancellationInProgressException => [
+                409,
+                'PAC_CANCELLATION_IN_PROGRESS',
+                'La cancelación fiscal ya está en curso.',
             ],
             $error instanceof InvoiceIssuanceInProgressException => [
                 409,

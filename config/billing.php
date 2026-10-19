@@ -18,6 +18,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Reserva de cancelación (Fase 6.19)
+    |--------------------------------------------------------------------------
+    |
+    | Minutos tras los cuales una solicitud `in_flight` se considera
+    | abandonada (proceso caído a mitad del DELETE). Sólo entonces la
+    | reconciliación puede liberarla si el PAC no registra la solicitud.
+    | Holgado frente a `services.facturapi.timeout` (15 s).
+    |
+    */
+
+    'cancel_in_flight_minutes' => (int) env('BILLING_CANCEL_IN_FLIGHT_MINUTES', 5),
+
+    /*
+    |--------------------------------------------------------------------------
     | Salud del ciclo de facturación (Fase 6.18)
     |--------------------------------------------------------------------------
     |

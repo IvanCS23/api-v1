@@ -60,6 +60,7 @@ class InvoiceBusinessCapabilitiesService
     public function cancellationMode(Invoice $invoice): ?string
     {
         if ($this->requiresReview($invoice)
+            || $this->hasOpenCancelRequest($invoice)
             || $invoice->pac_issue_status === 'pending'
             || in_array($invoice->cancellation_status, ['pending', 'verifying'], true)) {
             return null;
@@ -105,8 +106,22 @@ class InvoiceBusinessCapabilitiesService
 
         return $this->requiresReview($invoice)
             || $hasPartialIdentity
+            || $this->hasOpenCancelRequest($invoice)
             || $invoice->pac_status === 'pending'
             || $invoice->pac_draft_status === 'valid';
+    }
+
+    /**
+     * Fase 6.19: una solicitud de cancelación reservada (`in_flight`) o
+     * ambigua bloquea un nuevo DELETE hasta que la reconciliación la
+     * resuelva.
+     */
+    public function hasOpenCancelRequest(Invoice $invoice): bool
+    {
+        return in_array($invoice->pac_cancel_request_status, [
+            CancelInvoiceWithPacService::REQUEST_IN_FLIGHT,
+            CancelInvoiceWithPacService::REQUEST_RECONCILIATION_REQUIRED,
+        ], true);
     }
 
     public function hasCompleteFiscalIdentity(Invoice $invoice): bool
