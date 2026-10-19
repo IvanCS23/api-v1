@@ -210,7 +210,8 @@ class FacturapiProvider implements PacProvider
      */
     public function stampDraftInvoice(string $externalId): PacInvoiceResult
     {
-        $response = $this->client()->post("/invoices/{$externalId}/stamp");
+        // Sin idempotency_key: nunca se reintenta (ver client()).
+        $response = $this->client(retryOnConnectionFailure: false)->post("/invoices/{$externalId}/stamp");
 
         $this->assertSuccessful($response);
 
@@ -250,7 +251,8 @@ class FacturapiProvider implements PacProvider
             $query['substitution'] = $substitutionUuid;
         }
 
-        $response = $this->client()
+        // Sin idempotency_key: nunca se reintenta (ver client()).
+        $response = $this->client(retryOnConnectionFailure: false)
             ->withQueryParameters($query)
             ->delete("/invoices/{$externalId}");
 
@@ -476,26 +478,40 @@ class FacturapiProvider implements PacProvider
         return $value === null || $value === '' ? null : $value;
     }
 
-    private function client(): PendingRequest
+    /**
+     * Política de reintentos (Fase 6.19):
+     *
+     * - Consultas/descargas (GET) y escrituras con `idempotency_key`
+     *   (crear/actualizar borrador, createInvoice): un reintento ante
+     *   ConnectionException; repetirlas no duplica efectos.
+     * - Escrituras SIN llave (POST /stamp, DELETE de cancelación): nunca
+     *   se reintentan. Un timeout de lectura no distingue "no llegó" de
+     *   "llegó y se procesó"; la ConnectionException se propaga y el
+     *   servicio la clasifica como ambigua (reconciliation_required).
+     */
+    private function client(bool $retryOnConnectionFailure = true): PendingRequest
     {
         // Fase 6.19: toda petición (escritura, consulta o descarga) pasa
         // por aquí; si la llave no corresponde al modo configurado se
         // aborta antes de construir el request — el PAC nunca recibe nada.
         (new PacCredentialGuard($this->mode, $this->apiKey))->assertConfigured();
 
-        return Http::baseUrl($this->baseUrl)
+        $request = Http::baseUrl($this->baseUrl)
             ->withToken($this->apiKey)
             ->acceptJson()
             ->asJson()
             ->connectTimeout($this->connectTimeout)
-            ->timeout($this->timeout)
-            ->retry(2, 200, function (\Throwable $exception): bool {
-                // Solo errores transitorios de conexión (timeout, DNS, rechazo
-                // de conexión) son seguros de reintentar a ciegas — nunca una
-                // respuesta HTTP ya recibida (4xx/5xx), que puede representar
-                // un timbrado parcial o una operación no garantizada idempotente.
-                return $exception instanceof ConnectionException;
-            }, throw: false);
+            ->timeout($this->timeout);
+
+        if (! $retryOnConnectionFailure) {
+            return $request;
+        }
+
+        return $request->retry(2, 200, function (\Throwable $exception): bool {
+            // Nunca una respuesta HTTP ya recibida (4xx/5xx): sólo fallos de
+            // conexión, y sólo en operaciones seguras de repetir.
+            return $exception instanceof ConnectionException;
+        }, throw: false);
         // throw:false es obligatorio aquí: por defecto, retry() lanza su
         // propia RequestException genérica cuando la respuesta final no
         // es exitosa, sin pasar por assertSuccessful() — eso reemplazaría

@@ -96,6 +96,26 @@ Los comandos `billing:facturapi-test-*` usan el trait
 `GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test` y llave
 con el prefijo del modo; nunca imprimen la llave.
 
+### Política de reintentos
+
+| Operación | `idempotency_key` | Reintento ante `ConnectionException` |
+|---|---|---|
+| GET (consultas y descargas) | n/a | 1 reintento |
+| POST/PUT de borrador, `createInvoice` | sí (cuerpo JSON) | 1 reintento |
+| `POST /invoices/{id}/stamp` | no | nunca |
+| `DELETE /invoices/{id}` (cancelación) | no | nunca |
+
+Un timeout de lectura no distingue "no llegó" de "llegó y se procesó". Por eso
+el timbrado y la cancelación nunca se reenvían: la `ConnectionException` se
+propaga y el servicio la clasifica como ambigua (`reconciliation_required`).
+Ninguna respuesta HTTP ya recibida (4xx/5xx) se reintenta.
+
+Los códigos estables de error de Facturapi (`body.code`) incluyen
+`invoice_already_stamped`, `stamping_in_progress`,
+`invoice_cancellation_in_progress`, `draft_update_in_progress` e
+`idempotency_key_in_use` (docs.facturapi.io, "Error handling"); su HTTP status
+no está documentado y todavía no se mapean de forma específica.
+
 ## Salud del ciclo (diagnóstico)
 
 `php artisan billing:health` clasifica cada Invoice comparando el estado ERP

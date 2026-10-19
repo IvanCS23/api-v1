@@ -581,9 +581,12 @@ test('un timeout/conexión interrumpida en /stamp es AMBIGUO: pac_issue_status=r
     $invoice = draftReadyInvoiceForStampTest($company);
     app(CurrentTenant::class)->set($company->id);
 
+    $stampAttempts = 0;
     Http::fake([
         "*/invoices/{$invoice->pac_draft_external_id}" => Http::response(fakeSyncedReadyDraftBody($invoice), 200),
-        "*/invoices/{$invoice->pac_draft_external_id}/stamp" => function () {
+        "*/invoices/{$invoice->pac_draft_external_id}/stamp" => function () use (&$stampAttempts) {
+            $stampAttempts++;
+
             throw new ConnectionException('Connection timed out después de 5 segundos');
         },
     ]);
@@ -594,7 +597,9 @@ test('un timeout/conexión interrumpida en /stamp es AMBIGUO: pac_issue_status=r
     $fresh = $invoice->fresh();
     expect($fresh->pac_issue_status)->toBe('reconciliation_required')
         ->and($fresh->pac_reconciliation_required)->toBeTrue()
-        ->and($fresh->cfdi_uuid)->toBeNull();
+        ->and($fresh->cfdi_uuid)->toBeNull()
+        // Fase 6.19: tampoco la capa HTTP reenvía /stamp tras el timeout.
+        ->and($stampAttempts)->toBe(1);
 });
 
 test('una respuesta 200 no parseable/inesperada en /stamp es AMBIGUA: pac_issue_status=reconciliation_required', function () {
