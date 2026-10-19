@@ -13,6 +13,8 @@ use App\Models\Invoice;
 use App\Models\User;
 use App\Services\Billing\CancelInvoiceWithPacService;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
+use App\Services\Billing\InvoiceWorkflow;
+use App\Services\Billing\IssueInvoiceService;
 use App\Services\Billing\ReconcileInvoiceWithPacService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Http\Client\ConnectionException;
@@ -226,23 +228,74 @@ test('capabilities: completed o failed no bloquean una nueva solicitud válida',
     expect(app(InvoiceBusinessCapabilitiesService::class)->for($invoice, $user)['cancellation_mode'])->toBe('pac');
 })->with(['completed', 'failed']);
 
-test('los endpoints de cancelación responden 409 PAC_CANCELLATION_IN_PROGRESS con una reserva activa', function (string $uri) {
-    $invoice = phase619CancelableInvoice(['pac_cancel_request_status' => 'in_flight', 'pac_cancel_started_at' => now()]);
+function phase619OperationsCancel(Invoice $invoice)
+{
     $user = User::factory()->create(['company_id' => $invoice->company_id, 'role' => UserRole::Admin]);
-    Http::fake();
     app(CurrentTenant::class)->clear();
 
-    $response = $this->actingAs($user, 'api')
-        ->postJson(str_replace('{id}', (string) $invoice->id, $uri), ['confirm' => true, 'motive' => '02']);
+    return test()->actingAs($user, 'api')
+        ->postJson("/api/invoices/{$invoice->id}/operations/cancel", ['confirm' => true, 'motive' => '02']);
+}
 
-    // operations/cancel no ofrece la acción (capabilities) y pac/cancel
-    // llega a la reserva: ambos rechazan sin HTTP.
-    expect($response->status())->toBe(409);
+test('operations/cancel con reserva in_flight previa responde PAC_CANCELLATION_IN_PROGRESS', function () {
+    $invoice = phase619CancelableInvoice(['pac_cancel_request_status' => 'in_flight', 'pac_cancel_started_at' => now()]);
+    Http::fake();
+
+    phase619OperationsCancel($invoice)
+        ->assertStatus(409)
+        ->assertJsonPath('code', 'PAC_CANCELLATION_IN_PROGRESS');
+
     Http::assertNothingSent();
-})->with([
-    'pac/cancel' => '/api/invoices/{id}/pac/cancel',
-    'operations/cancel' => '/api/invoices/{id}/operations/cancel',
-]);
+    expect(phase619RequestedEvents())->toBe(0);
+});
+
+test('operations/cancel con reserva reconciliation_required responde PAC_RECONCILIATION_REQUIRED', function (bool $flag) {
+    // Con y sin el flag general: antes, sin flag, caía en INVOICE_LIFECYCLE_INCONSISTENT.
+    $invoice = phase619CancelableInvoice([
+        'pac_cancel_request_status' => 'reconciliation_required',
+        'pac_reconciliation_required' => $flag,
+    ]);
+    Http::fake();
+
+    phase619OperationsCancel($invoice)
+        ->assertStatus(409)
+        ->assertJsonPath('code', 'PAC_RECONCILIATION_REQUIRED');
+
+    Http::assertNothingSent();
+})->with(['con flag' => true, 'sin flag' => false]);
+
+test('carrera: la verificación previa pasa pero la reserva bajo lock ya está tomada -> PAC_CANCELLATION_IN_PROGRESS', function () {
+    $invoice = phase619CancelableInvoice();
+    Http::fake();
+
+    // Otro proceso toma la reserva justo después de la verificación previa
+    // del orquestador y antes de reserve() bajo lock.
+    app()->bind(InvoiceWorkflow::class, fn ($app) => new class($app->make(IssueInvoiceService::class), $app->make(ReconcileInvoiceWithPacService::class), $app->make(CancelInvoiceWithPacService::class)) extends InvoiceWorkflow
+    {
+        public function cancelWithPac(Invoice $invoice, CfdiCancellationMotive $motive, ?string $substitutionUuid = null): Invoice
+        {
+            DB::table('invoices')->where('id', $invoice->id)->update([
+                'pac_cancel_request_status' => 'in_flight',
+                'pac_cancel_started_at' => now(),
+                'pac_cancel_attempts' => 1,
+            ]);
+
+            return parent::cancelWithPac($invoice, $motive, $substitutionUuid);
+        }
+    });
+
+    phase619OperationsCancel($invoice)
+        ->assertStatus(409)
+        ->assertJsonPath('code', 'PAC_CANCELLATION_IN_PROGRESS');
+
+    $row = DB::table('invoices')->where('id', $invoice->id)->first();
+    expect($row->pac_cancel_request_status)->toBe('in_flight')
+        ->and((int) $row->pac_cancel_attempts)->toBe(1)
+        ->and($row->cancellation_status)->toBe('none')
+        ->and($row->status)->toBe('issued')
+        ->and(phase619RequestedEvents())->toBe(0);
+    Http::assertNothingSent();
+});
 
 test('pac/cancel expone el código PAC_CANCELLATION_IN_PROGRESS', function () {
     $invoice = phase619CancelableInvoice(['pac_cancel_request_status' => 'in_flight', 'pac_cancel_started_at' => now()]);
