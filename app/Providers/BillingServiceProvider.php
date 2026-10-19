@@ -22,6 +22,7 @@ class BillingServiceProvider extends ServiceProvider
                 apiKey: (string) config('services.facturapi.test_key'),
                 timeout: (int) config('services.facturapi.timeout'),
                 connectTimeout: (int) config('services.facturapi.connect_timeout'),
+                mode: config('billing.pac_mode'),
             );
         });
     }

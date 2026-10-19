@@ -10,6 +10,7 @@ use App\Exceptions\Billing\PacReconciliationRequiredException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacCredentialGuard;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
@@ -59,6 +60,8 @@ class OrchestrateInvoiceCancellationService
         if ($motive === null) {
             throw new InvoiceCannotBeCancelledException($invoice, 'la cancelación fiscal requiere motivo SAT');
         }
+
+        PacCredentialGuard::fromConfig()->assertConfigured();
 
         $result = $this->workflow->cancelWithPac($invoice, $motive, $substitutionUuid);
 

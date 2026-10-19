@@ -7,11 +7,12 @@ use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
-use App\Exceptions\Billing\InvoiceNotReadyForPacException;
 use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
 use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
+use App\Exceptions\Billing\InvoiceNotReadyForPacException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
@@ -114,6 +115,11 @@ class InvoicePacActionExceptionResponder
                 422,
                 'PAC_VALIDATION_FAILED',
                 'El proveedor fiscal rechazó los datos de la operación.',
+            ],
+            $error instanceof PacConfigurationException => [
+                503,
+                'PAC_CONFIGURATION_INVALID',
+                'El proveedor fiscal no está configurado para operar.',
             ],
             $error instanceof PacAuthenticationException => [
                 503,

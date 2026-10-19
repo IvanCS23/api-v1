@@ -3,6 +3,7 @@
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
@@ -70,7 +71,7 @@ test('el adaptador se construye con el timeout y connect_timeout configurados', 
         ->and($reflection->getProperty('connectTimeout')->getValue($provider))->toBe(3);
 });
 
-test('sin API key configurada, la petición igual se envía con un Bearer vacío, sin romper ni enviar la palabra null', function () {
+test('sin API key configurada no se envía ninguna petición (Fase 6.19: antes salía con Bearer vacío)', function () {
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => null,
@@ -78,16 +79,11 @@ test('sin API key configurada, la petición igual se envía con un Bearer vacío
     Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'pending'], 200)]);
 
     $invoice = fakeInvoiceForConfigTest();
-    app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
 
-    Http::assertSent(function ($request) {
-        $auth = trim($request->header('Authorization')[0] ?? '');
+    expect(fn () => app(PacProvider::class)->createInvoice(requestForConfigTest($invoice)))
+        ->toThrow(PacConfigurationException::class);
 
-        expect($auth)->toBe('Bearer')
-            ->and($auth)->not->toContain('null');
-
-        return true;
-    });
+    Http::assertNothingSent();
 });
 
 test('la API key nunca aparece en el mensaje ni en el código de una excepción PAC', function () {

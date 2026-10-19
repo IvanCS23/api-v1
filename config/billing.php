@@ -4,6 +4,20 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Modo del PAC (Fase 6.19)
+    |--------------------------------------------------------------------------
+    |
+    | La llave de Facturapi debe corresponder a este modo (test → sk_test_,
+    | live → sk_live_) o no se envía ninguna petición, ni escrituras ni
+    | descargas. En esta fase sólo `test` está soportado: `live` se rechaza
+    | hasta una fase explícita de producción.
+    |
+    */
+
+    'pac_mode' => env('BILLING_PAC_MODE', 'test'),
+
+    /*
+    |--------------------------------------------------------------------------
     | Salud del ciclo de facturación (Fase 6.18)
     |--------------------------------------------------------------------------
     |

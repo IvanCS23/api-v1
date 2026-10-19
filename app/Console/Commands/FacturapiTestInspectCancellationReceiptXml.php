@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\GuardsFacturapiTestCommand;
 use App\Exceptions\Billing\PacException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
@@ -16,6 +17,8 @@ use Throwable;
  */
 class FacturapiTestInspectCancellationReceiptXml extends Command
 {
+    use GuardsFacturapiTestCommand;
+
     protected $signature = 'billing:facturapi-test-cancellation-receipt-inspect
         {invoice : ID de la Invoice cancelada cuyo XML de acuse se inspeccionara}';
 
@@ -23,15 +26,7 @@ class FacturapiTestInspectCancellationReceiptXml extends Command
 
     public function handle(InspectCancellationReceiptXmlService $service): int
     {
-        if (app()->environment('production')) {
-            $this->error('Este comando esta prohibido en production. Solo se ejecuta en entornos local/testing.');
-
-            return self::FAILURE;
-        }
-
-        if (blank(config('services.facturapi.test_key'))) {
-            $this->error('FACTURAPI_TEST_KEY no esta configurada. Configurala con una llave de TEST antes de continuar.');
-
+        if (! $this->passesFacturapiTestGuard()) {
             return self::FAILURE;
         }
 

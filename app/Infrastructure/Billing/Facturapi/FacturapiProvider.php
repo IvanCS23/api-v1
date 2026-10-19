@@ -16,6 +16,7 @@ use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
+use App\Support\Billing\PacCredentialGuard;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
@@ -57,6 +58,7 @@ class FacturapiProvider implements PacProvider
         private readonly string $apiKey,
         private readonly int $timeout,
         private readonly int $connectTimeout,
+        private readonly ?string $mode = PacCredentialGuard::MODE_TEST,
     ) {}
 
     public function name(): string
@@ -476,6 +478,11 @@ class FacturapiProvider implements PacProvider
 
     private function client(): PendingRequest
     {
+        // Fase 6.19: toda petición (escritura, consulta o descarga) pasa
+        // por aquí; si la llave no corresponde al modo configurado se
+        // aborta antes de construir el request — el PAC nunca recibe nada.
+        (new PacCredentialGuard($this->mode, $this->apiKey))->assertConfigured();
+
         return Http::baseUrl($this->baseUrl)
             ->withToken($this->apiKey)
             ->acceptJson()

@@ -79,6 +79,23 @@ Los consumidores de UI nuevos deben usar `/operations/issue` y
 `actions.cancellation_mode`; no expone llaves, payloads, respuestas crudas ni
 claves de idempotencia.
 
+## Seguridad de escrituras PAC
+
+### Modo y llave
+
+`billing.pac_mode` (`BILLING_PAC_MODE`, por omisión `test`) define qué llave
+se acepta: `test` exige prefijo `sk_test_`; `live` (`sk_live_`) **no está
+soportado** en esta fase. `PacCredentialGuard` se evalúa en
+`FacturapiProvider::client()` antes de construir cualquier petición
+(escrituras, consultas y descargas) y en los orquestadores antes de cualquier
+transición ERP. Una configuración inválida lanza `PacConfigurationException`
+(fallo definitivo, `503 PAC_CONFIGURATION_INVALID`): el PAC nunca recibe la
+petición y el ERP no cambia.
+
+Los comandos `billing:facturapi-test-*` usan el trait
+`GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test` y llave
+con el prefijo del modo; nunca imprimen la llave.
+
 ## Salud del ciclo (diagnóstico)
 
 `php artisan billing:health` clasifica cada Invoice comparando el estado ERP

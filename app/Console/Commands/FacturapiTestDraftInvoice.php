@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\GuardsFacturapiTestCommand;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\CreatePacDraftInvoiceService;
@@ -23,6 +24,8 @@ use Throwable;
  */
 class FacturapiTestDraftInvoice extends Command
 {
+    use GuardsFacturapiTestCommand;
+
     /**
      * @var string
      */
@@ -35,15 +38,7 @@ class FacturapiTestDraftInvoice extends Command
 
     public function handle(CreatePacDraftInvoiceService $createDraft): int
     {
-        if (app()->environment('production')) {
-            $this->error('Este comando está prohibido en production. Solo se ejecuta en entornos local/testing.');
-
-            return self::FAILURE;
-        }
-
-        if (blank(config('services.facturapi.test_key'))) {
-            $this->error('FACTURAPI_TEST_KEY no está configurada. Configúrala (solo la llave de TEST, nunca una llave live) antes de continuar.');
-
+        if (! $this->passesFacturapiTestGuard()) {
             return self::FAILURE;
         }
 
