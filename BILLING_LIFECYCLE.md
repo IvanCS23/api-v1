@@ -78,3 +78,77 @@ Los consumidores de UI nuevos deben usar `/operations/issue` y
 `actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile` y
 `actions.cancellation_mode`; no expone llaves, payloads, respuestas crudas ni
 claves de idempotencia.
+
+## Salud del ciclo (diagnóstico)
+
+`php artisan billing:health` clasifica cada Invoice comparando el estado ERP
+con los campos PAC locales. Es exclusivamente read-only: sólo ejecuta
+`SELECT`, nunca hace HTTP al PAC (ni `GET /invoices`, ni `PUT .../status`,
+ni descargas), no emite, no cancela, no reconcilia y no modifica facturas ni
+eventos. Puede ejecutarse en producción.
+
+`InvoiceHealthEvaluator` reutiliza las reglas de
+`InvoiceBusinessCapabilitiesService`; `BillingHealthReportService` recorre las
+empresas fijando `CurrentTenant`, de modo que todas las consultas pasan por
+`CompanyScope`.
+
+Niveles:
+
+- `valid`: ERP y PAC coherentes.
+- `transient`: operación PAC en curso dentro de su ventana esperada.
+- `recoverable`: divergencia que una operación existente resuelve.
+- `invalid`: combinación que ningún flujo debería producir; revisión manual.
+
+Un hallazgo con nivel `valid` es informativo (`"informational": true` en
+JSON, sufijo `(info)` en tabla): se cuenta en `by_code` pero no eleva el
+estado de la factura ni dispara `--fail-on`.
+
+| Código | Nivel | Acción sugerida |
+|---|---|---|
+| `issue_pending_recent` / `issue_pending_stale` | transient / recoverable | wait / reconcile |
+| `cancellation_pending_recent` / `cancellation_pending_stale` | transient / recoverable | wait / reconcile |
+| `reconciliation_required` | recoverable | reconcile |
+| `issue_failed`, `erp_issued_without_cfdi` | recoverable | operations_issue |
+| `cfdi_canceled_erp_not_converged` | recoverable | operations_cancel |
+| `erp_cancelled_cfdi_valid` (ERP `cancelled`, CFDI `valid`, sin cancelación en curso; incluye rechazo/expiración) | recoverable | manual_review |
+| `cancellation_accepted_not_canceled`, `identity_incomplete`, `remote_draft_valid_unlinked` | recoverable | reconcile |
+| `cfdi_artifacts_missing` | valid (informativo) | fetch_artifacts |
+| `receipt_without_cancellation` (acuse sin ninguna solicitud registrada) | valid (informativo) | manual_review |
+| `remote_draft_date_window_risk` | transient (≥48 h) / recoverable (≥72 h) | operations_issue / manual_review |
+| `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
+| `identity_uuid_without_external_id`, `erp_behind_cfdi`, `issue_succeeded_without_valid_cfdi`, `pac_status_without_identity`, `idempotency_key_mismatch` | invalid | manual_review |
+
+El acuse nunca escala por sí mismo:
+
+- ERP emitido + `status=valid` + `cancellation_status=pending` dentro del
+  plazo (con o sin acuse): `transient`.
+- `rejected`/`expired`: el CFDI sigue vigente; con ERP emitido es `valid`.
+- ERP `cancelled` con CFDI `valid` y sin cancelación en curso:
+  `recoverable` (`erp_cancelled_cfdi_valid`).
+- ERP `cancelled` con CFDI `valid` y cancelación en curso: `invalid`
+  (`erp_cancelled_before_pac_confirmation`), porque el ERP sólo debe
+  converger con `pac_status=canceled` confirmado.
+
+`reconciliation_required` no se reporta por separado cuando lo explica una
+emisión o cancelación pendiente, salvo que `pac_issue_status` sea
+`reconciliation_required`. La antigüedad de una cancelación pendiente se mide
+desde el último evento `CancellationRequested` (o `last_pac_sync_at` si no
+existe). El acuse nunca cuenta como prueba de cancelación.
+
+Umbrales en `config/billing.php` (`billing.health.*`):
+
+- Emisión pendiente: 60 min (Facturapi reintenta recuperar un CFDI aceptado
+  con 202 hasta 5 veces cada 10 min).
+- Cancelación pendiente: 96 h = 72 h de plazo del receptor para aceptar o
+  rechazar (durante el cual Facturapi reporta `status=valid` +
+  `cancellation_status=pending`) + 24 h de margen operativo propio, no
+  normativo: el ERP sólo conoce el desenlace al reconciliar.
+- Borrador remoto: 48 h aviso / 72 h límite (un CFDI no puede fecharse más
+  de 72 h atrás).
+
+Opciones: `--company=`, `--invoice=`, `--status=*` (por omisión los no
+válidos), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
+(`transient|recoverable|invalid|none`). Sale con código 1 cuando algún estado
+alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
+folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
+idempotencia, `pac_external_id` ni `cfdi_uuid`.
