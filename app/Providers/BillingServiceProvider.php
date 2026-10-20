@@ -23,6 +23,7 @@ class BillingServiceProvider extends ServiceProvider
                 timeout: (int) config('services.facturapi.timeout'),
                 connectTimeout: (int) config('services.facturapi.connect_timeout'),
                 mode: config('billing.pac_mode'),
+                stampTimezone: config('billing.facturapi.stamp_timezone'),
             );
         });
     }

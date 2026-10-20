@@ -14,6 +14,8 @@ use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacInvoiceNotFoundException;
+use App\Exceptions\Billing\PacOperationInProgressException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
 use App\Exceptions\Billing\PacResourceCanceledException;
@@ -117,6 +119,17 @@ class InvoicePacActionExceptionResponder
                 'PAC_RECONCILIATION_REQUIRED',
                 'El estado de la emisión fiscal es ambiguo y debe reconciliarse antes de continuar.',
             ],
+            // Fase 6.20: antes que PacConflictException, de la que hereda.
+            $error instanceof PacOperationInProgressException => [
+                409,
+                'PAC_OPERATION_IN_PROGRESS',
+                'El proveedor fiscal todavía procesa otra operación sobre este comprobante. Actualiza el estado antes de reintentar.',
+            ],
+            $error instanceof PacInvoiceNotFoundException => [
+                409,
+                'PAC_INVOICE_NOT_FOUND',
+                'El comprobante no existe en el proveedor fiscal con la configuración actual.',
+            ],
             $error instanceof PacValidationException => [
                 422,
                 'PAC_VALIDATION_FAILED',
@@ -130,7 +143,8 @@ class InvoicePacActionExceptionResponder
             $error instanceof PacAuthenticationException => [
                 503,
                 'PAC_AUTHENTICATION_FAILED',
-                'El proveedor fiscal no está disponible temporalmente.',
+                // Fase 6.20: no es transitorio; reintentar no lo resuelve.
+                'El proveedor fiscal rechazó las credenciales configuradas. Un administrador debe revisar la llave del PAC.',
             ],
             $error instanceof PacRateLimitException => [
                 429,

@@ -108,7 +108,24 @@ class InvoiceBusinessCapabilitiesService
             || $hasPartialIdentity
             || $this->hasOpenCancelRequest($invoice)
             || $invoice->pac_status === 'pending'
-            || $invoice->pac_draft_status === 'valid';
+            || $invoice->pac_draft_status === 'valid'
+            || $this->hasUnlinkedDraftReservation($invoice);
+    }
+
+    /**
+     * Fase 6.20: la llave del borrador quedó reservada pero nunca se
+     * persistió el id remoto (la creación falló o quedó sin respuesta).
+     * Repetir el POST con la misma llave responde siempre
+     * `idempotency_key_in_use`, así que sólo la reconciliación puede
+     * vincular el borrador, buscándolo por `draftExternalId`.
+     */
+    public function hasUnlinkedDraftReservation(Invoice $invoice): bool
+    {
+        return filled($invoice->pac_draft_idempotency_key)
+            && blank($invoice->pac_draft_external_id)
+            && blank($invoice->pac_external_id)
+            && blank($invoice->pac_idempotency_key)
+            && $invoice->pac_issue_status === null;
     }
 
     /**

@@ -117,11 +117,78 @@ el timbrado y la cancelación nunca se reenvían: la `ConnectionException` se
 propaga y el servicio la clasifica como ambigua (`reconciliation_required`).
 Ninguna respuesta HTTP ya recibida (4xx/5xx) se reintenta.
 
-Los códigos estables de error de Facturapi (`body.code`) incluyen
-`invoice_already_stamped`, `stamping_in_progress`,
-`invoice_cancellation_in_progress`, `draft_update_in_progress` e
-`idempotency_key_in_use` (docs.facturapi.io, "Error handling"); su HTTP status
-no está documentado y todavía no se mapean de forma específica.
+### Códigos de error de Facturapi (Fase 6.20)
+
+`FacturapiProvider::assertSuccessful()` evalúa `body.code` (docs.facturapi.io,
+"Error handling") **antes** que el HTTP status, que Facturapi no documenta
+por código. Un código desconocido conserva el mapeo por status.
+
+| `body.code` | Excepción | Clasificación | Código público |
+|---|---|---|---|
+| `invoice_not_found` | `PacInvoiceNotFoundException` | definitivo (`failed`) | `409 PAC_INVOICE_NOT_FOUND` |
+| `stamping_in_progress`, `invoice_cancellation_in_progress`, `draft_update_in_progress`, `idempotency_key_in_use` | `PacOperationInProgressException` (hereda de `PacConflictException`) | ambiguo (`reconciliation_required`) | `409 PAC_OPERATION_IN_PROGRESS` |
+
+Antes, un `stamping_in_progress` con 400 se habría tratado como validación
+definitiva y habría habilitado repetir el timbrado.
+
+`invoice_not_found` sólo prueba que la operación no ocurrió **con la llave
+configurada**: Facturapi responde lo mismo si la llave es de otra
+organización. Por eso la reconciliación nunca lo interpreta como "el remoto
+no existe" y mantiene la revisión pendiente.
+
+### Llave de idempotencia repetida (verificado en Facturapi TEST)
+
+Experimento controlado de la Fase 6.20 (borradores `exp-6.20-*`, ya
+eliminados):
+
+1. `POST /invoices` (`status=draft`) con la llave K → 200, borrador A.
+2. Mismo `POST` con K → **409 `idempotency_key_in_use`**. No devuelve A ni
+   crea otro recurso, aunque la primera petición ya haya terminado.
+3. `GET /invoices?external_id=` → incluye el borrador (`status=draft`) con
+   su `idempotency_key`.
+4. `DELETE /invoices/{id}` de un borrador → 200; luego `GET` → 404
+   `invoice_not_found`.
+
+Consecuencia: si la creación del borrador falla después de reservar
+`pac_draft_idempotency_key` y nunca se guarda `pac_draft_external_id`,
+reintentar la emisión responde siempre `PAC_OPERATION_IN_PROGRESS`.
+`InvoiceBusinessCapabilitiesService::hasUnlinkedDraftReservation()` detecta
+ese estado (llave del borrador sin `pac_draft_external_id`,
+`pac_external_id`, `pac_idempotency_key` ni `pac_issue_status`), habilita
+`actions.can_reconcile` y `billing:health` lo reporta como
+`draft_reserved_without_remote_id`.
+
+`ReconcileInvoiceWithPacService` busca entonces por
+`PacIdentifiers::draftExternalId()`, relee el borrador con
+`retrieveDraftInvoice()` (exige `livemode=false`) y sólo lo vincula si
+`external_id` e `idempotency_key` coinciden con la reserva. Nunca toca
+`pac_external_id` ni `cfdi_uuid`; el siguiente `/operations/issue` continúa
+desde el borrador vinculado. Si no hay borrador remoto, libera la revisión:
+reintentar con la misma llave es seguro, porque Facturapi nunca crea un
+segundo recurso con ella.
+
+### Fechas del PAC (Fase 6.20)
+
+Facturapi no publica todas sus fechas en el mismo formato:
+
+| Campo remoto | Formato | Columna local |
+|---|---|---|
+| `created_at`, `date` | UTC con `Z` | `pac_draft_created_at` |
+| `stamp.date` (FechaTimbrado) | **sin offset**, hora del centro de México | `stamped_at` |
+
+`FacturapiDates::stampDate()` interpreta `stamp.date` en
+`billing.facturapi.stamp_timezone` (`BILLING_FACTURAPI_STAMP_TIMEZONE`, por
+omisión `America/Mexico_City`) y lo normaliza a UTC; un offset explícito en
+el texto siempre manda. Antes de esta fase se parseaba como UTC y
+`stamped_at` quedaba 6 h atrasado (también el `context.stamped_at` del
+evento `StampSucceeded`). Una zona inválida lanza
+`PacConfigurationException` (`stamp_timezone_invalid`) en
+`FacturapiProvider::client()`, antes de cualquier petición: nunca se
+descubre después de timbrar.
+
+Los registros previos a la corrección no se reparan (no hay datos de
+producción). `ReconcileInvoiceWithPacService` sólo llena `stamped_at`
+cuando está vacío, así que no los corrige por sí solo.
 
 ### Reserva de cancelación
 
@@ -179,6 +246,7 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_pending_recent` / `cancellation_pending_stale` | transient / recoverable | wait / reconcile |
 | `reconciliation_required` | recoverable | reconcile |
 | `issue_failed`, `erp_issued_without_cfdi` | recoverable | operations_issue |
+| `draft_reserved_without_remote_id` (ERP `issued`, llave de borrador reservada sin `pac_draft_external_id` ni `pac_issue_status`) | recoverable | reconcile |
 | `cfdi_canceled_erp_not_converged` | recoverable | operations_cancel |
 | `cancellation_request_in_flight` / `cancellation_request_in_flight_stale` | transient / recoverable | wait / reconcile |
 | `erp_cancelled_cfdi_valid` (ERP `cancelled`, CFDI `valid`, sin cancelación en curso; incluye rechazo/expiración) | recoverable | manual_review |
@@ -223,3 +291,24 @@ válidos), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
 alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
 folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
 idempotencia, `pac_external_id` ni `cfdi_uuid`.
+
+## Riesgos pendientes
+
+### Zona horaria de la conexión MySQL (no corregido)
+
+`config/database.php` no fija `timezone` en la conexión `mysql`, así que
+cada sesión usa la del servidor (`time_zone=SYSTEM`; en desarrollo,
+`America/Mexico_City`). Laravel escribe y lee las columnas `TIMESTAMP` como
+texto en UTC (`app.timezone=UTC`) y MySQL las convierte con la zona de la
+sesión, de modo que el ida y vuelta desde Laravel es coherente, pero:
+
+- un cliente SQL o una sesión con otra zona ve los valores desplazados;
+- `NOW()`/`CURRENT_TIMESTAMP` en SQL devuelve hora de México, no UTC:
+  cualquier comparación o default de base de datos queda 6 h corrido
+  (`useCurrent()` existe en `invoice_pac_events.occurred_at/created_at` y
+  `failed_jobs.failed_at`; `InvoicePacAuditService` fija ambas fechas
+  desde PHP, por lo que hoy no se usa el default);
+- fijar ahora `'timezone' => '+00:00'` desplazaría 6 h la lectura de todas
+  las fechas ya guardadas.
+
+Corregirlo exige una fase propia con migración de datos coordinada.

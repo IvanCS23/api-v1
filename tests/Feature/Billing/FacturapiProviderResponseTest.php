@@ -67,6 +67,53 @@ test('una respuesta exitosa se mapea correctamente a PacInvoiceResult, leyendo s
         ->and($result->rawResponse['extra_field'])->toBe('algo');
 });
 
+test('stamp.date sin offset (formato real de Facturapi) se interpreta en hora del centro y se normaliza a UTC (Fase 6.20)', function (string $raw, string $expectedUtc) {
+    Http::fake(['*' => Http::response(['id' => 'inv_tz', 'status' => 'valid', 'stamp' => ['date' => $raw]], 200)]);
+
+    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+
+    expect($result->stampedAt->toIso8601String())->toBe($expectedUtc)
+        ->and($result->stampedAt->getTimezone()->getName())->toBe('UTC');
+})->with([
+    'octubre (FAC-00000008 real)' => ['2026-10-20T13:52:54', '2026-10-20T19:52:54+00:00'],
+    'julio: sin horario de verano desde 2022' => ['2026-07-15T12:00:00', '2026-07-15T18:00:00+00:00'],
+    'cruce de día' => ['2026-10-19T18:43:41', '2026-10-20T00:43:41+00:00'],
+]);
+
+test('stamp.date con offset explícito respeta ese offset y no la zona configurada', function (string $raw, string $expectedUtc) {
+    Http::fake(['*' => Http::response(['id' => 'inv_tz', 'status' => 'valid', 'stamp' => ['date' => $raw]], 200)]);
+
+    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+
+    expect($result->stampedAt->toIso8601String())->toBe($expectedUtc);
+})->with([
+    'Z' => ['2026-07-28T12:00:00Z', '2026-07-28T12:00:00+00:00'],
+    '-05:00' => ['2026-07-28T12:00:00-05:00', '2026-07-28T17:00:00+00:00'],
+]);
+
+test('la zona de stamp.date se toma de billing.facturapi.stamp_timezone', function () {
+    config(['billing.facturapi.stamp_timezone' => 'America/Cancun']);
+    Http::fake(['*' => Http::response(['id' => 'inv_tz', 'status' => 'valid', 'stamp' => ['date' => '2026-10-20T14:52:54']], 200)]);
+
+    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+
+    expect($result->stampedAt->toIso8601String())->toBe('2026-10-20T19:52:54+00:00');
+});
+
+test('created_at de un borrador (UTC con Z) se conserva sin desplazamiento', function () {
+    Http::fake(['*' => Http::response([
+        'id' => 'inv_draft_tz',
+        'status' => 'draft',
+        'livemode' => false,
+        'is_ready_to_stamp' => true,
+        'created_at' => '2026-10-20T19:52:47.123Z',
+    ], 200)]);
+
+    $result = app(PacProvider::class)->createDraftInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+
+    expect($result->createdAt->toIso8601String())->toBe('2026-10-20T19:52:47+00:00');
+});
+
 test('una respuesta sin objeto stamp (aún no timbrada) mapea stampedAt como null, sin romper', function () {
     Http::fake(['*' => Http::response([
         'id' => 'inv_pending_1',

@@ -9,7 +9,10 @@ use App\Data\Billing\PacInvoiceResult;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacInvoiceNotFoundException;
+use App\Exceptions\Billing\PacOperationInProgressException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
@@ -17,7 +20,6 @@ use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
 use App\Support\Billing\PacCredentialGuard;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -59,6 +61,7 @@ class FacturapiProvider implements PacProvider
         private readonly int $timeout,
         private readonly int $connectTimeout,
         private readonly ?string $mode = PacCredentialGuard::MODE_TEST,
+        private readonly ?string $stampTimezone = FacturapiDates::DEFAULT_STAMP_TIMEZONE,
     ) {}
 
     public function name(): string
@@ -496,6 +499,12 @@ class FacturapiProvider implements PacProvider
         // aborta antes de construir el request — el PAC nunca recibe nada.
         (new PacCredentialGuard($this->mode, $this->apiKey))->assertConfigured();
 
+        // Fase 6.20: sin una zona válida no se puede interpretar
+        // `stamp.date`; se rechaza antes de la red, nunca después de timbrar.
+        if (! FacturapiDates::isValidTimezone($this->stampTimezone)) {
+            throw new PacConfigurationException('stamp_timezone_invalid');
+        }
+
         $request = Http::baseUrl($this->baseUrl)
             ->withToken($this->apiKey)
             ->acceptJson()
@@ -579,7 +588,8 @@ class FacturapiProvider implements PacProvider
      * ej. createInvoice()/retrieveInvoice()) y `findInvoiceByExternalId()`
      * (un elemento de `data[]` en el listado) — mismo shape de objeto
      * Invoice documentado en ambos casos. La fecha de timbrado vive
-     * anidada en `stamp.date`, no en un `stamped_at` plano.
+     * anidada en `stamp.date`, no en un `stamped_at` plano, y llega sin
+     * offset en hora del centro de México (Fase 6.20, ver FacturapiDates).
      *
      * @param  array<string, mixed>  $data
      */
@@ -591,7 +601,9 @@ class FacturapiProvider implements PacProvider
             externalId: (string) $data['id'],
             status: (string) $data['status'],
             uuid: isset($data['uuid']) ? (string) $data['uuid'] : null,
-            stampedAt: isset($stamp['date']) ? CarbonImmutable::parse((string) $stamp['date']) : null,
+            stampedAt: isset($stamp['date'])
+                ? FacturapiDates::stampDate((string) $stamp['date'], (string) $this->stampTimezone)
+                : null,
             cancellationStatus: isset($data['cancellation_status']) ? (string) $data['cancellation_status'] : null,
             rawResponse: $data,
         );
@@ -683,16 +695,32 @@ class FacturapiProvider implements PacProvider
             livemode: (bool) $data['livemode'],
             idempotencyKey: isset($data['idempotency_key']) ? (string) $data['idempotency_key'] : null,
             externalReference: isset($data['external_id']) ? (string) $data['external_id'] : null,
-            createdAt: isset($data['created_at']) ? CarbonImmutable::parse((string) $data['created_at']) : null,
+            createdAt: isset($data['created_at']) ? FacturapiDates::utcDate((string) $data['created_at']) : null,
             total: isset($data['total']) && is_numeric($data['total']) ? (float) $data['total'] : null,
             rawResponse: $data,
         );
     }
 
     /**
+     * `body.code` de Facturapi que indican otra operación registrada sobre
+     * el mismo recurso o la misma llave (docs.facturapi.io, "Error
+     * handling"). Su HTTP status no está documentado.
+     */
+    private const IN_PROGRESS_CODES = [
+        'stamping_in_progress',
+        'invoice_cancellation_in_progress',
+        'draft_update_in_progress',
+        'idempotency_key_in_use',
+    ];
+
+    /**
      * Traduce la respuesta a la excepción correspondiente. El mensaje y
      * `pacCode` solo usan el cuerpo de la respuesta del PAC — nunca la
      * API key ni ninguna cabecera de la petición saliente.
+     *
+     * Fase 6.20: los códigos estables de Facturapi (`body.code`) se
+     * evalúan ANTES que el HTTP status, que no está documentado por
+     * código; un código desconocido conserva el mapeo por status.
      */
     private function assertSuccessful(Response $response): void
     {
@@ -707,6 +735,8 @@ class FacturapiProvider implements PacProvider
 
         throw match (true) {
             $code === 'invoice_cancellation_receipt_unavailable' => new CancellationReceiptUnavailableException($message, $status, $code),
+            $code === 'invoice_not_found' => new PacInvoiceNotFoundException($message, $status, $code),
+            in_array($code, self::IN_PROGRESS_CODES, true) => new PacOperationInProgressException($message, $status, $code),
             $status === 401 || $status === 403 => new PacAuthenticationException($message, $status, $code),
             $status === 400 || $status === 422 => new PacValidationException($message, $status, $code),
             $status === 409 => new PacConflictException($message, $status, $code),
