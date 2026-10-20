@@ -143,7 +143,8 @@ class InvoicePacActionExceptionResponder
             $error instanceof PacAuthenticationException => [
                 503,
                 'PAC_AUTHENTICATION_FAILED',
-                'El proveedor fiscal no está disponible temporalmente.',
+                // Fase 6.20: no es transitorio; reintentar no lo resuelve.
+                'El proveedor fiscal rechazó las credenciales configuradas. Un administrador debe revisar la llave del PAC.',
             ],
             $error instanceof PacRateLimitException => [
                 429,

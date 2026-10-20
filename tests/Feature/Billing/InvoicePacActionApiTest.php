@@ -727,6 +727,28 @@ test('issue API sanitiza errores del PAC', function (int $remoteStatus, int $sta
     'unexpected' => [418, 502, 'PAC_UNEXPECTED_RESPONSE'],
 ]);
 
+test('PAC_AUTHENTICATION_FAILED usa un mensaje de credenciales, nunca uno transitorio, y no cierra la sesión (Fase 6.20)', function (int $remoteStatus) {
+    [, $user, $invoice] = phase610Fixture([
+        'pac_provider' => null,
+        'pac_external_id' => null,
+        'cfdi_uuid' => null,
+        'pac_status' => null,
+        'pac_issue_status' => null,
+    ]);
+    InvoiceItem::factory()->create(['company_id' => $invoice->company_id, 'invoice_id' => $invoice->id]);
+    Http::fake(['*' => Http::response(['message' => 'Unauthorized', 'code' => 'api_key_invalid'], $remoteStatus)]);
+    app(CurrentTenant::class)->clear();
+
+    $response = $this->actingAs($user, 'api')
+        ->postJson("/api/invoices/{$invoice->id}/pac/issue", ['confirm' => true])
+        // 503, nunca 401: un 401 haría que el frontend cerrara la sesión.
+        ->assertStatus(503)
+        ->assertJsonPath('code', 'PAC_AUTHENTICATION_FAILED')
+        ->assertJsonPath('message', 'El proveedor fiscal rechazó las credenciales configuradas. Un administrador debe revisar la llave del PAC.');
+
+    expect($response->json('message'))->not->toContain('temporalmente');
+})->with([401, 403]);
+
 test('issue API convierte stamp ambiguo en reconciliación requerida y no reintenta', function () {
     [, $user, $invoice] = phase610Fixture([
         'pac_provider' => null,
