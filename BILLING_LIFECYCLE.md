@@ -285,8 +285,10 @@ Umbrales en `config/billing.php` (`billing.health.*`):
 - Borrador remoto: 48 h aviso / 72 h límite (un CFDI no puede fecharse más
   de 72 h atrás).
 
-Opciones: `--company=`, `--invoice=`, `--status=*` (por omisión los no
-válidos), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
+Opciones: `--company=`, `--invoice=`, `--status=` (repetible:
+`--status=valid --status=transient`; valores `valid|transient|recoverable|invalid`;
+por omisión los no válidos; `*` es la sintaxis de Laravel en la firma del
+comando, no un valor aceptado), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
 (`transient|recoverable|invalid|none`). Sale con código 1 cuando algún estado
 alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
 folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
