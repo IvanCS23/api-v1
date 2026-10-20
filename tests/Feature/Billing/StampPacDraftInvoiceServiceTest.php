@@ -338,6 +338,30 @@ test('timbrado exitoso: el borrador se transforma en la factura timbrada (pac_ex
         ]);
 });
 
+test('stamped_at se persiste en UTC desde stamp.date sin offset; la auditoría registra el mismo instante (Fase 6.20)', function () {
+    $company = Company::factory()->create();
+    $invoice = draftReadyInvoiceForStampTest($company);
+    app(CurrentTenant::class)->set($company->id);
+
+    // Formato real (FAC-00000008): stamp.date en hora del centro sin
+    // offset; `date` del mismo recurso en UTC confirma el instante.
+    Http::fake([
+        "*/invoices/{$invoice->pac_draft_external_id}" => Http::response(fakeSyncedReadyDraftBody($invoice), 200),
+        "*/invoices/{$invoice->pac_draft_external_id}/stamp" => Http::response(fakeStampSuccessBody($invoice, [
+            'date' => '2026-10-20T19:52:54.651Z',
+            'stamp' => ['date' => '2026-10-20T13:52:54'],
+        ]), 200),
+    ]);
+
+    $updated = app(StampPacDraftInvoiceService::class)->stamp($invoice);
+    $succeeded = $updated->pacEvents()->get()
+        ->first(fn (InvoicePacEvent $event): bool => $event->event_type === InvoicePacEventType::StampSucceeded);
+
+    expect($updated->stamped_at->toIso8601String())->toBe('2026-10-20T19:52:54+00:00')
+        ->and($updated->getRawOriginal('stamped_at'))->toBe('2026-10-20 19:52:54')
+        ->and(CarbonImmutable::parse($succeeded->context['stamped_at'])->toIso8601String())->toBe('2026-10-20T19:52:54+00:00');
+});
+
 test('un fallo de auditoría no repite stamp ni convierte un éxito remoto persistido en fallo', function () {
     $company = Company::factory()->create();
     $invoice = draftReadyInvoiceForStampTest($company);

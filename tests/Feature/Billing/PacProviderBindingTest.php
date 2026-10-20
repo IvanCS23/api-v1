@@ -34,3 +34,14 @@ test('el binding construye el adaptador con los valores de configuración', func
         ->and($timeout->getValue($provider))->toBe(42)
         ->and($connectTimeout->getValue($provider))->toBe(7);
 });
+
+test('el binding toma stamp_timezone de billing.facturapi (default America/Mexico_City)', function () {
+    $stampTimezone = (new ReflectionClass(FacturapiProvider::class))->getProperty('stampTimezone');
+
+    expect(config('billing.facturapi.stamp_timezone'))->toBe('America/Mexico_City')
+        ->and($stampTimezone->getValue(app(PacProvider::class)))->toBe('America/Mexico_City');
+
+    config(['billing.facturapi.stamp_timezone' => 'America/Cancun']);
+
+    expect($stampTimezone->getValue(app(PacProvider::class)))->toBe('America/Cancun');
+});

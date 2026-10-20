@@ -123,6 +123,29 @@ Los códigos estables de error de Facturapi (`body.code`) incluyen
 `idempotency_key_in_use` (docs.facturapi.io, "Error handling"); su HTTP status
 no está documentado y todavía no se mapean de forma específica.
 
+### Fechas del PAC (Fase 6.20)
+
+Facturapi no publica todas sus fechas en el mismo formato:
+
+| Campo remoto | Formato | Columna local |
+|---|---|---|
+| `created_at`, `date` | UTC con `Z` | `pac_draft_created_at` |
+| `stamp.date` (FechaTimbrado) | **sin offset**, hora del centro de México | `stamped_at` |
+
+`FacturapiDates::stampDate()` interpreta `stamp.date` en
+`billing.facturapi.stamp_timezone` (`BILLING_FACTURAPI_STAMP_TIMEZONE`, por
+omisión `America/Mexico_City`) y lo normaliza a UTC; un offset explícito en
+el texto siempre manda. Antes de esta fase se parseaba como UTC y
+`stamped_at` quedaba 6 h atrasado (también el `context.stamped_at` del
+evento `StampSucceeded`). Una zona inválida lanza
+`PacConfigurationException` (`stamp_timezone_invalid`) en
+`FacturapiProvider::client()`, antes de cualquier petición: nunca se
+descubre después de timbrar.
+
+Los registros previos a la corrección no se reparan (no hay datos de
+producción). `ReconcileInvoiceWithPacService` sólo llena `stamped_at`
+cuando está vacío, así que no los corrige por sí solo.
+
 ### Reserva de cancelación
 
 `CancelInvoiceWithPacService` reserva la solicitud bajo `lockForUpdate` antes
@@ -223,3 +246,24 @@ válidos), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
 alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
 folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
 idempotencia, `pac_external_id` ni `cfdi_uuid`.
+
+## Riesgos pendientes
+
+### Zona horaria de la conexión MySQL (no corregido)
+
+`config/database.php` no fija `timezone` en la conexión `mysql`, así que
+cada sesión usa la del servidor (`time_zone=SYSTEM`; en desarrollo,
+`America/Mexico_City`). Laravel escribe y lee las columnas `TIMESTAMP` como
+texto en UTC (`app.timezone=UTC`) y MySQL las convierte con la zona de la
+sesión, de modo que el ida y vuelta desde Laravel es coherente, pero:
+
+- un cliente SQL o una sesión con otra zona ve los valores desplazados;
+- `NOW()`/`CURRENT_TIMESTAMP` en SQL devuelve hora de México, no UTC:
+  cualquier comparación o default de base de datos queda 6 h corrido
+  (`useCurrent()` existe en `invoice_pac_events.occurred_at/created_at` y
+  `failed_jobs.failed_at`; `InvoicePacAuditService` fija ambas fechas
+  desde PHP, por lo que hoy no se usa el default);
+- fijar ahora `'timezone' => '+00:00'` desplazaría 6 h la lectura de todas
+  las fechas ya guardadas.
+
+Corregirlo exige una fase propia con migración de datos coordinada.

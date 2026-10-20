@@ -9,6 +9,7 @@ use App\Data\Billing\PacInvoiceResult;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
@@ -17,7 +18,6 @@ use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
 use App\Support\Billing\PacCredentialGuard;
-use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -59,6 +59,7 @@ class FacturapiProvider implements PacProvider
         private readonly int $timeout,
         private readonly int $connectTimeout,
         private readonly ?string $mode = PacCredentialGuard::MODE_TEST,
+        private readonly ?string $stampTimezone = FacturapiDates::DEFAULT_STAMP_TIMEZONE,
     ) {}
 
     public function name(): string
@@ -496,6 +497,12 @@ class FacturapiProvider implements PacProvider
         // aborta antes de construir el request — el PAC nunca recibe nada.
         (new PacCredentialGuard($this->mode, $this->apiKey))->assertConfigured();
 
+        // Fase 6.20: sin una zona válida no se puede interpretar
+        // `stamp.date`; se rechaza antes de la red, nunca después de timbrar.
+        if (! FacturapiDates::isValidTimezone($this->stampTimezone)) {
+            throw new PacConfigurationException('stamp_timezone_invalid');
+        }
+
         $request = Http::baseUrl($this->baseUrl)
             ->withToken($this->apiKey)
             ->acceptJson()
@@ -579,7 +586,8 @@ class FacturapiProvider implements PacProvider
      * ej. createInvoice()/retrieveInvoice()) y `findInvoiceByExternalId()`
      * (un elemento de `data[]` en el listado) — mismo shape de objeto
      * Invoice documentado en ambos casos. La fecha de timbrado vive
-     * anidada en `stamp.date`, no en un `stamped_at` plano.
+     * anidada en `stamp.date`, no en un `stamped_at` plano, y llega sin
+     * offset en hora del centro de México (Fase 6.20, ver FacturapiDates).
      *
      * @param  array<string, mixed>  $data
      */
@@ -591,7 +599,9 @@ class FacturapiProvider implements PacProvider
             externalId: (string) $data['id'],
             status: (string) $data['status'],
             uuid: isset($data['uuid']) ? (string) $data['uuid'] : null,
-            stampedAt: isset($stamp['date']) ? CarbonImmutable::parse((string) $stamp['date']) : null,
+            stampedAt: isset($stamp['date'])
+                ? FacturapiDates::stampDate((string) $stamp['date'], (string) $this->stampTimezone)
+                : null,
             cancellationStatus: isset($data['cancellation_status']) ? (string) $data['cancellation_status'] : null,
             rawResponse: $data,
         );
@@ -683,7 +693,7 @@ class FacturapiProvider implements PacProvider
             livemode: (bool) $data['livemode'],
             idempotencyKey: isset($data['idempotency_key']) ? (string) $data['idempotency_key'] : null,
             externalReference: isset($data['external_id']) ? (string) $data['external_id'] : null,
-            createdAt: isset($data['created_at']) ? CarbonImmutable::parse((string) $data['created_at']) : null,
+            createdAt: isset($data['created_at']) ? FacturapiDates::utcDate((string) $data['created_at']) : null,
             total: isset($data['total']) && is_numeric($data['total']) ? (float) $data['total'] : null,
             rawResponse: $data,
         );

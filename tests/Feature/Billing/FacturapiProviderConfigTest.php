@@ -86,6 +86,33 @@ test('sin API key configurada no se envía ninguna petición (Fase 6.19: antes s
     Http::assertNothingSent();
 });
 
+test('una stamp_timezone inválida o vacía bloquea toda petición antes de la red (Fase 6.20)', function (?string $timezone) {
+    config([
+        'services.facturapi.base_url' => 'https://example-pac.test/v2',
+        'services.facturapi.test_key' => 'sk_test_TZ',
+        'billing.facturapi.stamp_timezone' => $timezone,
+    ]);
+    Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'valid', 'livemode' => false], 200)]);
+
+    $invoice = fakeInvoiceForConfigTest();
+
+    try {
+        app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
+        $this->fail('Se esperaba PacConfigurationException.');
+    } catch (PacConfigurationException $e) {
+        expect($e->pacCode)->toBe('stamp_timezone_invalid');
+    }
+
+    expect(fn () => app(PacProvider::class)->stampDraftInvoice('inv_tz_invalid'))
+        ->toThrow(PacConfigurationException::class);
+
+    Http::assertNothingSent();
+})->with([
+    'identificador inexistente' => ['Mexico/Centro'],
+    'vacía' => [''],
+    'null' => [null],
+]);
+
 test('la API key nunca aparece en el mensaje ni en el código de una excepción PAC', function () {
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',

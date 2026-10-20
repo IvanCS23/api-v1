@@ -32,6 +32,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Fechas de Facturapi (Fase 6.20)
+    |--------------------------------------------------------------------------
+    |
+    | - stamp_timezone: zona en la que se interpreta `stamp.date` (fecha de
+    |   timbrado). Facturapi la publica SIN offset y en hora del centro de
+    |   México (FechaTimbrado, Anexo 20), a diferencia de `created_at`, que
+    |   llega en UTC con `Z`. El resultado siempre se guarda en UTC. Si el
+    |   valor llegara con offset explícito, ese offset manda.
+    |
+    |   Debe ser un identificador IANA válido (p. ej. America/Mexico_City);
+    |   uno inválido bloquea toda petición al PAC con
+    |   PAC_CONFIGURATION_INVALID antes de contactarlo.
+    |
+    */
+
+    'facturapi' => [
+        'stamp_timezone' => env('BILLING_FACTURAPI_STAMP_TIMEZONE', 'America/Mexico_City'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Salud del ciclo de facturación (Fase 6.18)
     |--------------------------------------------------------------------------
     |
