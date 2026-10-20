@@ -72,7 +72,7 @@ test('comando de acuse exige FACTURAPI_TEST_KEY', function () {
     Http::fake();
 
     $this->artisan('billing:facturapi-test-cancellation-receipt', ['invoice' => $invoice->id])
-        ->expectsOutputToContain('FACTURAPI_TEST_KEY no esta configurada')
+        ->expectsOutputToContain('FACTURAPI_TEST_KEY no está configurada')
         ->assertExitCode(1);
 
     Http::assertNothingSent();

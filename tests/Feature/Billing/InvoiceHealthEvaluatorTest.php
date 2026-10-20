@@ -17,6 +17,7 @@ beforeEach(function () {
         'billing.health.cancellation_pending_hours' => 96,
         'billing.health.draft_date_warning_hours' => 48,
         'billing.health.draft_date_limit_hours' => 72,
+        'billing.cancel_in_flight_minutes' => 5,
     ]);
 });
 
@@ -145,6 +146,18 @@ test('cada combinacion detectable produce su codigo, nivel y accion', function (
     'ERP cancelado con CFDI vigente tras expiracion' => [
         healthyIssuedAttributes(['status' => InvoiceStatus::Cancelled, 'cancellation_status' => 'expired']),
         'erp_cancelled_cfdi_valid', InvoiceHealthStatus::Recoverable, InvoiceHealthAction::ManualReview,
+    ],
+    'solicitud de cancelacion en vuelo reciente' => [
+        healthyIssuedAttributes(['pac_cancel_request_status' => 'in_flight', 'pac_cancel_started_at' => healthNow()->subMinutes(4)]),
+        'cancellation_request_in_flight', InvoiceHealthStatus::Transient, InvoiceHealthAction::Wait,
+    ],
+    'solicitud de cancelacion en vuelo abandonada' => [
+        healthyIssuedAttributes(['pac_cancel_request_status' => 'in_flight', 'pac_cancel_started_at' => healthNow()->subMinutes(5)]),
+        'cancellation_request_in_flight_stale', InvoiceHealthStatus::Recoverable, InvoiceHealthAction::Reconcile,
+    ],
+    'solicitud de cancelacion ambigua' => [
+        healthyIssuedAttributes(['pac_cancel_request_status' => 'reconciliation_required', 'pac_reconciliation_required' => true]),
+        'reconciliation_required', InvoiceHealthStatus::Recoverable, InvoiceHealthAction::Reconcile,
     ],
     'cancelacion aceptada sin pac_status canceled' => [
         healthyIssuedAttributes(['cancellation_status' => 'accepted']),

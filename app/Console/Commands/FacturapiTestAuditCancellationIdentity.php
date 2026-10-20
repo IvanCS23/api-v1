@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\GuardsFacturapiTestCommand;
 use App\Exceptions\Billing\PacException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
@@ -12,6 +13,8 @@ use Throwable;
 
 class FacturapiTestAuditCancellationIdentity extends Command
 {
+    use GuardsFacturapiTestCommand;
+
     protected $signature = 'billing:facturapi-test-cancellation-identity-audit
         {invoice : ID de la Invoice cancelada cuya identidad se auditara}';
 
@@ -19,15 +22,7 @@ class FacturapiTestAuditCancellationIdentity extends Command
 
     public function handle(AuditCancellationIdentityService $service): int
     {
-        if (app()->environment('production')) {
-            $this->error('Este comando esta prohibido en production. Solo se ejecuta en entornos local/testing.');
-
-            return self::FAILURE;
-        }
-
-        if (blank(config('services.facturapi.test_key'))) {
-            $this->error('FACTURAPI_TEST_KEY no esta configurada. Usa exclusivamente una llave TEST.');
-
+        if (! $this->passesFacturapiTestGuard()) {
             return self::FAILURE;
         }
 

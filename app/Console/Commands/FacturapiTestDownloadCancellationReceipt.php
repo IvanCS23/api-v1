@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\GuardsFacturapiTestCommand;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacException;
@@ -19,6 +20,8 @@ use Throwable;
  */
 class FacturapiTestDownloadCancellationReceipt extends Command
 {
+    use GuardsFacturapiTestCommand;
+
     protected $signature = 'billing:facturapi-test-cancellation-receipt
         {invoice : ID de la Invoice cancelada y aceptada cuyo acuse se descargara}';
 
@@ -26,15 +29,7 @@ class FacturapiTestDownloadCancellationReceipt extends Command
 
     public function handle(DownloadCancellationReceiptService $service): int
     {
-        if (app()->environment('production')) {
-            $this->error('Este comando esta prohibido en production. Solo se ejecuta en entornos local/testing.');
-
-            return self::FAILURE;
-        }
-
-        if (blank(config('services.facturapi.test_key'))) {
-            $this->error('FACTURAPI_TEST_KEY no esta configurada. Configurala con una llave de TEST antes de continuar.');
-
+        if (! $this->passesFacturapiTestGuard()) {
             return self::FAILURE;
         }
 

@@ -7,9 +7,11 @@ use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
 use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
+use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacCredentialGuard;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
@@ -38,6 +40,17 @@ class OrchestrateInvoiceCancellationService
             return $current;
         }
 
+        // Fase 6.19: una solicitud de cancelación ya reservada responde con
+        // su propio código; si no, cancellationMode() devolvería null y la
+        // factura parecería inconsistente.
+        if ($current->pac_cancel_request_status === CancelInvoiceWithPacService::REQUEST_IN_FLIGHT) {
+            throw new InvoiceCancellationInProgressException($current);
+        }
+
+        if ($current->pac_cancel_request_status === CancelInvoiceWithPacService::REQUEST_RECONCILIATION_REQUIRED) {
+            throw new PacReconciliationRequiredException;
+        }
+
         if ($this->capabilities->requiresReview($current)) {
             throw new PacReconciliationRequiredException;
         }
@@ -59,6 +72,8 @@ class OrchestrateInvoiceCancellationService
         if ($motive === null) {
             throw new InvoiceCannotBeCancelledException($invoice, 'la cancelación fiscal requiere motivo SAT');
         }
+
+        PacCredentialGuard::fromConfig()->assertConfigured();
 
         $result = $this->workflow->cancelWithPac($invoice, $motive, $substitutionUuid);
 

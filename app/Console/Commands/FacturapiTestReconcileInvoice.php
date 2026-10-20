@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\GuardsFacturapiTestCommand;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\InvoiceWorkflow;
@@ -15,21 +16,15 @@ use Throwable;
  */
 class FacturapiTestReconcileInvoice extends Command
 {
+    use GuardsFacturapiTestCommand;
+
     protected $signature = 'billing:facturapi-test-reconcile {invoice : ID de la Invoice a reconciliar}';
 
     protected $description = 'Consulta Facturapi TEST y reconcilia únicamente metadata fiscal local de una Invoice existente.';
 
     public function handle(InvoiceWorkflow $workflow): int
     {
-        if (app()->environment('production')) {
-            $this->error('Este comando está prohibido en production. Solo se ejecuta en entornos local/testing.');
-
-            return self::FAILURE;
-        }
-
-        if (blank(config('services.facturapi.test_key'))) {
-            $this->error('FACTURAPI_TEST_KEY no está configurada. Configúrala con una llave de TEST antes de continuar.');
-
+        if (! $this->passesFacturapiTestGuard()) {
             return self::FAILURE;
         }
 

@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Console\Concerns\GuardsFacturapiTestCommand;
 use App\Enums\CfdiCancellationMotive;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
@@ -12,6 +13,8 @@ use Throwable;
 
 class FacturapiTestCancelInvoice extends Command
 {
+    use GuardsFacturapiTestCommand;
+
     protected $signature = 'billing:facturapi-test-cancel
         {invoice : ID de la Invoice cuyo CFDI se solicitará cancelar}
         {--motive= : Motivo SAT: 01, 02, 03 o 04}
@@ -21,15 +24,7 @@ class FacturapiTestCancelInvoice extends Command
 
     public function handle(InvoiceWorkflow $workflow): int
     {
-        if (app()->environment('production')) {
-            $this->error('Este comando está prohibido en production. Solo se ejecuta en entornos local/testing.');
-
-            return self::FAILURE;
-        }
-
-        if (blank(config('services.facturapi.test_key'))) {
-            $this->error('FACTURAPI_TEST_KEY no está configurada. Configúrala con una llave de TEST antes de continuar.');
-
+        if (! $this->passesFacturapiTestGuard()) {
             return self::FAILURE;
         }
 

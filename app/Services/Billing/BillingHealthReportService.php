@@ -30,6 +30,7 @@ class BillingHealthReportService
         'pac_idempotency_key', 'pac_issue_status', 'pac_issue_started_at', 'pac_reconciliation_required',
         'pac_draft_external_id', 'pac_draft_status', 'pac_draft_idempotency_key', 'pac_draft_created_at',
         'cfdi_artifacts_status', 'cancellation_receipt_status',
+        'pac_cancel_request_status', 'pac_cancel_started_at',
     ];
 
     public function __construct(
@@ -85,6 +86,7 @@ class BillingHealthReportService
                 'cancellation_pending_hours' => (int) config('billing.health.cancellation_pending_hours'),
                 'draft_date_warning_hours' => (int) config('billing.health.draft_date_warning_hours'),
                 'draft_date_limit_hours' => (int) config('billing.health.draft_date_limit_hours'),
+                'cancel_in_flight_minutes' => (int) config('billing.cancel_in_flight_minutes'),
             ],
             'evaluated' => array_sum($state['totals']),
             'worst' => $state['worst']->value,

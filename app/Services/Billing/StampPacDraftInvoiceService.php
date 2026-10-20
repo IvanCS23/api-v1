@@ -357,7 +357,7 @@ class StampPacDraftInvoiceService
             'company_id' => $invoice->company_id,
             'provider' => $invoice->pac_provider,
             'pac_issue_status' => $invoice->pac_issue_status,
-            'pac_external_id' => $invoice->pac_external_id,
+            'pac_external_id' => $this->audit->maskIdentifier($invoice->pac_external_id),
             'attempt' => $invoice->pac_issue_attempts,
             'elapsed_ms' => $elapsedMs,
             'pac_error_code' => $error instanceof PacException ? $error->pacCode : null,

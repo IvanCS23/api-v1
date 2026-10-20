@@ -28,6 +28,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 
 /**
  * StampPacDraftInvoiceService (Fase 6.2.5): timbrado explícito de un
@@ -581,9 +582,12 @@ test('un timeout/conexión interrumpida en /stamp es AMBIGUO: pac_issue_status=r
     $invoice = draftReadyInvoiceForStampTest($company);
     app(CurrentTenant::class)->set($company->id);
 
+    $stampAttempts = 0;
     Http::fake([
         "*/invoices/{$invoice->pac_draft_external_id}" => Http::response(fakeSyncedReadyDraftBody($invoice), 200),
-        "*/invoices/{$invoice->pac_draft_external_id}/stamp" => function () {
+        "*/invoices/{$invoice->pac_draft_external_id}/stamp" => function () use (&$stampAttempts) {
+            $stampAttempts++;
+
             throw new ConnectionException('Connection timed out después de 5 segundos');
         },
     ]);
@@ -594,7 +598,9 @@ test('un timeout/conexión interrumpida en /stamp es AMBIGUO: pac_issue_status=r
     $fresh = $invoice->fresh();
     expect($fresh->pac_issue_status)->toBe('reconciliation_required')
         ->and($fresh->pac_reconciliation_required)->toBeTrue()
-        ->and($fresh->cfdi_uuid)->toBeNull();
+        ->and($fresh->cfdi_uuid)->toBeNull()
+        // Fase 6.19: tampoco la capa HTTP reenvía /stamp tras el timeout.
+        ->and($stampAttempts)->toBe(1);
 });
 
 test('una respuesta 200 no parseable/inesperada en /stamp es AMBIGUA: pac_issue_status=reconciliation_required', function () {
@@ -738,4 +744,28 @@ test('una respuesta atrasada de /stamp nunca sobrescribe una emisión ya finaliz
     // Nuestra propia llamada "perdedora" nunca vuelve a disparar el evento
     // — ya se resolvió por la otra vía antes de nuestro commit.
     Event::assertNotDispatched(InvoiceIssued::class);
+});
+
+test('el log de intento de timbrado enmascara pac_external_id (Fase 6.19)', function () {
+    $company = Company::factory()->create();
+    $invoice = draftReadyInvoiceForStampTest($company);
+    app(CurrentTenant::class)->set($company->id);
+    $raw = (string) $invoice->pac_draft_external_id;
+    $logged = [];
+    Log::listen(function ($message) use (&$logged) {
+        if ($message->message === 'billing.invoice.pac_stamp_attempt') {
+            $logged[] = $message->context;
+        }
+    });
+
+    Http::fake([
+        "*/invoices/{$raw}" => Http::response(fakeSyncedReadyDraftBody($invoice), 200),
+        "*/invoices/{$raw}/stamp" => Http::response(fakeStampSuccessBody($invoice), 200),
+    ]);
+
+    app(StampPacDraftInvoiceService::class)->stamp($invoice);
+
+    expect($logged)->toHaveCount(1)
+        ->and($logged[0]['pac_external_id'])->toBe(mb_substr($raw, 0, 8).'...'.mb_substr($raw, -4))
+        ->and(json_encode($logged[0]))->not->toContain($raw);
 });

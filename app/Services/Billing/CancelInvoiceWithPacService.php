@@ -9,8 +9,10 @@ use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacRateLimitException;
+use App\Exceptions\Billing\PacReconciliationRequiredException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
+use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
@@ -29,6 +31,15 @@ class CancelInvoiceWithPacService
 {
     private const CANCELLABLE_STATUSES = [null, 'none', 'rejected', 'expired'];
 
+    /** Ciclo de vida de la solicitud local (Fase 6.19); no es cancellation_status. */
+    public const REQUEST_IN_FLIGHT = 'in_flight';
+
+    public const REQUEST_COMPLETED = 'completed';
+
+    public const REQUEST_FAILED = 'failed';
+
+    public const REQUEST_RECONCILIATION_REQUIRED = 'reconciliation_required';
+
     public function __construct(
         private readonly PacProvider $pacProvider,
         private readonly InvoicePacAuditService $audit,
@@ -43,7 +54,9 @@ class CancelInvoiceWithPacService
         $current = $this->requireCurrentTenantInvoice($invoice, $tenantId);
         $substitutionUuid = $this->validatedSubstitutionUuid($current, $motive, $substitutionUuid);
 
+        // Prevalidación rápida sin lock; la definitiva corre en reserve().
         $this->assertCancellable($current);
+        $current = $this->reserve($current, $tenantId);
 
         $expectedExternalId = (string) $current->pac_external_id;
         $expectedUuid = (string) $current->cfdi_uuid;
@@ -101,12 +114,15 @@ class CancelInvoiceWithPacService
                     ->lockForUpdate()
                     ->firstOrFail();
 
-                // La identidad o el estado cambió mientras el PAC respondía.
-                // Se descarta la respuesta vieja y se conserva al ganador.
+                // La identidad o el estado cambió mientras el PAC respondía
+                // (p. ej. una reconciliación). Se descarta la respuesta vieja
+                // y se conserva al ganador; la solicitud sí terminó.
                 if ($locked->pac_external_id !== $expectedExternalId
                     || strcasecmp((string) $locked->cfdi_uuid, $expectedUuid) !== 0
                     || $locked->pac_status !== $initialPacStatus
                     || $locked->cancellation_status !== $initialCancellationStatus) {
+                    $locked->forceFill(['pac_cancel_request_status' => self::REQUEST_COMPLETED])->save();
+
                     return $locked;
                 }
 
@@ -126,6 +142,7 @@ class CancelInvoiceWithPacService
                     'pac_response' => $result->rawResponse,
                     'pac_last_error' => null,
                     'pac_reconciliation_required' => $this->requiresReconciliation($result),
+                    'pac_cancel_request_status' => self::REQUEST_COMPLETED,
                 ])->save();
 
                 return $locked;
@@ -259,6 +276,41 @@ class CancelInvoiceWithPacService
             || $e instanceof PacRateLimitException);
     }
 
+    /**
+     * Transacción corta: revalida bajo lockForUpdate y marca la solicitud
+     * `in_flight` antes de tocar la red (mismo patrón que
+     * StampPacDraftInvoiceService::reserve()). Una segunda ejecución
+     * concurrente ve la reserva y no envía otro DELETE.
+     */
+    private function reserve(Invoice $invoice, int $tenantId): Invoice
+    {
+        return DB::transaction(function () use ($invoice, $tenantId): Invoice {
+            $locked = Invoice::withoutGlobalScope(CompanyScope::class)
+                ->whereKey($invoice->getKey())
+                ->where('company_id', $tenantId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            if ($locked->pac_cancel_request_status === self::REQUEST_IN_FLIGHT) {
+                throw new InvoiceCancellationInProgressException($locked);
+            }
+
+            if ($locked->pac_cancel_request_status === self::REQUEST_RECONCILIATION_REQUIRED) {
+                throw new PacReconciliationRequiredException;
+            }
+
+            $this->assertCancellable($locked);
+
+            $locked->forceFill([
+                'pac_cancel_request_status' => self::REQUEST_IN_FLIGHT,
+                'pac_cancel_started_at' => now(),
+                'pac_cancel_attempts' => (int) $locked->pac_cancel_attempts + 1,
+            ])->save();
+
+            return $locked;
+        });
+    }
+
     private function recordFailure(Invoice $invoice, int $tenantId, Throwable $e, bool $ambiguous): void
     {
         DB::transaction(function () use ($invoice, $tenantId, $e, $ambiguous): void {
@@ -268,12 +320,21 @@ class CancelInvoiceWithPacService
                 ->lockForUpdate()
                 ->firstOrFail();
 
+            $requestStatus = $ambiguous ? self::REQUEST_RECONCILIATION_REQUIRED : self::REQUEST_FAILED;
+
             if ($locked->pac_external_id !== $invoice->pac_external_id
                 || strcasecmp((string) $locked->cfdi_uuid, (string) $invoice->cfdi_uuid) !== 0) {
+                // La identidad cambió: no se escribe el error sobre otra
+                // identidad, pero la solicitud propia nunca queda in_flight.
+                $locked->forceFill(['pac_cancel_request_status' => self::REQUEST_RECONCILIATION_REQUIRED])->save();
+
                 return;
             }
 
-            $attributes = ['pac_last_error' => $this->sanitizeErrorMessage($e)];
+            $attributes = [
+                'pac_last_error' => $this->sanitizeErrorMessage($e),
+                'pac_cancel_request_status' => $requestStatus,
+            ];
 
             if ($ambiguous) {
                 $attributes['pac_reconciliation_required'] = true;

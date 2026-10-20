@@ -7,11 +7,12 @@ use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
-use App\Exceptions\Billing\InvoiceNotReadyForPacException;
 use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
 use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
+use App\Exceptions\Billing\InvoiceNotReadyForPacException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
@@ -21,6 +22,7 @@ use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Exceptions\InvoiceAlreadyIssuedException;
+use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
@@ -90,6 +92,11 @@ class InvoicePacActionExceptionResponder
                 'INVOICE_ALREADY_ISSUED',
                 'La factura ya cuenta con una emisión fiscal.',
             ],
+            $error instanceof InvoiceCancellationInProgressException => [
+                409,
+                'PAC_CANCELLATION_IN_PROGRESS',
+                'La cancelación fiscal ya está en curso.',
+            ],
             $error instanceof InvoiceIssuanceInProgressException => [
                 409,
                 'PAC_ISSUANCE_IN_PROGRESS',
@@ -114,6 +121,11 @@ class InvoicePacActionExceptionResponder
                 422,
                 'PAC_VALIDATION_FAILED',
                 'El proveedor fiscal rechazó los datos de la operación.',
+            ],
+            $error instanceof PacConfigurationException => [
+                503,
+                'PAC_CONFIGURATION_INVALID',
+                'El proveedor fiscal no está configurado para operar.',
             ],
             $error instanceof PacAuthenticationException => [
                 503,
