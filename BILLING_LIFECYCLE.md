@@ -75,9 +75,28 @@ modificar `cfdi_uuid`.
 
 Los consumidores de UI nuevos deben usar `/operations/issue` y
 `/operations/cancel`. `GET /api/invoices/{invoice}/billing` publica
-`actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile` y
-`actions.cancellation_mode`; no expone llaves, payloads, respuestas crudas ni
-claves de idempotencia.
+`actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile`,
+`actions.can_fetch_artifacts` y `actions.cancellation_mode`; no expone
+llaves, payloads, respuestas crudas ni claves de idempotencia.
+
+`can_reconcile` por un borrador `valid` sólo aplica mientras no exista
+`pac_external_id` (Fase 6.21): al timbrar, el borrador se transforma en el
+CFDI y conserva `pac_draft_status=valid` sin que haya nada que reconciliar.
+
+## Expediente fiscal: XML/PDF (Fase 6.21)
+
+`InvoiceBusinessCapabilitiesService::artifactsFetchable()` es la única
+regla para obtener el XML/PDF de un CFDI y la comparten
+`DownloadInvoiceArtifactsService`, `actions.can_fetch_artifacts` (más el
+permiso `managePacArtifacts`) y el hallazgo `cfdi_artifacts_missing` de
+`billing:health`: identidad completa, `pac_status` `valid` **o
+`canceled`** y artifacts ni `stored` ni `pending`.
+
+Los CFDI cancelados se pueden descargar: verificado en Facturapi TEST
+(`GET /invoices/{id}/xml` y `/pdf` de un CFDI cancelado responden 200 y el
+UUID del XML coincide con `cfdi_uuid`); la documentación de Facturapi no
+lo restringe ni lo confirma. El PDF descargado antes de cancelar no lleva
+marca de cancelación: la prueba de la cancelación es el acuse.
 
 ## Seguridad de escrituras PAC
 

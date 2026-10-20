@@ -227,9 +227,9 @@ class InvoiceHealthEvaluator
     /** @return list<Finding> */
     private function artifactFindings(Invoice $invoice): array
     {
-        if ($this->capabilities->hasCompleteFiscalIdentity($invoice)
-            && in_array($invoice->pac_status, self::PAC_FINAL_STATUSES, true)
-            && $invoice->cfdi_artifacts_status !== 'stored') {
+        // Fase 6.21: misma regla que el servicio y can_fetch_artifacts; sólo
+        // se sugiere fetch_artifacts cuando la descarga es posible.
+        if ($this->capabilities->artifactsFetchable($invoice)) {
             // Informativo: los artifacts se obtienen bajo demanda y su
             // ausencia no altera la vigencia del CFDI ni dispara --fail-on.
             return [new Finding('cfdi_artifacts_missing', Health::Valid, Action::FetchArtifacts)];

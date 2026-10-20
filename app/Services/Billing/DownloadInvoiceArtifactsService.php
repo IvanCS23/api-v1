@@ -28,8 +28,8 @@ use Throwable;
 /**
  * Descarga (una sola vez, salvo `forceRefresh`), valida y almacena
  * privadamente el XML/PDF de un CFDI YA TIMBRADO (Fase 6.3) —
- * `pac_status=valid` + `cfdi_uuid` real, nunca de un borrador ni de una
- * emisión ambigua. Depende ÚNICAMENTE de `PacProvider` (contrato) y de
+ * `pac_status=valid` (o `canceled`, Fase 6.21) + `cfdi_uuid` real, nunca
+ * de un borrador ni de una emisión ambigua. Depende ÚNICAMENTE de `PacProvider` (contrato) y de
  * `Illuminate\Support\Facades\Storage` — nunca importa `FacturapiProvider`
  * ni conoce URLs/el facade `Http`/el Bearer token (mismo aislamiento que
  * el resto de los servicios de Billing).
@@ -502,9 +502,16 @@ class DownloadInvoiceArtifactsService
         ], $error instanceof PacException ? ($error->pacCode ?? (string) $error->httpStatus) : null);
     }
 
+    /**
+     * Fase 6.21: también un CFDI cancelado. Su XML sigue siendo el
+     * comprobante timbrado (mismo UUID, validado en assertValidXml());
+     * verificado en Facturapi TEST que /xml y /pdf responden 200.
+     */
     private function assertIsStampedCfdi(Invoice $invoice): void
     {
-        if ($invoice->pac_external_id === null || $invoice->cfdi_uuid === null || $invoice->pac_status !== 'valid') {
+        if ($invoice->pac_external_id === null
+            || $invoice->cfdi_uuid === null
+            || ! in_array($invoice->pac_status, InvoiceBusinessCapabilitiesService::ARTIFACT_PAC_STATUSES, true)) {
             throw new RuntimeException(sprintf(
                 'La factura [%d] no es un CFDI timbrado válido (pac_external_id: %s, cfdi_uuid: %s, pac_status: %s); no se pueden descargar artifacts.',
                 $invoice->id,

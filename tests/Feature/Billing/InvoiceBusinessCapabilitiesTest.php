@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\User;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -28,12 +29,14 @@ test('matriz ERP PAC deriva capacidades empresariales sin consultar PAC', functi
 
     $actions = app(InvoiceBusinessCapabilitiesService::class)->for($invoice->fresh(), $user);
 
-    expect($actions)->toBe([
-        'can_issue' => $canIssue,
-        'can_cancel' => $cancelMode !== null,
-        'can_reconcile' => $canReconcile,
-        'cancellation_mode' => $cancelMode,
-    ]);
+    // can_fetch_artifacts tiene su propia matriz (CfdiArtifactsFetchabilityTest).
+    expect(array_keys($actions))->toBe(['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'cancellation_mode'])
+        ->and(Arr::except($actions, 'can_fetch_artifacts'))->toBe([
+            'can_issue' => $canIssue,
+            'can_cancel' => $cancelMode !== null,
+            'can_reconcile' => $canReconcile,
+            'cancellation_mode' => $cancelMode,
+        ]);
     Http::assertNothingSent();
 })->with([
     'draft sin CFDI válido ERP-only' => [InvoiceStatus::Draft, [], false, 'erp_only', false],
@@ -100,6 +103,7 @@ test('identidad fiscal parcial queda inválida y sin acciones automáticas', fun
         'can_issue' => false,
         'can_cancel' => false,
         'can_reconcile' => false,
+        'can_fetch_artifacts' => false,
         'cancellation_mode' => null,
     ]);
     Http::assertNothingSent();
