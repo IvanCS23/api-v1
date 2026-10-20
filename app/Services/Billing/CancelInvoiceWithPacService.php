@@ -8,6 +8,7 @@ use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
+use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
@@ -273,7 +274,8 @@ class CancelInvoiceWithPacService
     {
         return ! ($e instanceof PacValidationException
             || $e instanceof PacAuthenticationException
-            || $e instanceof PacRateLimitException);
+            || $e instanceof PacRateLimitException
+            || $e instanceof PacInvoiceNotFoundException);
     }
 
     /**

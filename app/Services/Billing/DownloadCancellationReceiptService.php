@@ -10,6 +10,7 @@ use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
+use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\Invoice;
@@ -404,6 +405,7 @@ class DownloadCancellationReceiptService
         return $e instanceof PacValidationException
             || $e instanceof PacAuthenticationException
             || $e instanceof PacRateLimitException
+            || $e instanceof PacInvoiceNotFoundException
                 ? 'failed'
                 : 'reconciliation_required';
     }

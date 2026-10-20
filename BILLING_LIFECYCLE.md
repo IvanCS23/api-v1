@@ -117,11 +117,55 @@ el timbrado y la cancelación nunca se reenvían: la `ConnectionException` se
 propaga y el servicio la clasifica como ambigua (`reconciliation_required`).
 Ninguna respuesta HTTP ya recibida (4xx/5xx) se reintenta.
 
-Los códigos estables de error de Facturapi (`body.code`) incluyen
-`invoice_already_stamped`, `stamping_in_progress`,
-`invoice_cancellation_in_progress`, `draft_update_in_progress` e
-`idempotency_key_in_use` (docs.facturapi.io, "Error handling"); su HTTP status
-no está documentado y todavía no se mapean de forma específica.
+### Códigos de error de Facturapi (Fase 6.20)
+
+`FacturapiProvider::assertSuccessful()` evalúa `body.code` (docs.facturapi.io,
+"Error handling") **antes** que el HTTP status, que Facturapi no documenta
+por código. Un código desconocido conserva el mapeo por status.
+
+| `body.code` | Excepción | Clasificación | Código público |
+|---|---|---|---|
+| `invoice_not_found` | `PacInvoiceNotFoundException` | definitivo (`failed`) | `409 PAC_INVOICE_NOT_FOUND` |
+| `stamping_in_progress`, `invoice_cancellation_in_progress`, `draft_update_in_progress`, `idempotency_key_in_use` | `PacOperationInProgressException` (hereda de `PacConflictException`) | ambiguo (`reconciliation_required`) | `409 PAC_OPERATION_IN_PROGRESS` |
+
+Antes, un `stamping_in_progress` con 400 se habría tratado como validación
+definitiva y habría habilitado repetir el timbrado.
+
+`invoice_not_found` sólo prueba que la operación no ocurrió **con la llave
+configurada**: Facturapi responde lo mismo si la llave es de otra
+organización. Por eso la reconciliación nunca lo interpreta como "el remoto
+no existe" y mantiene la revisión pendiente.
+
+### Llave de idempotencia repetida (verificado en Facturapi TEST)
+
+Experimento controlado de la Fase 6.20 (borradores `exp-6.20-*`, ya
+eliminados):
+
+1. `POST /invoices` (`status=draft`) con la llave K → 200, borrador A.
+2. Mismo `POST` con K → **409 `idempotency_key_in_use`**. No devuelve A ni
+   crea otro recurso, aunque la primera petición ya haya terminado.
+3. `GET /invoices?external_id=` → incluye el borrador (`status=draft`) con
+   su `idempotency_key`.
+4. `DELETE /invoices/{id}` de un borrador → 200; luego `GET` → 404
+   `invoice_not_found`.
+
+Consecuencia: si la creación del borrador falla después de reservar
+`pac_draft_idempotency_key` y nunca se guarda `pac_draft_external_id`,
+reintentar la emisión responde siempre `PAC_OPERATION_IN_PROGRESS`.
+`InvoiceBusinessCapabilitiesService::hasUnlinkedDraftReservation()` detecta
+ese estado (llave del borrador sin `pac_draft_external_id`,
+`pac_external_id`, `pac_idempotency_key` ni `pac_issue_status`), habilita
+`actions.can_reconcile` y `billing:health` lo reporta como
+`draft_reserved_without_remote_id`.
+
+`ReconcileInvoiceWithPacService` busca entonces por
+`PacIdentifiers::draftExternalId()`, relee el borrador con
+`retrieveDraftInvoice()` (exige `livemode=false`) y sólo lo vincula si
+`external_id` e `idempotency_key` coinciden con la reserva. Nunca toca
+`pac_external_id` ni `cfdi_uuid`; el siguiente `/operations/issue` continúa
+desde el borrador vinculado. Si no hay borrador remoto, libera la revisión:
+reintentar con la misma llave es seguro, porque Facturapi nunca crea un
+segundo recurso con ella.
 
 ### Fechas del PAC (Fase 6.20)
 
@@ -202,6 +246,7 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_pending_recent` / `cancellation_pending_stale` | transient / recoverable | wait / reconcile |
 | `reconciliation_required` | recoverable | reconcile |
 | `issue_failed`, `erp_issued_without_cfdi` | recoverable | operations_issue |
+| `draft_reserved_without_remote_id` (ERP `issued`, llave de borrador reservada sin `pac_draft_external_id` ni `pac_issue_status`) | recoverable | reconcile |
 | `cfdi_canceled_erp_not_converged` | recoverable | operations_cancel |
 | `cancellation_request_in_flight` / `cancellation_request_in_flight_stale` | transient / recoverable | wait / reconcile |
 | `erp_cancelled_cfdi_valid` (ERP `cancelled`, CFDI `valid`, sin cancelación en curso; incluye rechazo/expiración) | recoverable | manual_review |

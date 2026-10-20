@@ -11,6 +11,8 @@ use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacInvoiceNotFoundException;
+use App\Exceptions\Billing\PacOperationInProgressException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
@@ -700,9 +702,25 @@ class FacturapiProvider implements PacProvider
     }
 
     /**
+     * `body.code` de Facturapi que indican otra operación registrada sobre
+     * el mismo recurso o la misma llave (docs.facturapi.io, "Error
+     * handling"). Su HTTP status no está documentado.
+     */
+    private const IN_PROGRESS_CODES = [
+        'stamping_in_progress',
+        'invoice_cancellation_in_progress',
+        'draft_update_in_progress',
+        'idempotency_key_in_use',
+    ];
+
+    /**
      * Traduce la respuesta a la excepción correspondiente. El mensaje y
      * `pacCode` solo usan el cuerpo de la respuesta del PAC — nunca la
      * API key ni ninguna cabecera de la petición saliente.
+     *
+     * Fase 6.20: los códigos estables de Facturapi (`body.code`) se
+     * evalúan ANTES que el HTTP status, que no está documentado por
+     * código; un código desconocido conserva el mapeo por status.
      */
     private function assertSuccessful(Response $response): void
     {
@@ -717,6 +735,8 @@ class FacturapiProvider implements PacProvider
 
         throw match (true) {
             $code === 'invoice_cancellation_receipt_unavailable' => new CancellationReceiptUnavailableException($message, $status, $code),
+            $code === 'invoice_not_found' => new PacInvoiceNotFoundException($message, $status, $code),
+            in_array($code, self::IN_PROGRESS_CODES, true) => new PacOperationInProgressException($message, $status, $code),
             $status === 401 || $status === 403 => new PacAuthenticationException($message, $status, $code),
             $status === 400 || $status === 422 => new PacValidationException($message, $status, $code),
             $status === 409 => new PacConflictException($message, $status, $code),

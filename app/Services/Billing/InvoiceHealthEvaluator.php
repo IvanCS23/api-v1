@@ -80,6 +80,14 @@ class InvoiceHealthEvaluator
             return [new Finding('issue_failed', Health::Recoverable, Action::OperationsIssue)];
         }
 
+        // Fase 6.20: reintentar la emisión repetiría la llave del borrador y
+        // Facturapi respondería siempre idempotency_key_in_use; sólo la
+        // reconciliación puede vincular el borrador remoto.
+        if ($invoice->status === InvoiceStatus::Issued
+            && $this->capabilities->hasUnlinkedDraftReservation($invoice)) {
+            return [new Finding('draft_reserved_without_remote_id', Health::Recoverable, Action::Reconcile)];
+        }
+
         if ($invoice->status === InvoiceStatus::Issued
             && $invoice->pac_status === null
             && $invoice->pac_draft_status !== 'valid') {

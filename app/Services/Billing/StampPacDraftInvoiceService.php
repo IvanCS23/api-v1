@@ -8,6 +8,7 @@ use App\Enums\InvoicePacEventType;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
+use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
@@ -329,7 +330,8 @@ class StampPacDraftInvoiceService
     {
         return $e instanceof PacValidationException
             || $e instanceof PacAuthenticationException
-            || $e instanceof PacRateLimitException;
+            || $e instanceof PacRateLimitException
+            || $e instanceof PacInvoiceNotFoundException;
     }
 
     private function sanitizeErrorMessage(Throwable $e): string

@@ -38,6 +38,7 @@ class ReconcileInvoiceWithPacService
     public function __construct(
         private readonly PacProvider $pacProvider,
         private readonly InvoicePacAuditService $audit,
+        private readonly InvoiceBusinessCapabilitiesService $capabilities,
     ) {}
 
     public function reconcile(Invoice $invoice, bool $throwOnFailure = false): Invoice
@@ -53,6 +54,10 @@ class ReconcileInvoiceWithPacService
                 'La factura [%d] no tiene pac_external_id ni contexto previo de emisión ante el PAC; no hay nada que reconciliar.',
                 $current->id,
             ));
+        }
+
+        if ($this->capabilities->hasUnlinkedDraftReservation($current)) {
+            return $this->recoverUnlinkedDraft($current, $tenantId, $throwOnFailure);
         }
 
         $requestedRemoteId = $current->pac_external_id ?? $current->pac_draft_external_id;
@@ -232,6 +237,142 @@ class ReconcileInvoiceWithPacService
             $this->audit->appendSafely($updated, InvoicePacEventType::Reconciled, [
                 'elapsed_ms' => $elapsedMs,
                 'changed_fields' => $changedFields,
+            ]);
+        }
+
+        return $updated;
+    }
+
+    /**
+     * Fase 6.20: la llave del borrador quedó reservada sin id remoto.
+     * Repetir el POST con la misma llave responde siempre
+     * `idempotency_key_in_use` (verificado en Facturapi TEST), así que el
+     * borrador se busca por `draftExternalId` (el listado sí incluye
+     * borradores y publica su `idempotency_key`) y se relee con
+     * retrieveDraftInvoice() para validar livemode y normalizar campos.
+     *
+     * Sólo se vincula si external_id e idempotency_key coinciden con la
+     * reserva; nunca toca la identidad fiscal final (pac_external_id,
+     * cfdi_uuid). El siguiente /operations/issue continúa desde el
+     * borrador vinculado.
+     */
+    private function recoverUnlinkedDraft(Invoice $current, int $tenantId, bool $throwOnFailure): Invoice
+    {
+        $expectedExternalId = PacIdentifiers::draftExternalId($tenantId, $current->id);
+        $startedAt = microtime(true);
+
+        try {
+            $found = $this->pacProvider->findInvoiceByExternalId($expectedExternalId);
+            $draft = $found === null ? null : $this->pacProvider->retrieveDraftInvoice($found->externalId);
+        } catch (PacUnexpectedEnvironmentException $e) {
+            $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_draft_recovery_wrong_environment');
+
+            throw $e;
+        } catch (Throwable $e) {
+            $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_draft_recovery_failed');
+
+            if ($throwOnFailure) {
+                throw $e;
+            }
+
+            return $current->fresh();
+        }
+
+        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
+
+        if ($draft === null) {
+            // La creación nunca llegó al PAC: el siguiente intento de
+            // emisión puede crear el borrador con la misma llave. Liberar
+            // una marca de revisión previa es seguro: si el borrador sí
+            // existiera, repetir la llave responde idempotency_key_in_use y
+            // nunca crea un segundo recurso.
+            $updated = DB::transaction(function () use ($current, $tenantId): Invoice {
+                $locked = Invoice::withoutGlobalScope(CompanyScope::class)
+                    ->whereKey($current->getKey())
+                    ->where('company_id', $tenantId)
+                    ->lockForUpdate()
+                    ->firstOrFail();
+
+                if ($locked->pac_reconciliation_required
+                    && $this->capabilities->hasUnlinkedDraftReservation($locked)) {
+                    $locked->forceFill([
+                        'pac_reconciliation_required' => false,
+                        'pac_last_error' => null,
+                    ])->save();
+                }
+
+                return $locked;
+            });
+
+            Log::info('billing.invoice.pac_draft_recovery_not_found', $this->safeLogContext($updated, $elapsedMs));
+            $this->audit->appendSafely($updated, InvoicePacEventType::ReconciliationRequired, [
+                'elapsed_ms' => $elapsedMs,
+                'reason' => 'remote_draft_not_found',
+            ]);
+
+            return $updated;
+        }
+
+        if ($draft->externalId !== $found->externalId
+            || $draft->externalReference !== $expectedExternalId
+            || $draft->idempotencyKey === null
+            || ! hash_equals((string) $current->pac_draft_idempotency_key, $draft->idempotencyKey)) {
+            $exception = new PacUnexpectedResponseException(sprintf(
+                'El borrador remoto encontrado para la factura [%d] no corresponde a la llave de idempotencia reservada; no se vincula.',
+                $current->id,
+            ));
+            $this->recordReconciliationFailure($current, $tenantId, $exception, 'billing.invoice.pac_draft_recovery_identity_mismatch');
+
+            throw $exception;
+        }
+
+        $providerSlug = $this->pacProvider->name();
+
+        $updated = DB::transaction(function () use ($current, $tenantId, $draft, $providerSlug): Invoice {
+            if (app(CurrentTenant::class)->id() !== $tenantId) {
+                throw (new ModelNotFoundException)->setModel(Invoice::class, [$current->getKey()]);
+            }
+
+            $locked = Invoice::withoutGlobalScope(CompanyScope::class)
+                ->whereKey($current->getKey())
+                ->where('company_id', $tenantId)
+                ->lockForUpdate()
+                ->firstOrFail();
+
+            // Otra ejecución vinculó el borrador o cambió la reserva
+            // mientras ocurría el HTTP: no se pisa al ganador.
+            if (! $this->capabilities->hasUnlinkedDraftReservation($locked)
+                || $locked->pac_draft_idempotency_key !== $draft->idempotencyKey) {
+                return $locked;
+            }
+
+            $locked->forceFill([
+                'pac_provider' => $locked->pac_provider ?? $providerSlug,
+                'pac_draft_external_id' => $draft->externalId,
+                'pac_draft_status' => $draft->status,
+                'pac_draft_ready_to_stamp' => $draft->isReadyToStamp,
+                'pac_draft_created_at' => $draft->createdAt,
+                'pac_draft_last_sync_at' => now(),
+                'pac_draft_response' => $draft->rawResponse,
+                // Un borrador ya timbrado/cancelado fuera de este flujo
+                // se resuelve en la siguiente reconciliación por id.
+                'pac_reconciliation_required' => $draft->status !== 'draft',
+                'pac_last_error' => null,
+            ])->save();
+
+            return $locked;
+        });
+
+        if ($updated->pac_draft_external_id === $draft->externalId
+            && $current->pac_draft_external_id !== $draft->externalId) {
+            Log::info('billing.invoice.pac_draft_recovered', [
+                ...$this->safeLogContext($updated, $elapsedMs),
+                'pac_draft_external_id' => $this->audit->maskIdentifier($draft->externalId),
+                'pac_draft_status' => $updated->pac_draft_status,
+            ]);
+            $this->audit->appendSafely($updated, InvoicePacEventType::Reconciled, [
+                'elapsed_ms' => $elapsedMs,
+                'changed_fields' => ['pac_draft_external_id', 'pac_draft_status'],
             ]);
         }
 
