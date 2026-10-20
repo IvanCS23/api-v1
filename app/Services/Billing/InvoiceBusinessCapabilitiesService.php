@@ -108,7 +108,11 @@ class InvoiceBusinessCapabilitiesService
             || $hasPartialIdentity
             || $this->hasOpenCancelRequest($invoice)
             || $invoice->pac_status === 'pending'
-            || $invoice->pac_draft_status === 'valid'
+            // Fase 6.21: sólo un borrador valid SIN vincular. Al timbrar, el
+            // borrador se transforma en el CFDI y conserva
+            // pac_draft_status=valid; con pac_external_id ya no hay nada que
+            // reconciliar (misma regla que remote_draft_valid_unlinked).
+            || ($invoice->pac_draft_status === 'valid' && blank($invoice->pac_external_id))
             || $this->hasUnlinkedDraftReservation($invoice);
     }
 
