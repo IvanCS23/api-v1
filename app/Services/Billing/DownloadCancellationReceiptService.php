@@ -43,6 +43,7 @@ class DownloadCancellationReceiptService
     public function __construct(
         private readonly PacProvider $pacProvider,
         private readonly InvoicePacAuditService $audit,
+        private readonly InvoiceBusinessCapabilitiesService $capabilities,
     ) {}
 
     public function download(Invoice $invoice): CancellationReceiptResult
@@ -55,7 +56,9 @@ class DownloadCancellationReceiptService
             return $this->returnExistingOrReconcile($current);
         }
 
-        if ($current->cancellation_receipt_status === 'pending') {
+        // Fase 6.22: sólo una reserva vigente bloquea; una vencida o sin
+        // fecha (proceso caído a mitad del HTTP) puede retomarse.
+        if ($this->capabilities->cancellationReceiptDownloadInProgress($current)) {
             throw new RuntimeException(sprintf(
                 'La factura [%d] ya tiene una descarga de acuse en curso.',
                 $current->id,
@@ -161,7 +164,7 @@ class DownloadCancellationReceiptService
             $locked = $this->lockedInvoice($invoice);
             $this->assertReceiptCanBeDownloaded($locked);
 
-            if ($locked->cancellation_receipt_status === 'pending') {
+            if ($this->capabilities->cancellationReceiptDownloadInProgress($locked)) {
                 throw new RuntimeException(sprintf(
                     'La factura [%d] ya tiene una descarga de acuse en curso.',
                     $locked->id,
@@ -175,7 +178,10 @@ class DownloadCancellationReceiptService
                 ));
             }
 
-            $locked->forceFill(['cancellation_receipt_status' => 'pending'])->save();
+            $locked->forceFill([
+                'cancellation_receipt_status' => 'pending',
+                'cancellation_receipt_started_at' => now(),
+            ])->save();
 
             return $locked;
         });

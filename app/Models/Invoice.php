@@ -158,6 +158,7 @@ class Invoice extends Model
         'cancellation_receipt_xml_size' => 'integer',
         'cancellation_receipt_pdf_size' => 'integer',
         'cancellation_receipt_downloaded_at' => 'immutable_datetime',
+        'cancellation_receipt_started_at' => 'immutable_datetime',
     ];
 
     // company() ya la provee el trait BelongsToCompany.

@@ -31,6 +31,9 @@ class BillingHealthReportService
         'pac_draft_external_id', 'pac_draft_status', 'pac_draft_idempotency_key', 'pac_draft_created_at',
         'cfdi_artifacts_status', 'cfdi_artifacts_started_at', 'cancellation_receipt_status',
         'pac_cancel_request_status', 'pac_cancel_started_at',
+        // Fase 6.22: sólo se lee su prefijo [CODIGO] (PacErrorCode); el
+        // reporte nunca publica el texto.
+        'cancellation_receipt_last_error', 'cancellation_receipt_started_at',
     ];
 
     public function __construct(
@@ -88,6 +91,7 @@ class BillingHealthReportService
                 'draft_date_limit_hours' => (int) config('billing.health.draft_date_limit_hours'),
                 'cancel_in_flight_minutes' => (int) config('billing.cancel_in_flight_minutes'),
                 'artifacts_pending_minutes' => (int) config('billing.artifacts.pending_minutes'),
+                'cancellation_receipt_pending_minutes' => (int) config('billing.cancellation_receipt.pending_minutes'),
             ],
             'evaluated' => array_sum($state['totals']),
             'worst' => $state['worst']->value,

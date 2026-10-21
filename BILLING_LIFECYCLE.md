@@ -94,6 +94,17 @@ por diseño. La aceptación de un acuse legítimo solo puede verificarse con la
 primera cancelación real en modo Live; es una verificación obligatoria de esa
 fase.
 
+**Reintentos del acuse (Fase 6.22).** El backend calcula
+`actions.can_fetch_cancellation_receipt`: CFDI `canceled` + `accepted`, sin
+acuse almacenado ni descarga vigente, permiso `managePacArtifacts` y por
+debajo del límite de bloqueos de identidad, contados con los eventos
+`cancellation_receipt_identity_mismatch`. En `test` el límite es 1 (un
+reintento sólo repetiría el acuse ajeno); en `live`,
+`billing.cancellation_receipt.live_identity_mismatch_limit` (3). Al
+alcanzarlo, el panel deja de ofrecer "Obtener acuse" y `billing:health`
+sugiere `manual_review`. El endpoint y el comando de diagnóstico siguen
+pudiendo reintentar explícitamente.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.
@@ -105,8 +116,10 @@ fase.
 Los consumidores de UI nuevos deben usar `/operations/issue` y
 `/operations/cancel`. `GET /api/invoices/{invoice}/billing` publica
 `actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile`,
-`actions.can_fetch_artifacts` y `actions.cancellation_mode`; no expone
-llaves, payloads, respuestas crudas ni claves de idempotencia.
+`actions.can_fetch_artifacts`, `actions.can_fetch_cancellation_receipt`,
+`actions.cancellation_mode` y `pac.mode` (`test`|`live`, o `null` si el
+modo configurado no es reconocido); no expone llaves, payloads, respuestas
+crudas ni claves de idempotencia.
 
 `can_reconcile` por un borrador `valid` sólo aplica mientras no exista
 `pac_external_id` (Fase 6.21): al timbrar, el borrador se transforma en el
@@ -164,6 +177,12 @@ y `cfdi_artifacts_started_at`. Una reserva más vieja que
 `billing.artifacts.pending_minutes` (10 min), o sin fecha (anterior a la
 columna), se considera abandonada (proceso caído a mitad del HTTP) y puede
 retomarse; una vigente rechaza una segunda descarga.
+
+Fase 6.22: el acuse de cancelación sigue el mismo patrón.
+`DownloadCancellationReceiptService` reserva con
+`cancellation_receipt_status=pending` y `cancellation_receipt_started_at`;
+una reserva más vieja que `billing.cancellation_receipt.pending_minutes`
+(10 min), o sin fecha, puede retomarse.
 
 ## Seguridad de escrituras PAC
 
@@ -339,7 +358,10 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_accepted_not_canceled`, `identity_incomplete`, `remote_draft_valid_unlinked` | recoverable | reconcile |
 | `cfdi_artifacts_missing` (sólo si `artifactsFetchable()`: CFDI `valid` o `canceled`) | valid (informativo) | fetch_artifacts |
 | `artifacts_download_pending` / `artifacts_download_pending_stale` | transient / recoverable | wait / fetch_artifacts |
+| `cancellation_receipt_download_pending` / `cancellation_receipt_download_pending_stale` | transient / recoverable | wait / fetch_receipt |
 | `receipt_without_cancellation` (acuse sin ninguna solicitud registrada) | valid (informativo) | manual_review |
+| `cancellation_receipt_identity_mismatch` (acuse bloqueado: `Acuse/Folios/UUID` no corresponde al CFDI) | valid (informativo) con `billing.pac_mode=test`; recoverable con `live` | manual_review |
+| `cancellation_receipt_retry_pending` (acuse en `reconciliation_required` por otro motivo: no disponible, 5xx, archivo local faltante) | valid (informativo) | fetch_receipt |
 | `remote_draft_date_window_risk` | transient (≥48 h) / recoverable (≥72 h) | operations_issue / manual_review |
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
 | `identity_uuid_without_external_id`, `erp_behind_cfdi`, `issue_succeeded_without_valid_cfdi`, `pac_status_without_identity`, `idempotency_key_mismatch` | invalid | manual_review |
@@ -360,6 +382,14 @@ emisión o cancelación pendiente, salvo que `pac_issue_status` sea
 `reconciliation_required`. La antigüedad de una cancelación pendiente se mide
 desde el último evento `CancellationRequested` (o `last_pac_sync_at` si no
 existe). El acuse nunca cuenta como prueba de cancelación.
+
+Hallazgos del acuse (Fase 6.22): el bloqueo de identidad es la única
+excepción a "el acuse nunca escala", y sólo en `live`, donde un acuse ajeno
+exige revisión. En `test` Facturapi siempre entrega un acuse ajeno
+(`EstatusUUID` 205), así que es informativo y no dispara `--fail-on`. El
+motivo se distingue por el prefijo `[CODIGO]` de
+`cancellation_receipt_last_error` (`PacErrorCode`), que el reporte lee pero
+nunca publica.
 
 Umbrales en `config/billing.php` (`billing.health.*`):
 
@@ -383,18 +413,17 @@ idempotencia, `pac_external_id` ni `cfdi_uuid`.
 
 ## Riesgos pendientes
 
-### PRIORITARIO para la siguiente fase: revisión fiscal acoplada a los archivos
+### Resuelto en la Fase 6.22: revisión fiscal acoplada a los archivos
 
-`ReconcileInvoiceWithPacService` persiste
-`pac_reconciliation_required = ! $artifactsStored` cuando el CFDI remoto es
-`valid` (`ReconcileInvoiceWithPacService.php:182`). Reconciliar un CFDI
-vigente cuyo XML/PDF aún no se descargó lo marca "requiere reconciliación",
-aunque su estado fiscal sea correcto: eso bloquea `can_issue`, anula
-`cancellation_mode` (no se puede cancelar) y escala en `billing:health`. La
-descarga automática de la Fase 6.21 reduce los casos, pero no elimina el
-acoplamiento (worker detenido, descarga fallida). Los archivos ya tienen su
-propio estado (`cfdi_artifacts_status`); la revisión fiscal no debería
-depender de ellos.
+Hasta la Fase 6.21, `ReconcileInvoiceWithPacService` persistía
+`pac_reconciliation_required = ! $artifactsStored` para un CFDI `valid`.
+Reconciliar un CFDI vigente sin XML/PDF lo marcaba en revisión: la emisión
+orquestada por la ruta del borrador `valid` respondía 409
+`PAC_RECONCILIATION_REQUIRED` con el CFDI ya válido, "Cancelar factura"
+desaparecía y descargar los archivos no limpiaba la marca. Ahora la marca
+sólo depende del estado remoto (`valid` y `canceled` la liberan); la falta
+de archivos la cubren `cfdi_artifacts_missing`, `can_fetch_artifacts` y la
+descarga automática.
 
 ### Zona horaria de la conexión MySQL (no corregido)
 

@@ -13,5 +13,6 @@ enum InvoiceHealthAction: string
     case OperationsIssue = 'operations_issue';
     case OperationsCancel = 'operations_cancel';
     case FetchArtifacts = 'fetch_artifacts';
+    case FetchReceipt = 'fetch_receipt';
     case ManualReview = 'manual_review';
 }

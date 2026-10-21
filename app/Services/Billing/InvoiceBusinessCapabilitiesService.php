@@ -2,9 +2,11 @@
 
 namespace App\Services\Billing;
 
+use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\User;
+use App\Support\Billing\PacCredentialGuard;
 
 /**
  * Deriva capacidades empresariales sanitizadas desde ambas máquinas de
@@ -19,7 +21,7 @@ class InvoiceBusinessCapabilitiesService
      */
     public const ARTIFACT_PAC_STATUSES = ['valid', 'canceled'];
 
-    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, cancellation_mode: ?string} */
+    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string} */
     public function for(Invoice $invoice, ?User $user): array
     {
         $canIssue = $user?->can('issueBusiness', $invoice) === true
@@ -32,14 +34,60 @@ class InvoiceBusinessCapabilitiesService
             && $user?->can('reconcilePac', $invoice) === true;
         $canFetchArtifacts = $this->artifactsFetchable($invoice)
             && $user?->can('managePacArtifacts', $invoice) === true;
+        $canFetchReceipt = $user?->can('managePacArtifacts', $invoice) === true
+            && $this->cancellationReceiptFetchable($invoice);
 
         return [
             'can_issue' => $canIssue,
             'can_cancel' => $canCancel,
             'can_reconcile' => $canReconcile,
             'can_fetch_artifacts' => $canFetchArtifacts,
+            'can_fetch_cancellation_receipt' => $canFetchReceipt,
             'cancellation_mode' => $canCancel ? $mode : null,
         ];
+    }
+
+    /**
+     * Fase 6.22: única regla para ofrecer "Obtener acuse". CFDI cancelado y
+     * aceptado, sin acuse almacenado ni descarga vigente, y por debajo del
+     * límite de bloqueos de identidad: en modo test, Facturapi siempre
+     * entrega un acuse ajeno, así que basta un bloqueo; en live se permiten
+     * `billing.cancellation_receipt.live_identity_mismatch_limit` (3), por
+     * si Facturapi corrige el acuse, y después queda la revisión manual.
+     *
+     * Sólo gobierna la oferta en la UI: el servicio y el comando de
+     * diagnóstico pueden reintentar explícitamente.
+     */
+    public function cancellationReceiptFetchable(Invoice $invoice): bool
+    {
+        if (! $this->hasCompleteFiscalIdentity($invoice)
+            || $invoice->pac_status !== 'canceled'
+            || $invoice->cancellation_status !== 'accepted'
+            || $invoice->cancellation_receipt_status === 'stored'
+            || $this->cancellationReceiptDownloadInProgress($invoice)) {
+            return false;
+        }
+
+        return $this->identityMismatchCount($invoice) < $this->identityMismatchLimit();
+    }
+
+    public function identityMismatchLimit(): int
+    {
+        return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+            ? 1
+            : max(1, (int) config('billing.cancellation_receipt.live_identity_mismatch_limit'));
+    }
+
+    private function identityMismatchCount(Invoice $invoice): int
+    {
+        // Sin intento previo con error no hace falta consultar eventos.
+        if ($invoice->cancellation_receipt_status === null) {
+            return 0;
+        }
+
+        return $invoice->pacEvents()
+            ->where('event_type', InvoicePacEventType::CancellationReceiptIdentityMismatch->value)
+            ->count();
     }
 
     /**
@@ -62,6 +110,19 @@ class InvoiceBusinessCapabilitiesService
      * inicio (anterior a la columna), se considera abandonada y puede
      * retomarse.
      */
+    /**
+     * Fase 6.22: misma regla que artifactsDownloadInProgress() para el acuse
+     * de cancelación (`billing.cancellation_receipt.pending_minutes`).
+     */
+    public function cancellationReceiptDownloadInProgress(Invoice $invoice): bool
+    {
+        return $invoice->cancellation_receipt_status === 'pending'
+            && $invoice->cancellation_receipt_started_at !== null
+            && $invoice->cancellation_receipt_started_at->greaterThan(
+                now()->subMinutes((int) config('billing.cancellation_receipt.pending_minutes')),
+            );
+    }
+
     public function artifactsDownloadInProgress(Invoice $invoice): bool
     {
         return $invoice->cfdi_artifacts_status === 'pending'

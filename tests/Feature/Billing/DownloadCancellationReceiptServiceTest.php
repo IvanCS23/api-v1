@@ -157,7 +157,12 @@ test('cancellation_status distinto de accepted rechaza antes de HTTP', function 
 
 test('una descarga de acuse ya pending no inicia otra llamada HTTP', function () {
     $company = Company::factory()->create();
-    $invoice = canceledInvoiceForReceiptTest($company, ['cancellation_receipt_status' => 'pending']);
+    // Fase 6.22: sólo una reserva vigente bloquea (ver
+    // CancellationReceiptPendingTest para la vencida).
+    $invoice = canceledInvoiceForReceiptTest($company, [
+        'cancellation_receipt_status' => 'pending',
+        'cancellation_receipt_started_at' => now(),
+    ]);
     app(CurrentTenant::class)->set($company->id);
     Http::fake();
 

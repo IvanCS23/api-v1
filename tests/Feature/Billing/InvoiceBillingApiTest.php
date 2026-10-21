@@ -97,9 +97,9 @@ test('endpoint autenticado expone snapshot fiscal explícito compatible con Invo
         ->assertOk()
         ->assertExactJsonStructure([
             'id', 'folio', 'status',
-            'actions' => ['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'cancellation_mode'],
+            'actions' => ['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'can_fetch_cancellation_receipt', 'cancellation_mode'],
             'pac' => [
-                'provider', 'status', 'cancellation_status', 'issue_status',
+                'mode', 'provider', 'status', 'cancellation_status', 'issue_status',
                 'reconciliation_required', 'last_sync_at',
             ],
             'cfdi' => [
