@@ -65,6 +65,29 @@ El acuse es un artifact posterior y no condiciona la cancelación. El código
 `CANCELLATION_RECEIPT_UUID_MISMATCH` continúa bloqueando artifacts ajenos sin
 modificar `cfdi_uuid`.
 
+#### Acuse en Facturapi TEST (observado)
+
+`DownloadCancellationReceiptService::assertValidXml()` compara el texto de
+`Acuse/Folios/UUID` (por nombre local) contra `cfdi_uuid` con `strcasecmp`
+tras `trim`: ignora mayúsculas/minúsculas y basta un `Folios` que coincida.
+Hay pruebas con el UUID del acuse en mayúsculas.
+
+En Facturapi TEST, los acuses obtenidos **nunca han correspondido** al CFDI
+cancelado. Verificación de solo lectura (2026-10-21, FAC-00000010, CFDI
+`canceled`/`accepted`): `GET /invoices/{id}/cancellation_receipt/xml`
+respondió 200 con raíz `Acuse` y un único `Folios/UUID`, un UUID válido
+pero **ajeno** (no coincide ni ignorando mayúsculas, no es genérico ni el de
+otra factura local) y `EstatusUUID=205`. La factura #2 (otra organización,
+agosto) tuvo el mismo rechazo. Hipótesis: en TEST la cancelación no llega
+al SAT real y el acuse no describe este comprobante; no se verificó si TEST
+devuelve siempre el mismo acuse.
+
+Consecuencia esperada en TEST: "Obtener acuse" termina en
+`CANCELLATION_RECEIPT_UUID_MISMATCH`, `cancellation_receipt_status` queda
+`reconciliation_required` y no se guarda ningún archivo. No es un fallo de
+comparación ni debe relajarse la validación: el bloqueo protege contra
+acuses ajenos en LIVE. La cancelación del CFDI no depende del acuse.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.
