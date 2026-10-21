@@ -31,6 +31,9 @@ class BillingHealthReportService
         'pac_draft_external_id', 'pac_draft_status', 'pac_draft_idempotency_key', 'pac_draft_created_at',
         'cfdi_artifacts_status', 'cfdi_artifacts_started_at', 'cancellation_receipt_status',
         'pac_cancel_request_status', 'pac_cancel_started_at',
+        // Fase 6.22: sólo se lee su prefijo [CODIGO] (PacErrorCode); el
+        // reporte nunca publica el texto.
+        'cancellation_receipt_last_error',
     ];
 
     public function __construct(

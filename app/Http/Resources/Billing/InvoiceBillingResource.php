@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Billing;
 
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
+use App\Support\Billing\PacErrorCode;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -55,13 +56,6 @@ class InvoiceBillingResource extends JsonResource
 
     private function cancellationReceiptErrorCode(): ?string
     {
-        $error = $this->cancellation_receipt_last_error;
-
-        if (! is_string($error)
-            || preg_match('/^\[([A-Z0-9_.-]{1,100})\](?:\s|$)/', $error, $matches) !== 1) {
-            return null;
-        }
-
-        return $matches[1];
+        return PacErrorCode::from($this->cancellation_receipt_last_error);
     }
 }

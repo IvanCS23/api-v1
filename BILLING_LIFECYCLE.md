@@ -340,6 +340,8 @@ estado de la factura ni dispara `--fail-on`.
 | `cfdi_artifacts_missing` (sólo si `artifactsFetchable()`: CFDI `valid` o `canceled`) | valid (informativo) | fetch_artifacts |
 | `artifacts_download_pending` / `artifacts_download_pending_stale` | transient / recoverable | wait / fetch_artifacts |
 | `receipt_without_cancellation` (acuse sin ninguna solicitud registrada) | valid (informativo) | manual_review |
+| `cancellation_receipt_identity_mismatch` (acuse bloqueado: `Acuse/Folios/UUID` no corresponde al CFDI) | valid (informativo) con `billing.pac_mode=test`; recoverable con `live` | manual_review |
+| `cancellation_receipt_retry_pending` (acuse en `reconciliation_required` por otro motivo: no disponible, 5xx, archivo local faltante) | valid (informativo) | fetch_receipt |
 | `remote_draft_date_window_risk` | transient (≥48 h) / recoverable (≥72 h) | operations_issue / manual_review |
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
 | `identity_uuid_without_external_id`, `erp_behind_cfdi`, `issue_succeeded_without_valid_cfdi`, `pac_status_without_identity`, `idempotency_key_mismatch` | invalid | manual_review |
@@ -360,6 +362,14 @@ emisión o cancelación pendiente, salvo que `pac_issue_status` sea
 `reconciliation_required`. La antigüedad de una cancelación pendiente se mide
 desde el último evento `CancellationRequested` (o `last_pac_sync_at` si no
 existe). El acuse nunca cuenta como prueba de cancelación.
+
+Hallazgos del acuse (Fase 6.22): el bloqueo de identidad es la única
+excepción a "el acuse nunca escala", y sólo en `live`, donde un acuse ajeno
+exige revisión. En `test` Facturapi siempre entrega un acuse ajeno
+(`EstatusUUID` 205), así que es informativo y no dispara `--fail-on`. El
+motivo se distingue por el prefijo `[CODIGO]` de
+`cancellation_receipt_last_error` (`PacErrorCode`), que el reporte lee pero
+nunca publica.
 
 Umbrales en `config/billing.php` (`billing.health.*`):
 
