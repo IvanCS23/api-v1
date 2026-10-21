@@ -383,18 +383,17 @@ idempotencia, `pac_external_id` ni `cfdi_uuid`.
 
 ## Riesgos pendientes
 
-### PRIORITARIO para la siguiente fase: revisión fiscal acoplada a los archivos
+### Resuelto en la Fase 6.22: revisión fiscal acoplada a los archivos
 
-`ReconcileInvoiceWithPacService` persiste
-`pac_reconciliation_required = ! $artifactsStored` cuando el CFDI remoto es
-`valid` (`ReconcileInvoiceWithPacService.php:182`). Reconciliar un CFDI
-vigente cuyo XML/PDF aún no se descargó lo marca "requiere reconciliación",
-aunque su estado fiscal sea correcto: eso bloquea `can_issue`, anula
-`cancellation_mode` (no se puede cancelar) y escala en `billing:health`. La
-descarga automática de la Fase 6.21 reduce los casos, pero no elimina el
-acoplamiento (worker detenido, descarga fallida). Los archivos ya tienen su
-propio estado (`cfdi_artifacts_status`); la revisión fiscal no debería
-depender de ellos.
+Hasta la Fase 6.21, `ReconcileInvoiceWithPacService` persistía
+`pac_reconciliation_required = ! $artifactsStored` para un CFDI `valid`.
+Reconciliar un CFDI vigente sin XML/PDF lo marcaba en revisión: la emisión
+orquestada por la ruta del borrador `valid` respondía 409
+`PAC_RECONCILIATION_REQUIRED` con el CFDI ya válido, "Cancelar factura"
+desaparecía y descargar los archivos no limpiaba la marca. Ahora la marca
+sólo depende del estado remoto (`valid` y `canceled` la liberan); la falta
+de archivos la cubren `cfdi_artifacts_missing`, `can_fetch_artifacts` y la
+descarga automática.
 
 ### Zona horaria de la conexión MySQL (no corregido)
 

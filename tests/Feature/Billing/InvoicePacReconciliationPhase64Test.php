@@ -176,7 +176,8 @@ test('valid recupera UUID y stamp de forma controlada cuando localmente faltan',
     expect($result->cfdi_uuid)->toBe($uuid)
         ->and($result->stamped_at)->not->toBeNull()
         ->and($result->pac_issue_status)->toBe('succeeded')
-        ->and($result->pac_reconciliation_required)->toBeTrue(); // falta descarga separada de artifacts
+        // Fase 6.22: la falta de artifacts ya no deja revisión fiscal.
+        ->and($result->pac_reconciliation_required)->toBeFalse();
 });
 
 test('valid sin UUID se rechaza y no destruye metadata fiscal existente', function () {

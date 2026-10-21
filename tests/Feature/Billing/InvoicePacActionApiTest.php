@@ -194,7 +194,8 @@ test('reconcile devuelve BillingResource actualizado, timeline e idempotencia si
         ->assertOk()
         ->assertJsonPath('pac.status', 'valid')
         ->assertJsonPath('pac.issue_status', 'succeeded')
-        ->assertJsonPath('pac.reconciliation_required', true)
+        // Fase 6.22: un CFDI valid sin artifacts ya no queda en revisión.
+        ->assertJsonPath('pac.reconciliation_required', false)
         ->assertJsonPath('timeline.0.type', 'reconciled');
     $this->actingAs($user, 'api')->postJson($uri)->assertOk();
 

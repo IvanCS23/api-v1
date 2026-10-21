@@ -168,7 +168,6 @@ class ReconcileInvoiceWithPacService
             $hadCfdiBefore = $locked->cfdi_uuid !== null;
             $isKnownStatus = in_array($result->status, self::REMOTE_STATUSES, true);
             $isValid = $result->status === 'valid';
-            $artifactsStored = $locked->cfdi_artifacts_status === 'stored';
 
             $attributes = [
                 'pac_provider' => $locked->pac_provider ?? $providerSlug,
@@ -178,11 +177,10 @@ class ReconcileInvoiceWithPacService
                 'last_pac_sync_at' => now(),
                 'pac_response' => $result->rawResponse,
                 'pac_last_error' => null,
-                'pac_reconciliation_required' => match ($result->status) {
-                    'valid' => ! $artifactsStored,
-                    'canceled' => false,
-                    default => true,
-                },
+                // Fase 6.22: la revisión fiscal no depende de los artifacts;
+                // su ausencia la cubren cfdi_artifacts_missing y
+                // can_fetch_artifacts.
+                'pac_reconciliation_required' => ! in_array($result->status, ['valid', 'canceled'], true),
             ];
 
             if ($isValid && $locked->cfdi_uuid === null) {
