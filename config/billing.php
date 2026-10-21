@@ -75,6 +75,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Acuse de cancelación (Fase 6.22)
+    |--------------------------------------------------------------------------
+    |
+    | - pending_minutes: antigüedad tras la cual una descarga del acuse en
+    |   `pending` (proceso caído a mitad del HTTP) puede retomarse. Mismo
+    |   criterio que artifacts.pending_minutes.
+    |
+    */
+
+    'cancellation_receipt' => [
+        'pending_minutes' => (int) env('BILLING_CANCELLATION_RECEIPT_PENDING_MINUTES', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Salud del ciclo de facturación (Fase 6.18)
     |--------------------------------------------------------------------------
     |

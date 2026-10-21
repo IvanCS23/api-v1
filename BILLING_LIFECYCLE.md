@@ -165,6 +165,12 @@ y `cfdi_artifacts_started_at`. Una reserva más vieja que
 columna), se considera abandonada (proceso caído a mitad del HTTP) y puede
 retomarse; una vigente rechaza una segunda descarga.
 
+Fase 6.22: el acuse de cancelación sigue el mismo patrón.
+`DownloadCancellationReceiptService` reserva con
+`cancellation_receipt_status=pending` y `cancellation_receipt_started_at`;
+una reserva más vieja que `billing.cancellation_receipt.pending_minutes`
+(10 min), o sin fecha, puede retomarse.
+
 ## Seguridad de escrituras PAC
 
 ### Modo y llave
@@ -339,6 +345,7 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_accepted_not_canceled`, `identity_incomplete`, `remote_draft_valid_unlinked` | recoverable | reconcile |
 | `cfdi_artifacts_missing` (sólo si `artifactsFetchable()`: CFDI `valid` o `canceled`) | valid (informativo) | fetch_artifacts |
 | `artifacts_download_pending` / `artifacts_download_pending_stale` | transient / recoverable | wait / fetch_artifacts |
+| `cancellation_receipt_download_pending` / `cancellation_receipt_download_pending_stale` | transient / recoverable | wait / fetch_receipt |
 | `receipt_without_cancellation` (acuse sin ninguna solicitud registrada) | valid (informativo) | manual_review |
 | `cancellation_receipt_identity_mismatch` (acuse bloqueado: `Acuse/Folios/UUID` no corresponde al CFDI) | valid (informativo) con `billing.pac_mode=test`; recoverable con `live` | manual_review |
 | `cancellation_receipt_retry_pending` (acuse en `reconciliation_required` por otro motivo: no disponible, 5xx, archivo local faltante) | valid (informativo) | fetch_receipt |

@@ -62,6 +62,19 @@ class InvoiceBusinessCapabilitiesService
      * inicio (anterior a la columna), se considera abandonada y puede
      * retomarse.
      */
+    /**
+     * Fase 6.22: misma regla que artifactsDownloadInProgress() para el acuse
+     * de cancelación (`billing.cancellation_receipt.pending_minutes`).
+     */
+    public function cancellationReceiptDownloadInProgress(Invoice $invoice): bool
+    {
+        return $invoice->cancellation_receipt_status === 'pending'
+            && $invoice->cancellation_receipt_started_at !== null
+            && $invoice->cancellation_receipt_started_at->greaterThan(
+                now()->subMinutes((int) config('billing.cancellation_receipt.pending_minutes')),
+            );
+    }
+
     public function artifactsDownloadInProgress(Invoice $invoice): bool
     {
         return $invoice->cfdi_artifacts_status === 'pending'

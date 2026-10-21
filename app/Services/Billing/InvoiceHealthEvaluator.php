@@ -139,6 +139,13 @@ class InvoiceHealthEvaluator
             $findings[] = $this->receiptFinding($invoice);
         }
 
+        // Fase 6.22: misma salida por antigüedad que los artifacts (6.21).
+        if ($invoice->cancellation_receipt_status === 'pending') {
+            $findings[] = $this->capabilities->cancellationReceiptDownloadInProgress($invoice)
+                ? new Finding('cancellation_receipt_download_pending', Health::Transient, Action::Wait, $this->ageInMinutes($invoice->cancellation_receipt_started_at, $now))
+                : new Finding('cancellation_receipt_download_pending_stale', Health::Recoverable, Action::FetchReceipt, $this->ageInMinutes($invoice->cancellation_receipt_started_at, $now));
+        }
+
         return $findings;
     }
 
