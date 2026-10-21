@@ -12,7 +12,14 @@ use App\Models\User;
  */
 class InvoiceBusinessCapabilitiesService
 {
-    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, cancellation_mode: ?string} */
+    /**
+     * Estados remotos con un CFDI timbrado cuyo XML/PDF Facturapi entrega.
+     * Fase 6.21: `canceled` verificado en Facturapi TEST (GET /xml y /pdf
+     * de un CFDI cancelado responden 200 y el UUID del XML coincide).
+     */
+    public const ARTIFACT_PAC_STATUSES = ['valid', 'canceled'];
+
+    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, cancellation_mode: ?string} */
     public function for(Invoice $invoice, ?User $user): array
     {
         $canIssue = $user?->can('issueBusiness', $invoice) === true
@@ -23,13 +30,45 @@ class InvoiceBusinessCapabilitiesService
         $canReconcile = $this->needsReconciliationAction($invoice)
             && $this->hasReconciliationContext($invoice)
             && $user?->can('reconcilePac', $invoice) === true;
+        $canFetchArtifacts = $this->artifactsFetchable($invoice)
+            && $user?->can('managePacArtifacts', $invoice) === true;
 
         return [
             'can_issue' => $canIssue,
             'can_cancel' => $canCancel,
             'can_reconcile' => $canReconcile,
+            'can_fetch_artifacts' => $canFetchArtifacts,
             'cancellation_mode' => $canCancel ? $mode : null,
         ];
+    }
+
+    /**
+     * Fase 6.21: única regla para obtener XML/PDF. La comparten
+     * DownloadInvoiceArtifactsService, la capability can_fetch_artifacts y
+     * billing:health. Un CFDI timbrado (vigente o cancelado) sin
+     * artifacts almacenados y sin otra descarga en curso.
+     */
+    public function artifactsFetchable(Invoice $invoice): bool
+    {
+        return $this->hasCompleteFiscalIdentity($invoice)
+            && in_array($invoice->pac_status, self::ARTIFACT_PAC_STATUSES, true)
+            && $invoice->cfdi_artifacts_status !== 'stored'
+            && ! $this->artifactsDownloadInProgress($invoice);
+    }
+
+    /**
+     * Fase 6.21: una descarga reservada (`pending`) más reciente que
+     * `billing.artifacts.pending_minutes`. Una más vieja, o sin fecha de
+     * inicio (anterior a la columna), se considera abandonada y puede
+     * retomarse.
+     */
+    public function artifactsDownloadInProgress(Invoice $invoice): bool
+    {
+        return $invoice->cfdi_artifacts_status === 'pending'
+            && $invoice->cfdi_artifacts_started_at !== null
+            && $invoice->cfdi_artifacts_started_at->greaterThan(
+                now()->subMinutes((int) config('billing.artifacts.pending_minutes')),
+            );
     }
 
     public function isSuccessfulIssue(Invoice $invoice): bool
@@ -108,7 +147,11 @@ class InvoiceBusinessCapabilitiesService
             || $hasPartialIdentity
             || $this->hasOpenCancelRequest($invoice)
             || $invoice->pac_status === 'pending'
-            || $invoice->pac_draft_status === 'valid'
+            // Fase 6.21: sólo un borrador valid SIN vincular. Al timbrar, el
+            // borrador se transforma en el CFDI y conserva
+            // pac_draft_status=valid; con pac_external_id ya no hay nada que
+            // reconciliar (misma regla que remote_draft_valid_unlinked).
+            || ($invoice->pac_draft_status === 'valid' && blank($invoice->pac_external_id))
             || $this->hasUnlinkedDraftReservation($invoice);
     }
 

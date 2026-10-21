@@ -65,6 +65,35 @@ El acuse es un artifact posterior y no condiciona la cancelación. El código
 `CANCELLATION_RECEIPT_UUID_MISMATCH` continúa bloqueando artifacts ajenos sin
 modificar `cfdi_uuid`.
 
+#### Acuse en Facturapi TEST (observado)
+
+`DownloadCancellationReceiptService::assertValidXml()` compara el texto de
+`Acuse/Folios/UUID` (por nombre local) contra `cfdi_uuid` con `strcasecmp`
+tras `trim`: ignora mayúsculas/minúsculas y basta un `Folios` que coincida.
+Hay pruebas con el UUID del acuse en mayúsculas.
+
+En Facturapi TEST, los acuses obtenidos **nunca han correspondido** al CFDI
+cancelado. Verificación de solo lectura (2026-10-21, FAC-00000010, CFDI
+`canceled`/`accepted`): `GET /invoices/{id}/cancellation_receipt/xml`
+respondió 200 con raíz `Acuse` y un único `Folios/UUID`, un UUID válido
+pero **ajeno** (no coincide ni ignorando mayúsculas, no es genérico ni el de
+otra factura local) y `EstatusUUID=205`. La factura #2 (otra organización,
+agosto) tuvo el mismo rechazo. Hipótesis: en TEST la cancelación no llega
+al SAT real y el acuse no describe este comprobante; no se verificó si TEST
+devuelve siempre el mismo acuse.
+
+Consecuencia esperada en TEST: "Obtener acuse" termina en
+`CANCELLATION_RECEIPT_UUID_MISMATCH`, `cancellation_receipt_status` queda
+`reconciliation_required` y no se guarda ningún archivo. No es un fallo de
+comparación ni debe relajarse la validación: el bloqueo protege contra
+acuses ajenos en LIVE. La cancelación del CFDI no depende del acuse.
+
+**Verificación obligatoria en Live.** En Facturapi TEST el acuse de
+cancelación contiene un UUID ajeno (EstatusUUID 205) y el sistema lo bloquea
+por diseño. La aceptación de un acuse legítimo solo puede verificarse con la
+primera cancelación real en modo Live; es una verificación obligatoria de esa
+fase.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.
@@ -75,9 +104,66 @@ modificar `cfdi_uuid`.
 
 Los consumidores de UI nuevos deben usar `/operations/issue` y
 `/operations/cancel`. `GET /api/invoices/{invoice}/billing` publica
-`actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile` y
-`actions.cancellation_mode`; no expone llaves, payloads, respuestas crudas ni
-claves de idempotencia.
+`actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile`,
+`actions.can_fetch_artifacts` y `actions.cancellation_mode`; no expone
+llaves, payloads, respuestas crudas ni claves de idempotencia.
+
+`can_reconcile` por un borrador `valid` sólo aplica mientras no exista
+`pac_external_id` (Fase 6.21): al timbrar, el borrador se transforma en el
+CFDI y conserva `pac_draft_status=valid` sin que haya nada que reconciliar.
+
+## Expediente fiscal: XML/PDF (Fase 6.21)
+
+`InvoiceBusinessCapabilitiesService::artifactsFetchable()` es la única
+regla para obtener el XML/PDF de un CFDI y la comparten
+`DownloadInvoiceArtifactsService`, `actions.can_fetch_artifacts` (más el
+permiso `managePacArtifacts`) y el hallazgo `cfdi_artifacts_missing` de
+`billing:health`: identidad completa, `pac_status` `valid` **o
+`canceled`** y artifacts ni `stored` ni `pending`.
+
+Los CFDI cancelados se pueden descargar: verificado en Facturapi TEST
+(`GET /invoices/{id}/xml` y `/pdf` de un CFDI cancelado responden 200 y el
+UUID del XML coincide con `cfdi_uuid`); la documentación de Facturapi no
+lo restringe ni lo confirma. El PDF descargado antes de cancelar no lleva
+marca de cancelación: la prueba de la cancelación es el acuse.
+
+### Descarga automática tras el timbrado
+
+`InvoiceIssued` (emitido después del commit por el timbrado, la
+reconciliación y la emisión legacy) lo escucha
+`QueueInvoiceArtifactsDownload`, que encola
+`DownloadInvoiceArtifactsJob(company_id, invoice_id)`:
+
+- `ShouldBeUnique` por factura, `tries=3`, `backoff=[60, 300, 900]` s.
+- Recibe ids, no el modelo: fija el tenant de la factura y restaura el
+  previo al terminar (el worker reutiliza el proceso entre jobs).
+- No hace nada si los artifacts ya están `stored` o hay una descarga vigente.
+- Fallo definitivo (`cfdi_artifacts_status=failed`) → `fail()` sin
+  reintento; fallo ambiguo → se relanza y la cola reintenta.
+- **Nunca altera la emisión**: el servicio sólo escribe `cfdi_artifacts_*`
+  y el listener descarta cualquier error al encolar (con la cola `sync`
+  el job corre en línea y su excepción tampoco llega al timbrado).
+
+**Requiere un worker activo.** Con `QUEUE_CONNECTION=database`, sin worker
+los jobs esperan en la tabla `jobs` y el XML/PDF no se descarga:
+
+- desarrollo: `composer dev` (incluye `queue:listen`) o
+  `php artisan queue:work`;
+- producción: un proceso supervisado (p. ej. supervisor) con
+  `php artisan queue:work`.
+
+El botón "Obtener XML/PDF" (`actions.can_fetch_artifacts`) sigue disponible
+como respaldo. `billing.artifacts.auto_download`
+(`BILLING_ARTIFACTS_AUTO_DOWNLOAD`, por omisión `true`) lo apaga; las
+pruebas lo apagan en `phpunit.xml` y lo activan explícitamente.
+
+### Reserva de descarga
+
+`DownloadInvoiceArtifactsService` reserva con `cfdi_artifacts_status=pending`
+y `cfdi_artifacts_started_at`. Una reserva más vieja que
+`billing.artifacts.pending_minutes` (10 min), o sin fecha (anterior a la
+columna), se considera abandonada (proceso caído a mitad del HTTP) y puede
+retomarse; una vigente rechaza una segunda descarga.
 
 ## Seguridad de escrituras PAC
 
@@ -251,7 +337,8 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_request_in_flight` / `cancellation_request_in_flight_stale` | transient / recoverable | wait / reconcile |
 | `erp_cancelled_cfdi_valid` (ERP `cancelled`, CFDI `valid`, sin cancelación en curso; incluye rechazo/expiración) | recoverable | manual_review |
 | `cancellation_accepted_not_canceled`, `identity_incomplete`, `remote_draft_valid_unlinked` | recoverable | reconcile |
-| `cfdi_artifacts_missing` | valid (informativo) | fetch_artifacts |
+| `cfdi_artifacts_missing` (sólo si `artifactsFetchable()`: CFDI `valid` o `canceled`) | valid (informativo) | fetch_artifacts |
+| `artifacts_download_pending` / `artifacts_download_pending_stale` | transient / recoverable | wait / fetch_artifacts |
 | `receipt_without_cancellation` (acuse sin ninguna solicitud registrada) | valid (informativo) | manual_review |
 | `remote_draft_date_window_risk` | transient (≥48 h) / recoverable (≥72 h) | operations_issue / manual_review |
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
@@ -285,14 +372,29 @@ Umbrales en `config/billing.php` (`billing.health.*`):
 - Borrador remoto: 48 h aviso / 72 h límite (un CFDI no puede fecharse más
   de 72 h atrás).
 
-Opciones: `--company=`, `--invoice=`, `--status=*` (por omisión los no
-válidos), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
+Opciones: `--company=`, `--invoice=`, `--status=` (repetible:
+`--status=valid --status=transient`; valores `valid|transient|recoverable|invalid`;
+por omisión los no válidos; `*` es la sintaxis de Laravel en la firma del
+comando, no un valor aceptado), `--format=table|json`, `--limit=50` y `--fail-on=invalid`
 (`transient|recoverable|invalid|none`). Sale con código 1 cuando algún estado
 alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
 folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
 idempotencia, `pac_external_id` ni `cfdi_uuid`.
 
 ## Riesgos pendientes
+
+### PRIORITARIO para la siguiente fase: revisión fiscal acoplada a los archivos
+
+`ReconcileInvoiceWithPacService` persiste
+`pac_reconciliation_required = ! $artifactsStored` cuando el CFDI remoto es
+`valid` (`ReconcileInvoiceWithPacService.php:182`). Reconciliar un CFDI
+vigente cuyo XML/PDF aún no se descargó lo marca "requiere reconciliación",
+aunque su estado fiscal sea correcto: eso bloquea `can_issue`, anula
+`cancellation_mode` (no se puede cancelar) y escala en `billing:health`. La
+descarga automática de la Fase 6.21 reduce los casos, pero no elimina el
+acoplamiento (worker detenido, descarga fallida). Los archivos ya tienen su
+propio estado (`cfdi_artifacts_status`); la revisión fiscal no debería
+depender de ellos.
 
 ### Zona horaria de la conexión MySQL (no corregido)
 

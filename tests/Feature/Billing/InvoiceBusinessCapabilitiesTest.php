@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\User;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
@@ -28,12 +29,14 @@ test('matriz ERP PAC deriva capacidades empresariales sin consultar PAC', functi
 
     $actions = app(InvoiceBusinessCapabilitiesService::class)->for($invoice->fresh(), $user);
 
-    expect($actions)->toBe([
-        'can_issue' => $canIssue,
-        'can_cancel' => $cancelMode !== null,
-        'can_reconcile' => $canReconcile,
-        'cancellation_mode' => $cancelMode,
-    ]);
+    // can_fetch_artifacts tiene su propia matriz (CfdiArtifactsFetchabilityTest).
+    expect(array_keys($actions))->toBe(['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'cancellation_mode'])
+        ->and(Arr::except($actions, 'can_fetch_artifacts'))->toBe([
+            'can_issue' => $canIssue,
+            'can_cancel' => $cancelMode !== null,
+            'can_reconcile' => $canReconcile,
+            'cancellation_mode' => $cancelMode,
+        ]);
     Http::assertNothingSent();
 })->with([
     'draft sin CFDI válido ERP-only' => [InvoiceStatus::Draft, [], false, 'erp_only', false],
@@ -56,6 +59,20 @@ test('matriz ERP PAC deriva capacidades empresariales sin consultar PAC', functi
     'issued con draft remoto valid recuperable por reconciliación' => [InvoiceStatus::Issued, [
         'pac_draft_external_id' => 'inv_draft_valid', 'pac_draft_status' => 'valid',
     ], false, null, true],
+    // Fase 6.21: al timbrar, el borrador se transforma en el CFDI y queda
+    // pac_draft_status=valid; con la identidad ya vinculada no hay nada
+    // que reconciliar (antes toda factura timbrada ofrecía reconciliar).
+    'issued CFDI valid timbrado desde borrador no ofrece reconciliar' => [InvoiceStatus::Issued, [
+        'pac_draft_external_id' => 'inv_from_draft', 'pac_draft_status' => 'valid',
+        'pac_external_id' => 'inv_from_draft', 'cfdi_uuid' => 'FFFFFFFF-1111-4222-8333-444444444444',
+        'pac_status' => 'valid', 'pac_issue_status' => 'succeeded', 'cfdi_artifacts_status' => 'stored',
+    ], false, 'pac', false],
+    'cancelled CFDI canceled timbrado desde borrador no ofrece reconciliar' => [InvoiceStatus::Cancelled, [
+        'pac_draft_external_id' => 'inv_from_draft_canceled', 'pac_draft_status' => 'valid',
+        'pac_external_id' => 'inv_from_draft_canceled', 'cfdi_uuid' => '0FFFFFFF-1111-4222-8333-444444444444',
+        'pac_status' => 'canceled', 'pac_issue_status' => 'succeeded', 'cancellation_status' => 'accepted',
+        'pac_cancel_request_status' => 'completed',
+    ], false, null, false],
     'issued CFDI canceled converge ERP' => [InvoiceStatus::Issued, [
         'pac_external_id' => 'inv_canceled', 'cfdi_uuid' => 'BBBBBBBB-1111-4222-8333-444444444444',
         'pac_status' => 'canceled', 'pac_issue_status' => 'succeeded', 'cancellation_status' => 'accepted',
@@ -86,6 +103,7 @@ test('identidad fiscal parcial queda inválida y sin acciones automáticas', fun
         'can_issue' => false,
         'can_cancel' => false,
         'can_reconcile' => false,
+        'can_fetch_artifacts' => false,
         'cancellation_mode' => null,
     ]);
     Http::assertNothingSent();

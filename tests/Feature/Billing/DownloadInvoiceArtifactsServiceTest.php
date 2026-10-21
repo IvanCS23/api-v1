@@ -386,7 +386,12 @@ test('forceRefresh=true SÍ vuelve a descargar aunque ya existan artifacts store
 
 test('si cfdi_artifacts_status ya está pending localmente, una segunda llamada no reintenta', function () {
     $company = Company::factory()->create();
-    $invoice = stampedInvoiceForArtifactsTest($company, ['cfdi_artifacts_status' => 'pending']);
+    // Fase 6.21: sólo una reserva vigente bloquea (ver
+    // InvoiceArtifactsAutoDownloadTest para la reserva vencida).
+    $invoice = stampedInvoiceForArtifactsTest($company, [
+        'cfdi_artifacts_status' => 'pending',
+        'cfdi_artifacts_started_at' => now(),
+    ]);
     app(CurrentTenant::class)->set($company->id);
 
     Http::fake();

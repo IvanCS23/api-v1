@@ -154,6 +154,7 @@ class Invoice extends Model
         'cfdi_xml_size' => 'integer',
         'cfdi_pdf_size' => 'integer',
         'cfdi_artifacts_downloaded_at' => 'immutable_datetime',
+        'cfdi_artifacts_started_at' => 'immutable_datetime',
         'cancellation_receipt_xml_size' => 'integer',
         'cancellation_receipt_pdf_size' => 'integer',
         'cancellation_receipt_downloaded_at' => 'immutable_datetime',

@@ -46,7 +46,7 @@ class InvoiceHealthEvaluator
             ...$this->convergenceFindings($invoice),
             ...$this->identityFindings($invoice),
             ...$this->draftFindings($invoice, $now),
-            ...$this->artifactFindings($invoice),
+            ...$this->artifactFindings($invoice, $now),
         ];
 
         // El flag de revisión también se activa durante emisiones y
@@ -225,11 +225,22 @@ class InvoiceHealthEvaluator
     }
 
     /** @return list<Finding> */
-    private function artifactFindings(Invoice $invoice): array
+    private function artifactFindings(Invoice $invoice, CarbonImmutable $now): array
     {
-        if ($this->capabilities->hasCompleteFiscalIdentity($invoice)
-            && in_array($invoice->pac_status, self::PAC_FINAL_STATUSES, true)
-            && $invoice->cfdi_artifacts_status !== 'stored') {
+        // Fase 6.21: descarga reservada (manual o por la cola). Más allá de
+        // billing.artifacts.pending_minutes se asume proceso caído y puede
+        // retomarse.
+        if ($invoice->cfdi_artifacts_status === 'pending') {
+            $age = $this->ageInMinutes($invoice->cfdi_artifacts_started_at, $now);
+
+            return [$age !== null && $age < (int) config('billing.artifacts.pending_minutes')
+                ? new Finding('artifacts_download_pending', Health::Transient, Action::Wait, $age)
+                : new Finding('artifacts_download_pending_stale', Health::Recoverable, Action::FetchArtifacts, $age)];
+        }
+
+        // Fase 6.21: misma regla que el servicio y can_fetch_artifacts; sólo
+        // se sugiere fetch_artifacts cuando la descarga es posible.
+        if ($this->capabilities->artifactsFetchable($invoice)) {
             // Informativo: los artifacts se obtienen bajo demanda y su
             // ausencia no altera la vigencia del CFDI ni dispara --fail-on.
             return [new Finding('cfdi_artifacts_missing', Health::Valid, Action::FetchArtifacts)];
