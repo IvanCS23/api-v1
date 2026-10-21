@@ -25,6 +25,9 @@ class InvoiceBillingResource extends JsonResource
             'status' => $this->status?->value,
             'actions' => app(InvoiceBusinessCapabilitiesService::class)->for($this->resource, $request->user()),
             'pac' => [
+                // Fase 6.22: modo configurado (test|live), nunca la llave ni
+                // un fragmento de ella. Permite explicar los acuses de TEST.
+                'mode' => in_array(config('billing.pac_mode'), ['test', 'live'], true) ? config('billing.pac_mode') : null,
                 'provider' => $this->pac_provider,
                 'status' => $this->pac_status,
                 'cancellation_status' => $this->cancellation_status,

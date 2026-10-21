@@ -94,6 +94,17 @@ por diseño. La aceptación de un acuse legítimo solo puede verificarse con la
 primera cancelación real en modo Live; es una verificación obligatoria de esa
 fase.
 
+**Reintentos del acuse (Fase 6.22).** El backend calcula
+`actions.can_fetch_cancellation_receipt`: CFDI `canceled` + `accepted`, sin
+acuse almacenado ni descarga vigente, permiso `managePacArtifacts` y por
+debajo del límite de bloqueos de identidad, contados con los eventos
+`cancellation_receipt_identity_mismatch`. En `test` el límite es 1 (un
+reintento sólo repetiría el acuse ajeno); en `live`,
+`billing.cancellation_receipt.live_identity_mismatch_limit` (3). Al
+alcanzarlo, el panel deja de ofrecer "Obtener acuse" y `billing:health`
+sugiere `manual_review`. El endpoint y el comando de diagnóstico siguen
+pudiendo reintentar explícitamente.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.
@@ -105,8 +116,10 @@ fase.
 Los consumidores de UI nuevos deben usar `/operations/issue` y
 `/operations/cancel`. `GET /api/invoices/{invoice}/billing` publica
 `actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile`,
-`actions.can_fetch_artifacts` y `actions.cancellation_mode`; no expone
-llaves, payloads, respuestas crudas ni claves de idempotencia.
+`actions.can_fetch_artifacts`, `actions.can_fetch_cancellation_receipt`,
+`actions.cancellation_mode` y `pac.mode` (`test`|`live`, o `null` si el
+modo configurado no es reconocido); no expone llaves, payloads, respuestas
+crudas ni claves de idempotencia.
 
 `can_reconcile` por un borrador `valid` sólo aplica mientras no exista
 `pac_external_id` (Fase 6.21): al timbrar, el borrador se transforma en el
