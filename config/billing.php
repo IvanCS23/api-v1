@@ -53,6 +53,28 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Expediente fiscal: XML/PDF (Fase 6.21)
+    |--------------------------------------------------------------------------
+    |
+    | - auto_download: tras un timbrado exitoso (evento InvoiceIssued) se
+    |   encola DownloadInvoiceArtifactsJob. Requiere un worker activo
+    |   (`composer dev` o `php artisan queue:work` en desarrollo;
+    |   supervisor en producción); sin worker los jobs esperan en la
+    |   tabla `jobs`. Un fallo de la descarga nunca altera la emisión.
+    |   Las pruebas lo apagan (phpunit.xml) y lo activan explícitamente.
+    | - pending_minutes: antigüedad tras la cual una descarga `pending`
+    |   (proceso caído a mitad del HTTP) puede retomarse. Holgado frente a
+    |   dos descargas con `services.facturapi.timeout` (15 s).
+    |
+    */
+
+    'artifacts' => [
+        'auto_download' => (bool) env('BILLING_ARTIFACTS_AUTO_DOWNLOAD', true),
+        'pending_minutes' => (int) env('BILLING_ARTIFACTS_PENDING_MINUTES', 10),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Salud del ciclo de facturación (Fase 6.18)
     |--------------------------------------------------------------------------
     |

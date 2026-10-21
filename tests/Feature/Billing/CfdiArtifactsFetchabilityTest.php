@@ -91,7 +91,7 @@ test('can_fetch_artifacts sigue la regla única de artifactsFetchable', function
     'descarga previa failed' => [['cfdi_artifacts_status' => 'failed'], true],
     'descarga previa ambigua' => [['cfdi_artifacts_status' => 'reconciliation_required'], true],
     'artifacts ya almacenados' => [['cfdi_artifacts_status' => 'stored'], false],
-    'descarga en curso' => [['cfdi_artifacts_status' => 'pending'], false],
+    'descarga en curso' => [fn () => ['cfdi_artifacts_status' => 'pending', 'cfdi_artifacts_started_at' => now()], false],
     'emisión pending' => [['pac_status' => 'pending', 'cfdi_uuid' => null], false],
     'sin identidad fiscal' => [['pac_external_id' => null, 'cfdi_uuid' => null, 'pac_status' => null], false],
 ]);

@@ -52,7 +52,23 @@ class InvoiceBusinessCapabilitiesService
     {
         return $this->hasCompleteFiscalIdentity($invoice)
             && in_array($invoice->pac_status, self::ARTIFACT_PAC_STATUSES, true)
-            && ! in_array($invoice->cfdi_artifacts_status, ['stored', 'pending'], true);
+            && $invoice->cfdi_artifacts_status !== 'stored'
+            && ! $this->artifactsDownloadInProgress($invoice);
+    }
+
+    /**
+     * Fase 6.21: una descarga reservada (`pending`) más reciente que
+     * `billing.artifacts.pending_minutes`. Una más vieja, o sin fecha de
+     * inicio (anterior a la columna), se considera abandonada y puede
+     * retomarse.
+     */
+    public function artifactsDownloadInProgress(Invoice $invoice): bool
+    {
+        return $invoice->cfdi_artifacts_status === 'pending'
+            && $invoice->cfdi_artifacts_started_at !== null
+            && $invoice->cfdi_artifacts_started_at->greaterThan(
+                now()->subMinutes((int) config('billing.artifacts.pending_minutes')),
+            );
     }
 
     public function isSuccessfulIssue(Invoice $invoice): bool

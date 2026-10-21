@@ -77,6 +77,7 @@ class DownloadInvoiceArtifactsService
     public function __construct(
         private readonly PacProvider $pacProvider,
         private readonly InvoicePacAuditService $audit,
+        private readonly InvoiceBusinessCapabilitiesService $capabilities,
     ) {}
 
     public function download(Invoice $invoice, bool $forceRefresh = false): InvoiceArtifactsResult
@@ -228,14 +229,19 @@ class DownloadInvoiceArtifactsService
                 ->lockForUpdate()
                 ->firstOrFail();
 
-            if ($locked->cfdi_artifacts_status === 'pending') {
+            // Fase 6.21: una reserva `pending` vencida (proceso caído a mitad
+            // del HTTP) puede retomarse; una vigente sigue bloqueando.
+            if ($this->capabilities->artifactsDownloadInProgress($locked)) {
                 throw new RuntimeException(sprintf(
                     'La factura [%d] ya tiene una descarga de artifacts en curso; no se inicia una segunda.',
                     $locked->id,
                 ));
             }
 
-            $locked->forceFill(['cfdi_artifacts_status' => 'pending'])->save();
+            $locked->forceFill([
+                'cfdi_artifacts_status' => 'pending',
+                'cfdi_artifacts_started_at' => now(),
+            ])->save();
 
             return $locked;
         });

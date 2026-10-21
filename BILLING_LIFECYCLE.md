@@ -98,6 +98,44 @@ UUID del XML coincide con `cfdi_uuid`); la documentación de Facturapi no
 lo restringe ni lo confirma. El PDF descargado antes de cancelar no lleva
 marca de cancelación: la prueba de la cancelación es el acuse.
 
+### Descarga automática tras el timbrado
+
+`InvoiceIssued` (emitido después del commit por el timbrado, la
+reconciliación y la emisión legacy) lo escucha
+`QueueInvoiceArtifactsDownload`, que encola
+`DownloadInvoiceArtifactsJob(company_id, invoice_id)`:
+
+- `ShouldBeUnique` por factura, `tries=3`, `backoff=[60, 300, 900]` s.
+- Recibe ids, no el modelo: fija el tenant de la factura y restaura el
+  previo al terminar (el worker reutiliza el proceso entre jobs).
+- No hace nada si los artifacts ya están `stored` o hay una descarga vigente.
+- Fallo definitivo (`cfdi_artifacts_status=failed`) → `fail()` sin
+  reintento; fallo ambiguo → se relanza y la cola reintenta.
+- **Nunca altera la emisión**: el servicio sólo escribe `cfdi_artifacts_*`
+  y el listener descarta cualquier error al encolar (con la cola `sync`
+  el job corre en línea y su excepción tampoco llega al timbrado).
+
+**Requiere un worker activo.** Con `QUEUE_CONNECTION=database`, sin worker
+los jobs esperan en la tabla `jobs` y el XML/PDF no se descarga:
+
+- desarrollo: `composer dev` (incluye `queue:listen`) o
+  `php artisan queue:work`;
+- producción: un proceso supervisado (p. ej. supervisor) con
+  `php artisan queue:work`.
+
+El botón "Obtener XML/PDF" (`actions.can_fetch_artifacts`) sigue disponible
+como respaldo. `billing.artifacts.auto_download`
+(`BILLING_ARTIFACTS_AUTO_DOWNLOAD`, por omisión `true`) lo apaga; las
+pruebas lo apagan en `phpunit.xml` y lo activan explícitamente.
+
+### Reserva de descarga
+
+`DownloadInvoiceArtifactsService` reserva con `cfdi_artifacts_status=pending`
+y `cfdi_artifacts_started_at`. Una reserva más vieja que
+`billing.artifacts.pending_minutes` (10 min), o sin fecha (anterior a la
+columna), se considera abandonada (proceso caído a mitad del HTTP) y puede
+retomarse; una vigente rechaza una segunda descarga.
+
 ## Seguridad de escrituras PAC
 
 ### Modo y llave
@@ -270,7 +308,8 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_request_in_flight` / `cancellation_request_in_flight_stale` | transient / recoverable | wait / reconcile |
 | `erp_cancelled_cfdi_valid` (ERP `cancelled`, CFDI `valid`, sin cancelación en curso; incluye rechazo/expiración) | recoverable | manual_review |
 | `cancellation_accepted_not_canceled`, `identity_incomplete`, `remote_draft_valid_unlinked` | recoverable | reconcile |
-| `cfdi_artifacts_missing` | valid (informativo) | fetch_artifacts |
+| `cfdi_artifacts_missing` (sólo si `artifactsFetchable()`: CFDI `valid` o `canceled`) | valid (informativo) | fetch_artifacts |
+| `artifacts_download_pending` / `artifacts_download_pending_stale` | transient / recoverable | wait / fetch_artifacts |
 | `receipt_without_cancellation` (acuse sin ninguna solicitud registrada) | valid (informativo) | manual_review |
 | `remote_draft_date_window_risk` | transient (≥48 h) / recoverable (≥72 h) | operations_issue / manual_review |
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
@@ -314,6 +353,19 @@ folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
 idempotencia, `pac_external_id` ni `cfdi_uuid`.
 
 ## Riesgos pendientes
+
+### PRIORITARIO para la siguiente fase: revisión fiscal acoplada a los archivos
+
+`ReconcileInvoiceWithPacService` persiste
+`pac_reconciliation_required = ! $artifactsStored` cuando el CFDI remoto es
+`valid` (`ReconcileInvoiceWithPacService.php:182`). Reconciliar un CFDI
+vigente cuyo XML/PDF aún no se descargó lo marca "requiere reconciliación",
+aunque su estado fiscal sea correcto: eso bloquea `can_issue`, anula
+`cancellation_mode` (no se puede cancelar) y escala en `billing:health`. La
+descarga automática de la Fase 6.21 reduce los casos, pero no elimina el
+acoplamiento (worker detenido, descarga fallida). Los archivos ya tienen su
+propio estado (`cfdi_artifacts_status`); la revisión fiscal no debería
+depender de ellos.
 
 ### Zona horaria de la conexión MySQL (no corregido)
 
