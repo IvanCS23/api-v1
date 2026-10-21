@@ -88,6 +88,12 @@ Consecuencia esperada en TEST: "Obtener acuse" termina en
 comparación ni debe relajarse la validación: el bloqueo protege contra
 acuses ajenos en LIVE. La cancelación del CFDI no depende del acuse.
 
+**Verificación obligatoria en Live.** En Facturapi TEST el acuse de
+cancelación contiene un UUID ajeno (EstatusUUID 205) y el sistema lo bloquea
+por diseño. La aceptación de un acuse legítimo solo puede verificarse con la
+primera cancelación real en modo Live; es una verificación obligatoria de esa
+fase.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.
