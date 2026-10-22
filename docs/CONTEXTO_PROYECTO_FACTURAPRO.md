@@ -28,6 +28,11 @@ Backend:
 
 `C:\Users\PC\Desktop\app-frontend\api-v1`
 
+Ramas de trabajo (desde 2026-10-20): todo el trabajo va directo en
+`changes-ivan` (api-v1) e `integracion-ivan` (app-front). No se crean ramas
+nuevas. Los commits se dejan locales; el push lo decide el responsable del
+repositorio.
+
 Frontend:
 - Next.js 16.
 - React.
@@ -176,29 +181,64 @@ FASE 6.16:
 - Cancelación fiscal y convergencia ERP.
 - Protección contra sustitución de UUID.
 
-FASE 6.17:
-- Deprecación de endpoints ERP legacy.
-- Headers `Deprecation: true`.
-- Successor links.
-- Logging estructurado sin secretos.
-- Documentación del ciclo de vida.
-- Pruebas que prohíben el consumo productivo de endpoints legacy desde el cliente fiscal.
+FASE 6.17 (reportada, **no presente en el código**):
+- Se reportó la deprecación de endpoints ERP legacy (headers `Deprecation: true`, successor links, pruebas que prohíben su consumo).
+- Verificado al cierre de la 6.22: no existen esos headers, links ni pruebas, y `POST /api/invoices/{id}/issue` y `/cancel` siguen sin marcar. Se rehace en la FASE 6.26.
+
+FASE 6.18 — Observabilidad y salud del ciclo de facturación:
+- `InvoiceHealthEvaluator` y comando read-only `php artisan billing:health` (clasificación `valid`/`transient`/`recoverable`/`invalid`, `--company`, `--invoice`, `--status` repetible, `--format`, `--fail-on`).
+- Sin escrituras ni llamadas al PAC; la salida nunca expone payloads, errores crudos, llaves ni identidad fiscal.
+- Commit api-v1: `75f51a7`.
+
+FASE 6.19 — Seguridad de escrituras PAC:
+- Guard de modo/llave (`billing.pac_mode=test` exige `sk_test_`; `live` rechazado) antes de cualquier HTTP.
+- Política de reintentos por operación (solo errores de conexión en lecturas e idempotentes).
+- Reserva de la cancelación bajo lock (`pac_cancel_request_status`, migración `add_pac_cancel_control`).
+- `pac_external_id` enmascarado en logs; códigos explícitos en `/operations/cancel` con reserva abierta.
+- Commits api-v1: `c743aaa`, `4d93dd5`, `04b4da4`, `3ff6fe4`, `1b1f2c7`. app-front: `633a11e`.
+
+FASE 6.20 — Correcciones fiscales:
+- `stamp.date` llega sin offset en hora del centro de México: se interpreta con `billing.facturapi.stamp_timezone` y se guarda en UTC (antes `stamped_at` quedaba 6 h atrasado).
+- Errores de Facturapi mapeados por `body.code` antes que por HTTP status: `invoice_not_found` definitivo; `stamping_in_progress`, `invoice_cancellation_in_progress`, `draft_update_in_progress` e `idempotency_key_in_use` ambiguos.
+- Recuperación de un borrador reservado sin id remoto por `draftExternalId` + `idempotency_key`.
+- Mensaje específico para `PAC_AUTHENTICATION_FAILED`; el panel recarga la factura completa tras cada acción fiscal.
+- Commits api-v1: `be2874a` (este documento), `9543a51`, `1ee53de`, `ba54523`. app-front: `58f0a99`, `3983a5a`.
+
+FASE 6.21 — Expediente fiscal (XML/PDF):
+- Descarga automática del XML/PDF en cola tras el timbrado (`InvoiceIssued` → `DownloadInvoiceArtifactsJob`); un fallo nunca altera la emisión. Requiere worker (`composer dev` o `php artisan queue:work`).
+- XML/PDF obtenibles también de CFDI cancelados (verificado en Facturapi TEST).
+- Capability `can_fetch_artifacts`; `can_reconcile` acotado al borrador `valid` sin vincular; salida por antigüedad de la descarga (`cfdi_artifacts_started_at`).
+- Documentado el acuse de TEST (UUID ajeno, EstatusUUID 205) y la verificación obligatoria en Live.
+- Commits api-v1: `8c8e58d`, `98852f2`, `b2dca04`, `86e948e`, `150d49b`, `b3ea7db`. app-front: `2fce56a`.
+
+FASE 6.22 — Coherencia de reconciliación y acuse:
+- La revisión fiscal (`pac_reconciliation_required`) ya no depende de los artifacts; corrige un 409 en `operations/issue` por la ruta del borrador `valid` con el CFDI ya válido.
+- `billing:health`: hallazgos del acuse (bloqueo de identidad informativo en test y `recoverable` en live) y de su descarga en `pending`.
+- Salida por antigüedad del acuse en `pending` (`cancellation_receipt_started_at`).
+- `pac.mode` en `GET /billing` (sin la llave) y capability `can_fetch_cancellation_receipt` (límite de bloqueos de identidad: 1 en test, 3 en live); el panel explica el acuse de prueba.
+- Commits api-v1: `0121198`, `17ff278`, `e2d1bcb`, `f778619`. app-front: `9ef9aec`.
 
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md`
 
-## 8. Estado de pruebas reportado
+## 8. Estado de pruebas y línea base
 
-Último informe de FASE 6.17:
-- Backend: 937 pruebas aprobadas, 4091 assertions.
-- Frontend: 81 pruebas aprobadas en 8 archivos.
-- TypeScript: aprobado.
+Línea base al cierre de la FASE 6.22 (verificada el 2026-10-22 sobre
+`changes-ivan` e `integracion-ivan`, sincronizadas con `origin`):
+- Backend: 1208 pruebas aprobadas, 5030 assertions, 0 fallidas.
+- Frontend: 92 pruebas aprobadas en 8 archivos, 0 fallidas.
+- TypeScript (`tsc --noEmit`): aprobado.
 - Build Next.js: aprobado, 31 páginas generadas.
 - Pint y ESLint de archivos relacionados: aprobados.
 - `git diff --check`: limpio.
 
-Estos resultados son históricos. Ejecútalos de nuevo antes de afirmar que el workspace actual está validado.
+Ejecuta las suites de nuevo antes de afirmar que el workspace actual está
+validado. (Histórico: FASE 6.17 reportó 937 backend / 81 frontend.)
+
+Estado de la BD local de desarrollo:
+- Company 1 tiene `default_payment_form='03'` y `default_payment_method='PUE'` escritos manualmente (antes null); no hay endpoint para configurarlos.
+- Migraciones de la 6.21 y 6.22 (`cfdi_artifacts_started_at`, `cancellation_receipt_started_at`) aplicadas.
 
 Deuda conocida:
 - Lint global frontend con errores y warnings anteriores.
@@ -208,6 +248,19 @@ Deuda conocida:
 - No existe endpoint real de envío por correo.
 - Debe revisarse el diff del lockfile.
 - Los endpoints legacy siguen disponibles por compatibilidad.
+
+Hallazgos de producto pendientes (verificados en el código):
+- Creación de facturas simulada: `/pages/invoices/invoice` es una maqueta; "enviar factura" y el envío por correo son `setTimeout` que muestran "¡Factura Generada!" sin llamar a la API.
+- Enlace "Nueva venta" roto: `MenuItems.tsx` y `Navbar.tsx` apuntan a `/pages/invoices/nueva-venta`, que no existe (`app/pages/invoices/nueva/` está vacío).
+- Forma y método de pago: `SaleToInvoiceConverter` copia siempre los predeterminados de la empresa; deben capturarse por venta y usar el de la empresa solo como valor por omisión.
+- Sin validación SAT al capturar: clientes validan `rfc` solo con `max:13` y `regimen_fiscal`, `uso_cfdi` y `codigo_postal` como texto libre; productos no validan `clave_unidad` ni `objeto_imp` contra catálogo. Los errores llegan hasta el PAC. Además, `clave_producto` es única por empresa, lo que impide dos productos con la misma clave SAT.
+
+Riesgos pendientes:
+- Zona horaria de la conexión MySQL: la sesión usa `SYSTEM` (America/Mexico_City); `NOW()` en SQL da hora local y fijar `+00:00` desplazaría las fechas guardadas. Requiere fase propia con migración de datos (documentado en `BILLING_LIFECYCLE.md`).
+- Organización Facturapi por empresa: hay una sola llave global (`services.facturapi.test_key`); todas las empresas timbran en la misma organización.
+- Facturas 1-3 huérfanas: pertenecen a una organización Facturapi sin acceso con la llave actual (`invoice_not_found`); no se pueden reconciliar ni descargar.
+- Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación.
+- Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 
 ## 9. Reglas de trabajo
 
@@ -245,45 +298,22 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase reportada como completada es FASE 6.17.
+La última fase completada y verificada es la FASE 6.22 (ver sección 7).
 
-La siguiente fase propuesta es FASE 6.18: Observabilidad operativa y salud del ciclo de facturación.
+Hoja de ruta:
+- FASE 6.23 — Inventario de pantallas: clasificar cada página de `app-front` como real, maqueta o rota (incluye los hallazgos de producto de la sección 8) y proponer qué conservar, conectar o retirar. Solo diagnóstico.
+- FASE 6.24 — Flujo venta → factura: captura real de la venta y su factura desde la UI, forma y método de pago por venta y validación SAT al capturar.
+- FASE 6.25 — Organización Facturapi por empresa: llave/organización por empresa en lugar de la llave global, y tratamiento de las facturas 1-3.
+- FASE 6.26 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
 
-Objetivo: detectar, clasificar y reportar facturas saludables, transitorias, recuperables e inconsistentes sin modificar facturas ni ejecutar operaciones PAC.
+## 11. Siguiente tarea
 
-Posibles entregables:
-- Evaluador de salud reutilizando las reglas de FASE 6.16.
-- Comando Artisan de diagnóstico, por ejemplo `php artisan billing:health`.
-- Resumen de estados y operaciones pendientes.
-- API administrativa read-only, únicamente si la auditoría demuestra que es necesaria.
-- Autorización, aislamiento multi-tenant, pruebas y documentación.
-- Observabilidad del uso de endpoints legacy.
+Prepara la FASE 6.23 antes de modificar archivos:
 
-La primera versión debe limitarse a diagnóstico y reporte.
-
-No debe:
-- Emitir CFDI.
-- Cancelar CFDI.
-- Reconciliar automáticamente.
-- Descargar artifacts.
-- Modificar facturas.
-- Crear migraciones sin necesidad demostrada.
-
-## 11. Primera tarea solicitada
-
-No empieces a programar inmediatamente.
-
-Realiza una auditoría de continuidad de FASE 6.17 y prepara FASE 6.18:
-
-1. Confirma el estado real de ambos repositorios.
-2. Verifica los servicios y clasificadores de FASE 6.16.
-3. Inspecciona `BILLING_LIFECYCLE.md`.
-4. Comprueba qué métricas, logs, comandos y mecanismos de observabilidad ya existen.
-5. Identifica las combinaciones de estados que pueden detectarse con los datos disponibles.
-6. Determina si basta con un comando Artisan o si también se justifica una API administrativa.
-7. Propón archivos a crear o modificar, contrato de salida, seguridad, estrategia de pruebas y riesgos.
-8. Presenta el plan antes de modificar archivos.
+1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
+2. Recorre las rutas de `app-front/app` y clasifica cada pantalla (real, maqueta, rota) con evidencia del código.
+3. Identifica qué endpoints consume cada pantalla real y cuáles simulan resultados.
+4. Propón alcance, archivos, pruebas, riesgos y orden de commits.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
-
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.
