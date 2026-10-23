@@ -218,19 +218,32 @@ FASE 6.22 — Coherencia de reconciliación y acuse:
 - `pac.mode` en `GET /billing` (sin la llave) y capability `can_fetch_cancellation_receipt` (límite de bloqueos de identidad: 1 en test, 3 en live); el panel explica el acuse de prueba.
 - Commits api-v1: `0121198`, `17ff278`, `e2d1bcb`, `f778619`. app-front: `9ef9aec`.
 
+FASE 6.23 — Inventario del frontend (solo lectura):
+- Clasificó las 27 páginas de `app/pages`: 7 reales, el resto maquetas; 16 mostraban un éxito sin hacer nada real; 24 enlaces apuntaban a rutas inexistentes; ninguna pantalla creaba ventas ni facturas.
+- Derivó dos correcciones de seguridad: `console.log` con contraseñas del CSD/FIEL y datos de clientes y productos. Commits app-front: `a2b351f`, `06c9f87`.
+
+FASE 6.24 — Honestidad de la interfaz:
+- Regla ESLint `no-console` (sólo `warn`/`error`) en `app/**`, `src/**` y `lib/**`; `.agents/**` (scripts de herramientas) fuera del lint global.
+- `src/data/screenStatus.ts`: registro único `real` / `demo` / `unavailable` de cada ruta. Menú, Navbar, Dashboard y Configuración lo usan: los destinos sin página se muestran como "Próximamente", sin enlace.
+- `NEXT_PUBLIC_SHOW_DEMO_SCREENS` (por omisión `false`, documentada en `app-front/.env.example`): con `false` las maquetas no aparecen en la navegación; con `true` aparecen con la etiqueta "Demo". Entrando por URL siempre muestran el aviso de demostración.
+- Maquetas fiscales (factura, facturación masiva, carga XML, descargas, recuperación, reportes, sellos): aviso y acción final deshabilitada. Demás maquetas: solo lectura (`<fieldset disabled>`). Ninguna simula ya un éxito. `settings/users` (maqueta huérfana) eliminada.
+- Pantallas reales: "Facturas emitidas" de Configuración cuenta facturas reales (`GET /api/invoices?status=issued`, `meta.total`) en lugar de `/api/legacy-invoices`; aviso de datos de ejemplo en el Dashboard; `Toast` con variante `info`; Productos sin la columna "Unidad" duplicada.
+- Commits app-front: `052c8d2`, `9516731`, `e5a774b`, `ba4c239`, `97e32f9`, `6fa2276`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.22 (verificada el 2026-10-22 sobre
-`changes-ivan` e `integracion-ivan`, sincronizadas con `origin`):
+Línea base al cierre de la FASE 6.24 (verificada el 2026-10-23 sobre
+`changes-ivan` e `integracion-ivan`):
 - Backend: 1208 pruebas aprobadas, 5030 assertions, 0 fallidas.
-- Frontend: 92 pruebas aprobadas en 8 archivos, 0 fallidas.
-- TypeScript (`tsc --noEmit`): aprobado.
-- Build Next.js: aprobado, 31 páginas generadas.
-- Pint y ESLint de archivos relacionados: aprobados.
+- Frontend: 140 pruebas aprobadas en 13 archivos, 0 fallidas.
+- TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
+- Build Next.js: aprobado, 30 páginas generadas.
+- ESLint global del frontend: 32 errores / 58 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
+- Pint de archivos relacionados: aprobado.
 - `git diff --check`: limpio.
 
 Ejecuta las suites de nuevo antes de afirmar que el workspace actual está
@@ -241,7 +254,7 @@ Estado de la BD local de desarrollo:
 - Migraciones de la 6.21 y 6.22 (`cfdi_artifacts_started_at`, `cancellation_receipt_started_at`) aplicadas.
 
 Deuda conocida:
-- Lint global frontend con errores y warnings anteriores.
+- Lint global frontend: 32 errores / 58 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
 - Vulnerabilidades de dependencias reportadas, pendientes de nueva auditoría.
 - Búsqueda parcial `LIKE`.
 - Índices de consulta pendientes de evaluación con datos reales.
@@ -250,8 +263,9 @@ Deuda conocida:
 - Los endpoints legacy siguen disponibles por compatibilidad.
 
 Hallazgos de producto pendientes (verificados en el código):
-- Creación de facturas simulada: `/pages/invoices/invoice` es una maqueta; "enviar factura" y el envío por correo son `setTimeout` que muestran "¡Factura Generada!" sin llamar a la API.
-- Enlace "Nueva venta" roto: `MenuItems.tsx` y `Navbar.tsx` apuntan a `/pages/invoices/nueva-venta`, que no existe (`app/pages/invoices/nueva/` está vacío).
+- Sin flujo real de venta → factura en la UI: ninguna pantalla usa `/api/sales` ni `POST /api/invoices`. La maqueta `/pages/invoices/invoice` queda como demo (oculta por omisión, "Crear Factura" deshabilitado desde la 6.24).
+- "Nueva venta" (menú y Navbar) se muestra como "Próximamente", sin enlace, hasta que exista la pantalla (`/pages/invoices/nueva-venta`).
+- 19 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Forma y método de pago: `SaleToInvoiceConverter` copia siempre los predeterminados de la empresa; deben capturarse por venta y usar el de la empresa solo como valor por omisión.
 - Sin validación SAT al capturar: clientes validan `rfc` solo con `max:13` y `regimen_fiscal`, `uso_cfdi` y `codigo_postal` como texto libre; productos no validan `clave_unidad` ni `objeto_imp` contra catálogo. Los errores llegan hasta el PAC. Además, `clave_producto` es única por empresa, lo que impide dos productos con la misma clave SAT.
 
@@ -298,22 +312,22 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada y verificada es la FASE 6.22 (ver sección 7).
+La última fase completada y verificada es la FASE 6.24 (ver sección 7).
 
-Hoja de ruta:
-- FASE 6.23 — Inventario de pantallas: clasificar cada página de `app-front` como real, maqueta o rota (incluye los hallazgos de producto de la sección 8) y proponer qué conservar, conectar o retirar. Solo diagnóstico.
-- FASE 6.24 — Flujo venta → factura: captura real de la venta y su factura desde la UI, forma y método de pago por venta y validación SAT al capturar.
-- FASE 6.25 — Organización Facturapi por empresa: llave/organización por empresa en lugar de la llave global, y tratamiento de las facturas 1-3.
-- FASE 6.26 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
+Hoja de ruta (renumerada en la 6.24):
+- FASE 6.25 — Flujo venta → factura: captura real de la venta desde la UI (`/pages/invoices/nueva-venta`), forma y método de pago por venta (la empresa sólo como valor por omisión), revisión de `billing-readiness`, conversión con `POST /api/invoices` y paso al detalle de la factura para emitir.
+- FASE 6.26 — Validación SAT al capturar: RFC, régimen, uso CFDI, C.P., clave de producto, unidad y objeto de impuesto en frontend y backend; decidir la unicidad de `clave_producto` por empresa.
+- FASE 6.27 — Organización Facturapi por empresa: llave/organización por empresa en lugar de la llave global, y tratamiento de las facturas 1-3.
+- FASE 6.28 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.23 antes de modificar archivos:
+Prepara la FASE 6.25 antes de modificar archivos:
 
 1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Recorre las rutas de `app-front/app` y clasifica cada pantalla (real, maqueta, rota) con evidencia del código.
-3. Identifica qué endpoints consume cada pantalla real y cuáles simulan resultados.
-4. Propón alcance, archivos, pruebas, riesgos y orden de commits.
+2. Revisa los endpoints de ventas (`/api/sales*`, `billing-readiness`) y `POST /api/invoices`, y lo que necesita `SaleToInvoiceConverter` para tomar forma y método de pago de la venta.
+3. Define la pantalla de nueva venta y su registro en `screenStatus.ts` (pasa de `unavailable` a `real`).
+4. Propón alcance, archivos, migraciones, pruebas, riesgos y orden de commits.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.
