@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SaleItemController;
+use App\Http\Controllers\Api\SatCatalogController;
 use App\Http\Controllers\Api\TaxRateController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserSecurityController;
@@ -93,6 +94,11 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
 
     // Fase 6.25: tasas de impuesto seleccionables en las líneas de venta.
     Route::get('/tax-rates', [TaxRateController::class, 'index']);
+
+    // Fase 6.26: catálogos SAT locales para la captura (sin llamadas al PAC).
+    Route::get('/sat/catalogs', [SatCatalogController::class, 'index']);
+    Route::get('/sat/product-keys', [SatCatalogController::class, 'productKeys']);
+    Route::get('/sat/unit-keys', [SatCatalogController::class, 'unitKeys']);
 
     // Sale items (anidados bajo una venta)
     Route::get('/sales/{sale}/items', [SaleItemController::class, 'index']);
