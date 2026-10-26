@@ -8,6 +8,7 @@ use App\Http\Requests\UpdateSaleItemRequest;
 use App\Http\Resources\SaleItemResource;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
 use App\Services\Sales\SaleCalculator;
 use Illuminate\Support\Facades\DB;
@@ -31,10 +32,6 @@ class SaleItemController extends Controller
 
         $this->authorize('update', $sale);
 
-        if (! $sale->isEditable()) {
-            return response()->json(['message' => 'No se pueden agregar productos a esta venta en su estado actual.'], 422);
-        }
-
         $product = Product::findOrFail($request->validated('product_id'));
 
         $taxRateId = $request->validated('tax_rate_id');
@@ -48,16 +45,30 @@ class SaleItemController extends Controller
 
         $calculated = $this->calculator->calculateItem($quantity, $unitPrice, $discount, $taxRate);
 
-        $item = $sale->items()->create([
-            'product_id' => $product->id,
-            'tax_rate_id' => $taxRate?->id,
-            'description' => $product->name,
-            'quantity' => $quantity,
-            'unit_price' => $unitPrice,
-            ...$calculated,
-        ]);
+        $item = DB::transaction(function () use ($sale, $product, $taxRate, $quantity, $unitPrice, $calculated) {
+            $locked = $this->lockedEditableSale($sale);
 
-        $this->calculator->recalculateSale($sale)->save();
+            if ($locked === null) {
+                return null;
+            }
+
+            $item = $locked->items()->create([
+                'product_id' => $product->id,
+                'tax_rate_id' => $taxRate?->id,
+                'description' => $product->name,
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                ...$calculated,
+            ]);
+
+            $this->calculator->recalculateSale($locked)->save();
+
+            return $item;
+        });
+
+        if ($item === null) {
+            return response()->json(['message' => 'No se pueden agregar productos a esta venta en su estado actual.'], 422);
+        }
 
         return (new SaleItemResource($item))->response()->setStatusCode(201);
     }
@@ -78,7 +89,13 @@ class SaleItemController extends Controller
 
         $data = $request->validated();
 
-        DB::transaction(function () use ($data, $item, $sale): void {
+        $updated = DB::transaction(function () use ($data, $item, $sale): bool {
+            $locked = $this->lockedEditableSale($sale);
+
+            if ($locked === null) {
+                return false;
+            }
+
             if (array_key_exists('product_id', $data)) {
                 $item->product_id = $data['product_id'];
             }
@@ -102,8 +119,14 @@ class SaleItemController extends Controller
             ]);
             $item->save();
 
-            $this->calculator->recalculateSale($sale)->save();
+            $this->calculator->recalculateSale($locked)->save();
+
+            return true;
         });
+
+        if (! $updated) {
+            return response()->json(['message' => 'No se pueden modificar productos de esta venta en su estado actual.'], 422);
+        }
 
         return new SaleItemResource($item);
     }
@@ -122,10 +145,41 @@ class SaleItemController extends Controller
 
         $this->authorize('delete', $item);
 
-        $item->delete();
+        $deleted = DB::transaction(function () use ($item, $sale): bool {
+            $locked = $this->lockedEditableSale($sale);
 
-        $this->calculator->recalculateSale($sale)->save();
+            if ($locked === null) {
+                return false;
+            }
+
+            $item->delete();
+            $this->calculator->recalculateSale($locked)->save();
+
+            return true;
+        });
+
+        if (! $deleted) {
+            return response()->json(['message' => 'No se pueden eliminar productos de esta venta en su estado actual.'], 422);
+        }
 
         return response()->json(null, 204);
+    }
+
+    /**
+     * Fase 6.25: relee la venta con lockForUpdate (mismo criterio que
+     * SaleWorkflow::lockedSale) y la devuelve sólo si sigue siendo
+     * editable. Así una línea nunca se cuela mientras la orquestación
+     * (POST /sales/{sale}/invoice) confirma y copia los conceptos: o entra
+     * antes y se factura, o llega después y se rechaza.
+     */
+    private function lockedEditableSale(Sale $sale): ?Sale
+    {
+        $locked = Sale::withoutGlobalScope(CompanyScope::class)
+            ->whereKey($sale->getKey())
+            ->where('company_id', $sale->company_id)
+            ->lockForUpdate()
+            ->firstOrFail();
+
+        return $locked->isEditable() ? $locked : null;
     }
 }

@@ -3,17 +3,23 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\SaleStatus;
+use App\Exceptions\SaleCancelledException;
+use App\Exceptions\SaleNotBillableException;
 use App\Exceptions\WorkflowTransitionException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\IndexSaleRequest;
 use App\Http\Requests\StoreSaleRequest;
 use App\Http\Requests\UpdateSaleRequest;
+use App\Http\Resources\InvoiceResource;
 use App\Http\Resources\SaleResource;
+use App\Models\Invoice;
 use App\Models\Sale;
 use App\Services\Billing\SaleBillingReadinessService;
+use App\Services\Sales\InvoiceSaleService;
 use App\Services\Sales\SaleNumberGenerator;
 use App\Services\Sales\SaleWorkflow;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Http\Request;
 
 class SaleController extends Controller
 {
@@ -21,6 +27,7 @@ class SaleController extends Controller
         private readonly SaleNumberGenerator $numberGenerator,
         private readonly SaleWorkflow $workflow,
         private readonly SaleBillingReadinessService $billingReadiness,
+        private readonly InvoiceSaleService $invoicing,
     ) {}
 
     /**
@@ -149,6 +156,37 @@ class SaleController extends Controller
         }
 
         return new SaleResource($sale->load('items'));
+    }
+
+    /**
+     * Fase 6.25: factura la venta en una sola operación (ver
+     * InvoiceSaleService). 201 si crea la factura; 200 si ya existía
+     * (idempotente, sin tocar una ready/issued/cancelled).
+     */
+    public function invoice(Request $request, $id)
+    {
+        $sale = Sale::findOrFail($id);
+
+        $this->authorize('update', $sale);
+        $this->authorize('create', Invoice::class);
+
+        try {
+            ['invoice' => $invoice, 'created' => $created] = $this->invoicing->invoice($sale, $request->user()->id);
+        } catch (SaleNotBillableException $e) {
+            return response()->json([
+                'message' => 'La venta no está lista para facturarse.',
+                'code' => 'SALE_NOT_BILLABLE',
+                'errors' => $e->errors,
+            ], 422);
+        } catch (SaleCancelledException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => 'SALE_CANCELLED'], 409);
+        } catch (WorkflowTransitionException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => 'SALE_WORKFLOW_CONFLICT'], 409);
+        }
+
+        return (new InvoiceResource($invoice->load('items')))
+            ->response()
+            ->setStatusCode($created ? 201 : 200);
     }
 
     public function billingReadiness($id)

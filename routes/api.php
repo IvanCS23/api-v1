@@ -88,6 +88,8 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
 
     // Billing readiness (Fase 4 — preparación fiscal, sin Facturapi)
     Route::get('/sales/{id}/billing-readiness', [SaleController::class, 'billingReadiness']);
+    // Fase 6.25: venta → factura ready en una sola operación atómica e idempotente.
+    Route::post('/sales/{id}/invoice', [SaleController::class, 'invoice']);
 
     // Fase 6.25: tasas de impuesto seleccionables en las líneas de venta.
     Route::get('/tax-rates', [TaxRateController::class, 'index']);
