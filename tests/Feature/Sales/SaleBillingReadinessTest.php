@@ -8,7 +8,9 @@ use App\Models\Product;
 use App\Models\Sale;
 use App\Models\TaxRate;
 use App\Models\User;
+use App\Services\Billing\SaleBillingReadinessService;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Crea una Sale Confirmed con una línea coherente, pasando siempre por
@@ -17,7 +19,8 @@ use App\Support\Tenant\CurrentTenant;
  */
 function confirmedSaleWithItem(User $user, Client $client, Product $product): Sale
 {
-    $sale = test()->actingAs($user, 'api')->postJson('/api/sales', ['client_id' => $client->id])->json();
+    // Fase 6.25: billing-readiness exige forma y método de pago efectivos.
+    $sale = test()->actingAs($user, 'api')->postJson('/api/sales', ['client_id' => $client->id, 'payment_form' => '03', 'payment_method' => 'PUE'])->json();
     test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/items", ['product_id' => $product->id, 'quantity' => 1])->assertCreated();
     test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/submit")->assertOk();
     test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/confirm")->assertOk();
@@ -42,7 +45,7 @@ test('una venta fiscalmente completa da ready=true sin errores', function () {
         ->assertJsonPath('warnings', []);
 });
 
-test('una venta no confirmada no está lista para facturarse', function () {
+test('el endpoint no exige la confirmación (la hace la orquestación); el modo base sí', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $client = Client::factory()->create(['company_id' => $company->id]);
@@ -50,8 +53,13 @@ test('una venta no confirmada no está lista para facturarse', function () {
 
     $response = $this->actingAs($user, 'api')->getJson("/api/sales/{$sale->id}/billing-readiness");
 
-    $response->assertOk()->assertJsonPath('ready', false);
-    expect(collect($response->json('errors'))->pluck('code'))->toContain('SALE_NOT_CONFIRMED');
+    // Fase 6.25: cambio de contrato intencional del endpoint.
+    $response->assertOk();
+    expect(collect($response->json('errors'))->pluck('code'))->not->toContain('SALE_NOT_CONFIRMED');
+
+    app(CurrentTenant::class)->set($company->id);
+    $base = app(SaleBillingReadinessService::class)->evaluate($sale->fresh());
+    expect(collect($base['errors'])->pluck('code'))->toContain('SALE_NOT_CONFIRMED');
 });
 
 test('un cliente sin RFC bloquea la facturación', function () {
@@ -156,7 +164,7 @@ test('datos cross-tenant en las líneas bloquean la facturación y la respuesta 
     // revierte cualquier intento de cambiar company_id vía Eloquent
     // ->update(), así que solo un ALTER directo en BD puede producir
     // este escenario — exactamente lo que esta prueba busca cubrir.
-    \Illuminate\Support\Facades\DB::table('sale_items')
+    DB::table('sale_items')
         ->where('id', $sale->items()->first()->id)
         ->update(['company_id' => $companyB->id, 'product_id' => $foreignProduct->id]);
 
@@ -217,7 +225,7 @@ test('una tasa de impuesto inactiva en una línea bloquea la facturación', func
     expect(collect($response->json('errors'))->pluck('code'))->toContain('ITEM_TAX_RATE_INVALID');
 });
 
-test('un producto sin clave de unidad SAT genera un warning pero no bloquea', function () {
+test('un producto sin clave de unidad SAT bloquea antes de facturar; en el modo base sigue siendo warning', function () {
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $client = Client::factory()->create(['company_id' => $company->id]);
@@ -226,6 +234,12 @@ test('un producto sin clave de unidad SAT genera un warning pero no bloquea', fu
 
     $response = $this->actingAs($user, 'api')->getJson("/api/sales/{$sale->id}/billing-readiness");
 
-    $response->assertOk()->assertJsonPath('ready', true);
-    expect(collect($response->json('warnings'))->pluck('code'))->toContain('ITEM_PRODUCT_UNIT_KEY_MISSING');
+    // Fase 6.25: la factura quedaría ready sin poder emitirse.
+    $response->assertOk()->assertJsonPath('ready', false);
+    expect(collect($response->json('errors'))->pluck('code'))->toContain('ITEM_PRODUCT_UNIT_KEY_MISSING');
+
+    app(CurrentTenant::class)->set($company->id);
+    $base = app(SaleBillingReadinessService::class)->evaluate($sale->fresh());
+    expect($base['ready'])->toBeTrue()
+        ->and(collect($base['warnings'])->pluck('code'))->toContain('ITEM_PRODUCT_UNIT_KEY_MISSING');
 });

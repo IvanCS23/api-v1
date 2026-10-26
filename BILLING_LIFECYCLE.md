@@ -105,6 +105,57 @@ alcanzarlo, el panel deja de ofrecer "Obtener acuse" y `billing:health`
 sugiere `manual_review`. El endpoint y el comando de diagnóstico siguen
 pudiendo reintentar explícitamente.
 
+## Flujo venta → factura (Fase 6.25)
+
+La UI captura la venta en `/pages/sales/new` y `/pages/sales/{id}` y la
+factura con **una sola llamada**:
+
+`POST /api/sales/{sale}/invoice` (`InvoiceSaleService`), dentro de una
+transacción y con la venta bloqueada:
+
+1. Si la venta ya tiene factura vigente responde **200** con ella, sin crear
+   otra. Una factura en `draft` del flujo anterior se marca `ready`; `ready`,
+   `issued` y `cancelled` se devuelven sin tocar nada.
+2. Venta cancelada: **409 `SALE_CANCELLED`**.
+3. Readiness previo a facturar; si falla, **422 `SALE_NOT_BILLABLE`** con
+   `errors[{code, field, message}]` y la venta queda sin cambios.
+4. Conserva los estados de la venta `draft → pending → confirmed`
+   (`SaleWorkflow`), convierte (`SaleToInvoiceConverter`) y deja la factura
+   `ready` (**201**). Cualquier fallo revierte todo (savepoints).
+
+Una segunda petición concurrente espera el bloqueo y recibe la misma
+factura. Los pasos de aprobación (`submit`/`confirm`) se conservan, pero hoy
+no hay separación de roles: cualquier usuario de la empresa puede ejecutarlos.
+Los endpoints `submit`, `confirm`, `POST /api/invoices` y `ready` siguen
+disponibles.
+
+**Readiness previo a facturar** (`GET /sales/{id}/billing-readiness`,
+`SaleBillingReadinessService::evaluate($sale, beforeInvoicing: true)`):
+borrador y pendiente pueden facturarse; además del cliente y los productos,
+exige el pago efectivo (`SALE_PAYMENT_FORM_MISSING`,
+`SALE_PAYMENT_METHOD_MISSING`, `SALE_PPD_REQUIRES_FORM_99`,
+`SALE_PUE_FORBIDS_FORM_99`), rechaza retenciones
+(`ITEM_TAX_WITHHOLDING_UNSUPPORTED`) y bloquea la clave de unidad faltante.
+El modo base (sin `beforeInvoicing`) no cambia: lo usa `POST /api/invoices`.
+
+**Forma y método de pago por venta** (`sales.payment_form`,
+`sales.payment_method`): la venta guarda los suyos y la empresa
+(`default_payment_*`) sólo es respaldo, campo por campo
+(`SalePaymentRules::effective()`). PPD exige la forma 99 y PUE no la admite,
+tanto al guardar (Store/UpdateSaleRequest) como al revisar el readiness.
+
+**Venta cuya factura se borró.** `invoices` usa borrado suave. La unicidad de
+la venta vive en la columna generada virtual `active_sale_id` (`sale_id`
+mientras la factura no esté borrada): la venta sigue `confirmed`, conserva el
+historial de la factura borrada y puede facturarse de nuevo. Los generadores
+de folio de facturas y ventas incluyen los registros borrados para no
+repetir folios.
+
+`GET /api/tax-rates` lista las tasas de traslado activas para las líneas
+(sin retenciones). `GET /api/sales` es paginado (`search`, `status`, `page`,
+`per_page`) y cada venta trae su factura vigente resumida. Las mutaciones de
+líneas bloquean la venta, así que ninguna se cuela mientras se factura.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.

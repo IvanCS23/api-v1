@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SaleItemController;
+use App\Http\Controllers\Api\TaxRateController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserSecurityController;
 use Illuminate\Support\Facades\Route;
@@ -87,6 +88,11 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
 
     // Billing readiness (Fase 4 — preparación fiscal, sin Facturapi)
     Route::get('/sales/{id}/billing-readiness', [SaleController::class, 'billingReadiness']);
+    // Fase 6.25: venta → factura ready en una sola operación atómica e idempotente.
+    Route::post('/sales/{id}/invoice', [SaleController::class, 'invoice']);
+
+    // Fase 6.25: tasas de impuesto seleccionables en las líneas de venta.
+    Route::get('/tax-rates', [TaxRateController::class, 'index']);
 
     // Sale items (anidados bajo una venta)
     Route::get('/sales/{sale}/items', [SaleItemController::class, 'index']);

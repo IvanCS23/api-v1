@@ -87,7 +87,9 @@ test('una empresa no puede listar ni ver ventas de otra empresa', function () {
 
     $index = $this->actingAs($userB, 'api')->getJson('/api/sales');
     $index->assertOk();
-    expect($index->json())->toHaveCount(1);
+    // Fase 6.25: el índice es paginado ({data, links, meta}).
+    expect($index->json('data'))->toHaveCount(1)
+        ->and($index->json('meta.total'))->toBe(1);
 
     $this->actingAs($userB, 'api')->getJson("/api/sales/{$saleA->id}")->assertNotFound();
 });

@@ -20,7 +20,11 @@ class SaleNumberGenerator
     public function next(int $companyId): string
     {
         return DB::transaction(function () use ($companyId): string {
+            // Fase 6.25: incluye las borradas (suave). El único (company_id,
+            // folio) también las cuenta; sin esto, borrar el último registro
+            // y crear otro repetía el folio (error 500).
             $lastFolio = Sale::withoutGlobalScope(CompanyScope::class)
+                ->withTrashed()
                 ->where('company_id', $companyId)
                 ->lockForUpdate()
                 ->orderByDesc('id')
