@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Sat\SatFiscalValidator;
 use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Collection;
 
@@ -42,6 +43,10 @@ use Illuminate\Support\Collection;
  */
 class SaleBillingReadinessService
 {
+    public function __construct(
+        private readonly SatFiscalValidator $satValidator = new SatFiscalValidator,
+    ) {}
+
     /**
      * @return array{ready: bool, errors: array<int, array{code: string, field: string, message: string}>, warnings: array<int, array{code: string, field: string, message: string}>}
      */
@@ -152,6 +157,12 @@ class SaleBillingReadinessService
         if (empty($client->email)) {
             $warnings[] = $this->error('CLIENT_EMAIL_MISSING', 'client.email', 'El cliente no tiene correo electrónico para el envío del CFDI.');
         }
+
+        // Fase 6.26: además de faltantes, valores inválidos según el SAT
+        // (formato, catálogo y matriz régimen ↔ uso ↔ tipo de persona).
+        foreach ($this->satValidator->clientIssues($client->only(['rfc', 'codigo_postal', 'regimen_fiscal', 'uso_cfdi'])) as $issue) {
+            $errors[] = $this->error($issue['code'], "client.{$issue['field']}", $issue['message']);
+        }
     }
 
     /**
@@ -217,6 +228,8 @@ class SaleBillingReadinessService
                     }
                 }
 
+                $this->checkProductCatalogs($product, $prefix, $errors, $warnings, $beforeInvoicing);
+
                 try {
                     if (! $product->type instanceof ProductType) {
                         $errors[] = $this->error('ITEM_PRODUCT_TYPE_INVALID', "{$prefix}.product.type", 'El producto de la línea no tiene un tipo válido.');
@@ -237,6 +250,66 @@ class SaleBillingReadinessService
                     $errors[] = $this->error('ITEM_TAX_WITHHOLDING_UNSUPPORTED', "{$prefix}.tax_rate_id", 'La línea usa una retención, que todavía no se puede facturar.');
                 }
             }
+
+            if ($product !== null) {
+                $this->checkTaxObject($item, $product, $prefix, $errors);
+            }
+        }
+    }
+
+    /**
+     * Fase 6.26: clave de producto, unidad y objeto de impuesto que existen
+     * pero no son válidos en los catálogos del SAT. La unidad inválida sigue
+     * la misma severidad que la faltante (warning salvo antes de facturar).
+     *
+     * @param  array<int, array{code: string, field: string, message: string}>  $errors
+     * @param  array<int, array{code: string, field: string, message: string}>  $warnings
+     */
+    private function checkProductCatalogs(Product $product, string $prefix, array &$errors, array &$warnings, bool $beforeInvoicing): void
+    {
+        $issues = $this->satValidator->productIssues($product->only(['clave_producto', 'clave_unidad', 'objeto_imp']));
+
+        foreach ($issues as $issue) {
+            $code = match ($issue['code']) {
+                'PRODUCT_SAT_KEY_INVALID' => 'ITEM_PRODUCT_SAT_KEY_INVALID',
+                'PRODUCT_UNIT_KEY_INVALID' => 'ITEM_PRODUCT_UNIT_KEY_INVALID',
+                'PRODUCT_TAX_OBJECT_INVALID' => 'ITEM_PRODUCT_OBJETO_IMP_INVALID',
+                // La coherencia que cuenta en la factura es la de la línea
+                // (checkTaxObject), no el IVA sugerido del producto.
+                default => null,
+            };
+
+            if ($code === null) {
+                continue;
+            }
+
+            $entry = $this->error($code, "{$prefix}.product.{$issue['field']}", $issue['message']);
+
+            if ($code === 'ITEM_PRODUCT_UNIT_KEY_INVALID' && ! $beforeInvoicing) {
+                $warnings[] = $entry;
+            } else {
+                $errors[] = $entry;
+            }
+        }
+    }
+
+    /**
+     * Fase 6.26: el objeto de impuesto del producto debe corresponder al
+     * impuesto real de la línea, que es lo que llega al CFDI: con 02 la línea
+     * necesita un traslado (16 %, 0 % o exento); con 01, 03 o 04 no puede
+     * llevarlo. 05–08 no se validan en esta fase.
+     *
+     * @param  array<int, array{code: string, field: string, message: string}>  $errors
+     */
+    private function checkTaxObject(SaleItem $item, Product $product, string $prefix, array &$errors): void
+    {
+        $taxObject = (string) $product->objeto_imp;
+        $hasTransfer = $item->tax_rate_id !== null && $item->taxRate?->tax_type === TaxType::Traslado;
+
+        if ($taxObject === SatFiscalValidator::TAX_OBJECT_TAXED && ! $hasTransfer) {
+            $errors[] = $this->error('ITEM_TAX_OBJECT_MISMATCH', "{$prefix}.tax_rate_id", 'El producto es objeto de impuesto (02) pero la línea no tiene IVA: elige 16 %, 0 % o exento.');
+        } elseif (in_array($taxObject, SatFiscalValidator::TAX_OBJECTS_WITHOUT_TAX, true) && $hasTransfer) {
+            $errors[] = $this->error('ITEM_TAX_OBJECT_MISMATCH', "{$prefix}.tax_rate_id", "El producto tiene objeto de impuesto {$taxObject}, que no lleva IVA, pero la línea sí lo tiene.");
         }
     }
 
@@ -291,6 +364,10 @@ class SaleBillingReadinessService
 
         if ($form === null) {
             $errors[] = $this->error('SALE_PAYMENT_FORM_MISSING', 'payment_form', 'La venta no tiene forma de pago (ni la empresa una predeterminada).');
+        } elseif (! SalePaymentRules::isValidForm($form)) {
+            // Fase 6.26: p. ej. un predeterminado de empresa capturado antes
+            // de validar contra c_FormaPago.
+            $errors[] = $this->error(SalePaymentRules::FORM_INVALID, 'payment_form', "La forma de pago {$form} no existe en el catálogo c_FormaPago del SAT.");
         }
 
         if ($method === null) {

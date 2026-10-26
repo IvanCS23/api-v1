@@ -2,13 +2,15 @@
 
 namespace App\Support\Billing;
 
+use App\Support\Sat\SatCatalog;
+
 /**
  * Fase 6.25: forma y método de pago de una venta (CFDI 4.0).
  *
  * Única fuente de las reglas que comparten StoreSaleRequest,
  * UpdateSaleRequest y SaleBillingReadinessService:
- * - payment_form: clave de 2 dígitos (c_FormaPago); el catálogo completo
- *   se valida en la Fase 6.26.
+ * - payment_form: clave del catálogo c_FormaPago del SAT (Fase 6.26: las 22
+ *   formas vigentes del archivo oficial, ver SatCatalog).
  * - payment_method: PUE o PPD.
  * - PPD exige la forma 99 ("Por definir") y PUE no la admite.
  *
@@ -21,11 +23,17 @@ final class SalePaymentRules
 
     public const FORM_TO_BE_DEFINED = '99';
 
-    public const FORM_PATTERN = '/^\d{2}$/';
-
     public const PPD_REQUIRES_FORM_99 = 'SALE_PPD_REQUIRES_FORM_99';
 
     public const PUE_FORBIDS_FORM_99 = 'SALE_PUE_FORBIDS_FORM_99';
+
+    public const FORM_INVALID = 'SALE_PAYMENT_FORM_INVALID';
+
+    /** Fase 6.26: la forma existe y está vigente en c_FormaPago. */
+    public static function isValidForm(?string $form): bool
+    {
+        return SatCatalog::isPaymentForm($form);
+    }
 
     /** Código de la incompatibilidad entre forma y método, o null si no hay. */
     public static function violation(?string $form, ?string $method): ?string

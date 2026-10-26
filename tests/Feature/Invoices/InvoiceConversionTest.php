@@ -118,7 +118,7 @@ test('el snapshot del producto en la línea de factura copia clave_producto, cla
     $client = Client::factory()->create(['company_id' => $company->id]);
     $product = Product::factory()->create([
         'company_id' => $company->id,
-        'clave_producto' => 'ABC12345',
+        'clave_producto' => '84111506', // Fase 6.26: clave real del catálogo
         'clave_unidad' => 'H87',
         'type' => 'service',
     ]);
@@ -131,13 +131,13 @@ test('el snapshot del producto en la línea de factura copia clave_producto, cla
     $invoice = Invoice::with('items')->findOrFail($response->json('id'));
     $item = $invoice->items->first();
 
-    expect($item->product_clave_producto)->toBe('ABC12345')
+    expect($item->product_clave_producto)->toBe('84111506')
         ->and($item->product_clave_unidad)->toBe('H87')
         ->and($item->product_type)->toBe('service');
 
     // El snapshot no cambia si el producto se modifica después.
     $product->update(['clave_producto' => 'ZZZ99999', 'clave_unidad' => 'XYZ']);
-    expect($item->fresh()->product_clave_producto)->toBe('ABC12345')
+    expect($item->fresh()->product_clave_producto)->toBe('84111506')
         ->and($item->fresh()->product_clave_unidad)->toBe('H87');
 });
 
@@ -145,7 +145,8 @@ test('el snapshot de impuestos en la línea de factura copia code, name, rate, t
     $company = Company::factory()->create();
     $user = User::factory()->create(['company_id' => $company->id]);
     $client = Client::factory()->create(['company_id' => $company->id]);
-    $product = Product::factory()->create(['company_id' => $company->id]);
+    // Fase 6.26: una línea con IVA exige objeto de impuesto 02.
+    $product = Product::factory()->create(['company_id' => $company->id, 'objeto_imp' => '02']);
     $taxRate = TaxRate::factory()->create([
         'code' => '002',
         'name' => 'IVA Trasladado 16%',
