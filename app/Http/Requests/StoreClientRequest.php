@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\NormalizesEmptyStrings;
+use App\Http\Requests\Concerns\ValidatesClientFiscalData;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -10,6 +11,7 @@ use Illuminate\Validation\Rule;
 class StoreClientRequest extends FormRequest
 {
     use NormalizesEmptyStrings;
+    use ValidatesClientFiscalData;
 
     /**
      * Auditoría (revisión post-Etapa D): `ClientPolicy::create()` hoy
@@ -30,6 +32,7 @@ class StoreClientRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->nullifyEmptyStrings(['no_exterior', 'no_interior', 'colonia', 'localidad', 'municipio']);
+        $this->normalizeFiscalData();
 
         if (! $this->filled('calle')) {
             $this->merge(['calle' => '']);

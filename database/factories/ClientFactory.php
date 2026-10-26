@@ -31,7 +31,9 @@ class ClientFactory extends Factory
             'company_id' => Company::factory(),
             'name' => fake()->company(),
             'email' => fake()->unique()->safeEmail(),
-            'rfc' => strtoupper(fake()->unique()->bothify('???######??')),
+            // Fase 6.26: RFC de persona moral válido (3 letras, fecha AAMMDD,
+            // homoclave), coherente con el régimen 601 y el uso G03.
+            'rfc' => strtoupper(fake()->unique()->lexify('???').fake()->date('ymd').fake()->bothify('??#')),
             'codigo_postal' => fake()->numerify('#####'),
             'regimen_fiscal' => '601',
             'uso_cfdi' => 'G03',
