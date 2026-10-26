@@ -4,6 +4,7 @@ namespace App\Http\Requests;
 
 use App\Enums\ProductType;
 use App\Http\Requests\Concerns\NormalizesEmptyStrings;
+use App\Http\Requests\Concerns\ValidatesProductFiscalData;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -12,6 +13,7 @@ use Illuminate\Validation\Rules\Enum;
 class StoreProductRequest extends FormRequest
 {
     use NormalizesEmptyStrings;
+    use ValidatesProductFiscalData;
 
     /**
      * Auditoría (revisión post-Etapa D): `ProductPolicy::create()` retorna
@@ -31,6 +33,7 @@ class StoreProductRequest extends FormRequest
             'no_identificacion', 'cuenta_predial', 'clave_unidad', 'objeto_imp',
             'no_pedimento', 'impuesto_local', 'iva_retenido', 'ieps', 'isr',
         ]);
+        $this->normalizeFiscalData();
     }
 
     /**
@@ -49,9 +52,10 @@ class StoreProductRequest extends FormRequest
             'descripcion' => 'required|string|max:255',
             'precio_unitario' => 'required|numeric|min:0',
             'cuenta_predial' => 'nullable|string|max:255',
-            'clave_producto' => ['required', 'string', 'size:8', Rule::unique('products', 'clave_producto')->where(fn ($query) => $query->where('company_id', $companyId))],
-            'clave_unidad' => 'nullable|string|max:10',
-            'objeto_imp' => 'nullable|string|max:10',
+            // Fase 6.26: clave_producto, clave_unidad, objeto_imp y tax_rate_id
+            // (ver ValidatesProductFiscalData). La clave SAT ya no es única por
+            // empresa: es una clasificación, no un identificador.
+            ...$this->fiscalRules(creating: true),
             'no_pedimento' => 'nullable|string|max:255',
             'impuesto_local' => 'nullable|string|max:255',
             'iva' => 'nullable|numeric|min:0',
@@ -96,6 +100,7 @@ class StoreProductRequest extends FormRequest
             return $validated;
         }
 
-        return array_filter($validated, fn ($value) => $value !== null);
+        return $this->withDerivedIva(array_filter($validated, fn ($value) => $value !== null))
+            + ['iva' => 0]; // sin tasa (objeto 01, 03, 04): sin IVA, nunca el default 16 de la columna.
     }
 }

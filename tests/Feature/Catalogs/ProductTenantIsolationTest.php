@@ -29,7 +29,9 @@ test('store asigna company_id automáticamente desde el usuario autenticado, no 
         'name' => 'Producto de prueba',
         'descripcion' => 'Descripción de prueba',
         'precio_unitario' => 150.5,
-        'clave_producto' => 'ABCD1234',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
         'company_id' => $companyB->id, // intento de inyectar otra empresa vía payload
     ]);
 
@@ -39,11 +41,17 @@ test('store asigna company_id automáticamente desde el usuario autenticado, no 
     expect($created->company_id)->toBe($companyA->id);
 });
 
-test('la validación unique de clave_producto es por empresa, no global', function () {
+/**
+ * Fase 6.26: clave_producto es la clasificación SAT (c_ClaveProdServ), no
+ * un identificador, así que ya no es única ni por empresa: dos productos de
+ * la misma empresa pueden compartirla. El identificador propio sigue siendo
+ * no_identificacion (único por empresa).
+ */
+test('dos productos pueden compartir la clave SAT, en la misma empresa o en otra', function () {
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
-    Product::factory()->create(['company_id' => $companyA->id, 'clave_producto' => 'ZZZZ9999']);
+    Product::factory()->create(['company_id' => $companyA->id, 'clave_producto' => '43232408']);
 
     $userB = User::factory()->create(['company_id' => $companyB->id]);
 
@@ -51,20 +59,28 @@ test('la validación unique de clave_producto es por empresa, no global', functi
         'name' => 'Producto de otra empresa',
         'descripcion' => 'Descripción',
         'precio_unitario' => 50,
-        'clave_producto' => 'ZZZZ9999',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
     ]);
     $response->assertCreated();
 
     $userA = User::factory()->create(['company_id' => $companyA->id]);
 
-    $duplicate = $this->actingAs($userA, 'api')->postJson('/api/products', [
-        'name' => 'Producto duplicado',
+    $sameKey = $this->actingAs($userA, 'api')->postJson('/api/products', [
+        'name' => 'Otro producto con la misma clave SAT',
         'descripcion' => 'Descripción',
         'precio_unitario' => 50,
-        'clave_producto' => 'ZZZZ9999',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
     ]);
-    $duplicate->assertStatus(422);
-    $duplicate->assertJsonValidationErrors('clave_producto');
+    $sameKey->assertCreated();
+
+    expect(Product::withoutGlobalScope(CompanyScope::class)
+        ->where('company_id', $companyA->id)
+        ->where('clave_producto', '43232408')
+        ->count())->toBe(2);
 });
 
 test('un usuario no puede ver, editar ni borrar productos de otra empresa', function () {

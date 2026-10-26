@@ -24,7 +24,9 @@ test('precio_unitario en 0 se conserva (no se filtra como si fuera vacío)', fun
         'name' => 'Producto gratuito',
         'descripcion' => 'Precio en cero',
         'precio_unitario' => 0,
-        'clave_producto' => 'ZEROPRC1',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
     ]);
 
     // Si el filtro hubiera eliminado 0 (comparación truthy), la columna
@@ -44,7 +46,9 @@ test('iva en 0 (int) se conserva', function () {
         'name' => 'Producto IVA 0',
         'descripcion' => 'Descripción',
         'precio_unitario' => 100,
-        'clave_producto' => 'IVAZERO1',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
         'iva' => 0,
     ]);
 
@@ -62,7 +66,9 @@ test('iva_retenido como "0" (string) se conserva', function () {
         'name' => 'Producto retención string 0',
         'descripcion' => 'Descripción',
         'precio_unitario' => 100,
-        'clave_producto' => 'STRZERO1',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
         'iva_retenido' => '0',
     ]);
 
@@ -80,7 +86,9 @@ test('iva_retenido omitido (no enviado) queda NULL, no 0 ni ausente por error', 
         'name' => 'Producto sin retención',
         'descripcion' => 'Descripción',
         'precio_unitario' => 100,
-        'clave_producto' => 'NORETEN1',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
     ]);
 
     $response->assertCreated();
@@ -97,7 +105,9 @@ test('iva_retenido enviado como cadena vacía se normaliza a NULL y se filtra de
         'name' => 'Producto retención vacía',
         'descripcion' => 'Descripción',
         'precio_unitario' => 100,
-        'clave_producto' => 'EMPTYRE1',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
         'iva_retenido' => '',
     ]);
 

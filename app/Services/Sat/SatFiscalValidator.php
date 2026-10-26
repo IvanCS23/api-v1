@@ -32,6 +32,15 @@ final class SatFiscalValidator
 
     public const PERSON_PHYSICAL = 'physical';
 
+    /**
+     * Objeto de impuesto con traslado obligatorio (02) y los que no admiten
+     * el nodo Impuestos en el concepto (01, 03, 04). 05–08 son casos
+     * especiales del SAT que esta fase no valida contra el IVA.
+     */
+    public const TAX_OBJECT_TAXED = '02';
+
+    public const TAX_OBJECTS_WITHOUT_TAX = ['01', '03', '04'];
+
     /** Moral: 3 letras; física: 4. Luego AAMMDD y homoclave de 3. */
     private const RFC_PATTERN = '/^([A-ZÑ&]{3,4})(\d{2})(\d{2})(\d{2})([A-Z\d]{3})$/u';
 
@@ -124,6 +133,48 @@ final class SatFiscalValidator
 
         if ($regimeOk && $useOk && ! in_array($regime, $uses[$use]['regimes'], true)) {
             $issues[] = $this->issue('CLIENT_REGIME_USE_INCOMPATIBLE', 'uso_cfdi', "El uso de CFDI {$use} no es compatible con el régimen fiscal {$regime}.");
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Clave SAT, unidad, objeto de impuesto y su coherencia con el IVA del
+     * producto (`tax_rate_id`). `$productKeyExists` / `$unitKeyExists`
+     * permiten pasar el resultado de una consulta por lotes
+     * (SatCatalog::existingProductKeys); si son null se consulta aquí.
+     *
+     * @param  array{clave_producto?: ?string, clave_unidad?: ?string, objeto_imp?: ?string, tax_rate_id?: int|string|null}  $product
+     * @return list<array{code: string, field: string, message: string}>
+     */
+    public function productIssues(array $product, ?bool $productKeyExists = null, ?bool $unitKeyExists = null): array
+    {
+        $productKey = trim((string) ($product['clave_producto'] ?? ''));
+        $unitKey = mb_strtoupper(trim((string) ($product['clave_unidad'] ?? '')));
+        $taxObject = trim((string) ($product['objeto_imp'] ?? ''));
+        $hasTax = filled($product['tax_rate_id'] ?? null);
+        $issues = [];
+
+        if ($productKey !== '') {
+            if (! preg_match('/^\d{8}$/', $productKey)) {
+                $issues[] = $this->issue('PRODUCT_SAT_KEY_INVALID', 'clave_producto', 'La clave de producto SAT debe tener 8 dígitos.');
+            } elseif (! ($productKeyExists ?? SatCatalog::productKeyExists($productKey))) {
+                $issues[] = $this->issue('PRODUCT_SAT_KEY_INVALID', 'clave_producto', "La clave de producto {$productKey} no existe en el catálogo c_ClaveProdServ del SAT.");
+            }
+        }
+
+        if ($unitKey !== '' && ! ($unitKeyExists ?? SatCatalog::unitKeyExists($unitKey))) {
+            $issues[] = $this->issue('PRODUCT_UNIT_KEY_INVALID', 'clave_unidad', "La clave de unidad {$unitKey} no existe en el catálogo c_ClaveUnidad del SAT.");
+        }
+
+        if ($taxObject !== '') {
+            if (! SatCatalog::isTaxObject($taxObject)) {
+                $issues[] = $this->issue('PRODUCT_TAX_OBJECT_INVALID', 'objeto_imp', "El objeto de impuesto {$taxObject} no existe en el catálogo c_ObjetoImp del SAT.");
+            } elseif ($taxObject === self::TAX_OBJECT_TAXED && ! $hasTax) {
+                $issues[] = $this->issue('PRODUCT_TAX_OBJECT_MISMATCH', 'tax_rate_id', 'Con objeto de impuesto 02 el producto debe tener IVA (16 %, 0 % o exento).');
+            } elseif (in_array($taxObject, self::TAX_OBJECTS_WITHOUT_TAX, true) && $hasTax) {
+                $issues[] = $this->issue('PRODUCT_TAX_OBJECT_MISMATCH', 'tax_rate_id', "Con objeto de impuesto {$taxObject} el producto no lleva IVA: quita la tasa o usa el objeto 02.");
+            }
         }
 
         return $issues;

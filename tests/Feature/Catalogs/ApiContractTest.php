@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Company;
+use App\Models\TaxRate;
 use App\Models\User;
 
 /*
@@ -78,10 +79,13 @@ test('contrato JSON de products: index, store, show, update', function () {
     $storeKeys = [
         'id', 'company_id', 'name', 'type', 'no_identificacion', 'descripcion',
         'precio_unitario', 'cuenta_predial', 'clave_producto', 'clave_unidad',
-        'objeto_imp', 'no_pedimento', 'impuesto_local', 'iva', 'iva_retenido',
+        'objeto_imp', 'tax_rate_id', 'no_pedimento', 'impuesto_local', 'iva', 'iva_retenido',
         'ieps', 'isr', 'created_at', 'updated_at',
     ];
     $fetchedKeys = [...$storeKeys, 'deleted_at'];
+
+    // Fase 6.26: con objeto 02 el producto necesita su tasa; `iva` 16 se traduce a ella.
+    TaxRate::factory()->create(['name' => 'IVA 16%']);
 
     $store = $this->actingAs($user, 'api')->postJson('/api/products', [
         'name' => 'Contrato Producto',
@@ -90,7 +94,7 @@ test('contrato JSON de products: index, store, show, update', function () {
         'descripcion' => 'Descripción de contrato',
         'precio_unitario' => 10,
         'cuenta_predial' => '123',
-        'clave_producto' => 'CTR12345',
+        'clave_producto' => '43232408',
         'clave_unidad' => 'H87',
         'objeto_imp' => '02',
         'no_pedimento' => '1',

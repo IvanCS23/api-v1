@@ -4,6 +4,8 @@ namespace App\Http\Requests;
 
 use App\Enums\ProductType;
 use App\Http\Requests\Concerns\NormalizesEmptyStrings;
+use App\Http\Requests\Concerns\ValidatesProductFiscalData;
+use App\Models\Product;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -12,6 +14,7 @@ use Illuminate\Validation\Rules\Enum;
 class UpdateProductRequest extends FormRequest
 {
     use NormalizesEmptyStrings;
+    use ValidatesProductFiscalData;
 
     /**
      * Auditoría (revisión post-Etapa D): igual que UpdateClientRequest —
@@ -31,6 +34,7 @@ class UpdateProductRequest extends FormRequest
             'no_identificacion', 'cuenta_predial', 'clave_unidad', 'objeto_imp',
             'no_pedimento', 'impuesto_local', 'iva_retenido', 'ieps', 'isr',
         ]);
+        $this->normalizeFiscalData();
     }
 
     /**
@@ -46,9 +50,8 @@ class UpdateProductRequest extends FormRequest
             'descripcion' => 'sometimes|string|max:255',
             'precio_unitario' => 'sometimes|numeric|min:0',
             'cuenta_predial' => 'nullable|string|max:255',
-            'clave_producto' => ['sometimes', 'string', 'size:8', Rule::unique('products', 'clave_producto')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($productId)],
-            'clave_unidad' => 'nullable|string|max:10',
-            'objeto_imp' => 'nullable|string|max:10',
+            // Fase 6.26: ver ValidatesProductFiscalData.
+            ...$this->fiscalRules(creating: false),
             'no_pedimento' => 'nullable|string|max:255',
             'impuesto_local' => 'nullable|string|max:255',
             'iva' => 'nullable|numeric|min:0',
@@ -58,5 +61,24 @@ class UpdateProductRequest extends FormRequest
             'no_identificacion' => ['nullable', 'string', 'max:255', Rule::unique('products', 'no_identificacion')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($productId)],
             'type' => ['sometimes', new Enum(ProductType::class)],
         ];
+    }
+
+    /**
+     * Fase 6.26: `iva` se deriva de `tax_rate_id` y nunca se guarda crudo
+     * (un `iva` null llegaba a la columna NOT NULL y respondía 500).
+     */
+    public function validated($key = null, $default = null)
+    {
+        $validated = parent::validated($key, $default);
+
+        return $key === null ? $this->withDerivedIva($validated) : $validated;
+    }
+
+    /** @return array<string, mixed> */
+    protected function currentFiscalData(): array
+    {
+        $product = Product::find($this->route('id'));
+
+        return $product === null ? [] : $product->only(['clave_producto', 'clave_unidad', 'objeto_imp', 'tax_rate_id']);
     }
 }
