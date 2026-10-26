@@ -2,12 +2,16 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesSalePayment;
+use App\Models\Sale;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class UpdateSaleRequest extends FormRequest
 {
+    use ValidatesSalePayment;
+
     public function authorize(): bool
     {
         return true;
@@ -34,6 +38,27 @@ class UpdateSaleRequest extends FormRequest
         return [
             'client_id' => ['sometimes', 'required', 'integer', Rule::exists('clients', 'id')->where('company_id', $companyId)],
             'notes' => ['nullable', 'string', 'max:1000'],
+            ...$this->paymentRules(),
         ];
+    }
+
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return $this->paymentMessages();
+    }
+
+    /**
+     * Fase 6.25: la compatibilidad forma/método se evalúa contra lo que la
+     * venta ya tenía. La venta se busca con el scope de empresa; si no
+     * existe, el controller responde 404 después.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    protected function currentPayment(): array
+    {
+        $sale = Sale::find($this->route('id'));
+
+        return [$sale?->payment_form, $sale?->payment_method];
     }
 }

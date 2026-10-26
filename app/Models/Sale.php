@@ -25,6 +25,8 @@ class Sale extends Model implements HasCalculableItems
         'tax_total',
         'total',
         'currency',
+        'payment_form',
+        'payment_method',
         'notes',
     ];
 

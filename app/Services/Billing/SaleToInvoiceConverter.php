@@ -14,6 +14,7 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
+use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -84,7 +85,9 @@ class SaleToInvoiceConverter
 
             $client = Client::withoutGlobalScope(CompanyScope::class)->findOrFail($lockedSale->client_id);
 
-            // `payment_form`/`payment_method` (Fase 6.2.2): Sale no posee
+            // `payment_form`/`payment_method`: desde la Fase 6.25 la venta
+            // guarda su propio valor y la empresa sólo es respaldo
+            // (SalePaymentRules::effective()). Historia (Fase 6.2.2): Sale no poseía
             // este dato fiscal directamente — la única fuente en el
             // dominio hoy es el default a nivel de Company
             // (`default_payment_form`/`default_payment_method`, ver su
@@ -93,6 +96,12 @@ class SaleToInvoiceConverter
             // Si la empresa no configuró su default, el snapshot queda
             // en null — nunca se inventa aquí un valor fijo.
             $company = Company::findOrFail($lockedSale->company_id);
+            [$paymentForm, $paymentMethod] = SalePaymentRules::effective(
+                $lockedSale->payment_form,
+                $lockedSale->payment_method,
+                $company->default_payment_form,
+                $company->default_payment_method,
+            );
 
             $invoice = new Invoice([
                 'client_id' => $client->id,
@@ -116,8 +125,8 @@ class SaleToInvoiceConverter
                 'client_municipio' => $client->municipio,
                 'client_estado' => $client->estado,
                 'client_pais' => $client->pais,
-                'payment_form' => $company->default_payment_form,
-                'payment_method' => $company->default_payment_method,
+                'payment_form' => $paymentForm,
+                'payment_method' => $paymentMethod,
             ]);
             $invoice->company_id = $lockedSale->company_id;
             $invoice->sale_id = $lockedSale->id;

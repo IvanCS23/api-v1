@@ -2,12 +2,15 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesSalePayment;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
 class StoreSaleRequest extends FormRequest
 {
+    use ValidatesSalePayment;
+
     public function authorize(): bool
     {
         return true;
@@ -28,6 +31,13 @@ class StoreSaleRequest extends FormRequest
             'client_id' => ['required', 'integer', Rule::exists('clients', 'id')->where('company_id', $companyId)],
             'notes' => ['nullable', 'string', 'max:1000'],
             'currency' => ['nullable', 'string', 'size:3'],
+            ...$this->paymentRules(),
         ];
+    }
+
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return $this->paymentMessages();
     }
 }
