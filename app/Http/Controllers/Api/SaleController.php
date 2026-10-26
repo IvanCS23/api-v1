@@ -135,6 +135,8 @@ class SaleController extends Controller
 
         $this->authorize('view', $sale);
 
-        return response()->json($this->billingReadiness->evaluate($sale));
+        // Fase 6.25: responde "¿se puede facturar ya?" en los términos de la
+        // orquestación (POST /sales/{sale}/invoice), que envía y confirma.
+        return response()->json($this->billingReadiness->evaluate($sale, beforeInvoicing: true));
     }
 }

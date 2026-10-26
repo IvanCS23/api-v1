@@ -4,10 +4,13 @@ namespace App\Services\Billing;
 
 use App\Enums\ProductType;
 use App\Enums\SaleStatus;
+use App\Enums\TaxType;
+use App\Models\Company;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Collection;
 
 /**
@@ -42,7 +45,7 @@ class SaleBillingReadinessService
     /**
      * @return array{ready: bool, errors: array<int, array{code: string, field: string, message: string}>, warnings: array<int, array{code: string, field: string, message: string}>}
      */
-    public function evaluate(Sale $sale): array
+    public function evaluate(Sale $sale, bool $beforeInvoicing = false): array
     {
         $errors = [];
         $warnings = [];
@@ -51,10 +54,14 @@ class SaleBillingReadinessService
             ->where('sale_id', $sale->id)
             ->get();
 
-        $this->checkSale($sale, $items, $errors);
+        $this->checkSale($sale, $items, $errors, $beforeInvoicing);
         $this->checkClient($sale, $errors, $warnings);
-        $this->checkItems($items, $errors, $warnings);
+        $this->checkItems($items, $errors, $warnings, $beforeInvoicing);
         $this->checkTenant($sale, $items, $errors);
+
+        if ($beforeInvoicing) {
+            $this->checkPayment($sale, $errors);
+        }
 
         return [
             'ready' => $errors === [],
@@ -67,9 +74,15 @@ class SaleBillingReadinessService
      * @param  Collection<int, SaleItem>  $items
      * @param  array<int, array{code: string, field: string, message: string}>  $errors
      */
-    private function checkSale(Sale $sale, Collection $items, array &$errors): void
+    private function checkSale(Sale $sale, Collection $items, array &$errors, bool $beforeInvoicing): void
     {
-        if ($sale->status !== SaleStatus::Confirmed) {
+        if ($beforeInvoicing) {
+            // Fase 6.25: la orquestación (POST /sales/{sale}/invoice) envía y
+            // confirma la venta; borrador y pendiente pueden facturarse.
+            if ($sale->status === SaleStatus::Cancelled) {
+                $errors[] = $this->error('SALE_CANCELLED', 'status', 'La venta está cancelada y no puede facturarse.');
+            }
+        } elseif ($sale->status !== SaleStatus::Confirmed) {
             $errors[] = $this->error('SALE_NOT_CONFIRMED', 'status', 'La venta debe estar Confirmed para poder facturarse.');
         }
 
@@ -146,7 +159,7 @@ class SaleBillingReadinessService
      * @param  array<int, array{code: string, field: string, message: string}>  $errors
      * @param  array<int, array{code: string, field: string, message: string}>  $warnings
      */
-    private function checkItems(Collection $items, array &$errors, array &$warnings): void
+    private function checkItems(Collection $items, array &$errors, array &$warnings, bool $beforeInvoicing): void
     {
         foreach ($items as $item) {
             $prefix = "items.{$item->id}";
@@ -192,8 +205,16 @@ class SaleBillingReadinessService
                  * pertenece a la validación previa al timbrado, no a este
                  * servicio.
                  */
+                // Fase 6.25: antes de facturar bloquea, porque la factura
+                // quedaría ready sin poder emitirse (ClaveUnidad es obligatoria
+                // en el CFDI; InvoicePacReadinessService la exige).
                 if (empty($product->clave_unidad)) {
-                    $warnings[] = $this->error('ITEM_PRODUCT_UNIT_KEY_MISSING', "{$prefix}.product.clave_unidad", 'El producto de la línea no tiene clave de unidad SAT.');
+                    $unitKey = $this->error('ITEM_PRODUCT_UNIT_KEY_MISSING', "{$prefix}.product.clave_unidad", 'El producto de la línea no tiene clave de unidad SAT.');
+                    if ($beforeInvoicing) {
+                        $errors[] = $unitKey;
+                    } else {
+                        $warnings[] = $unitKey;
+                    }
                 }
 
                 try {
@@ -210,6 +231,10 @@ class SaleBillingReadinessService
 
                 if ($taxRate === null || $taxRate->active !== true) {
                     $errors[] = $this->error('ITEM_TAX_RATE_INVALID', "{$prefix}.tax_rate_id", 'La línea referencia una tasa de impuesto inexistente o inactiva.');
+                } elseif ($beforeInvoicing && $taxRate->tax_type === TaxType::Retencion) {
+                    // Fase 6.25: el PAC todavía no admite retenciones
+                    // (INVOICE_ITEM_WITHHOLDING_UNSUPPORTED al emitir).
+                    $errors[] = $this->error('ITEM_TAX_WITHHOLDING_UNSUPPORTED', "{$prefix}.tax_rate_id", 'La línea usa una retención, que todavía no se puede facturar.');
                 }
             }
         }
@@ -245,6 +270,37 @@ class SaleBillingReadinessService
             if ($product !== null && $product->company_id !== $sale->company_id) {
                 $errors[] = $this->error('TENANT_MISMATCH', "items.{$item->id}.product_id", 'El producto de una línea pertenece a otra empresa.');
             }
+        }
+    }
+
+    /**
+     * Fase 6.25: forma y método de pago efectivos (venta y, si falta, la
+     * empresa) completos y compatibles (SalePaymentRules).
+     *
+     * @param  array<int, array{code: string, field: string, message: string}>  $errors
+     */
+    private function checkPayment(Sale $sale, array &$errors): void
+    {
+        $company = Company::find($sale->company_id);
+        [$form, $method] = SalePaymentRules::effective(
+            $sale->payment_form,
+            $sale->payment_method,
+            $company?->default_payment_form,
+            $company?->default_payment_method,
+        );
+
+        if ($form === null) {
+            $errors[] = $this->error('SALE_PAYMENT_FORM_MISSING', 'payment_form', 'La venta no tiene forma de pago (ni la empresa una predeterminada).');
+        }
+
+        if ($method === null) {
+            $errors[] = $this->error('SALE_PAYMENT_METHOD_MISSING', 'payment_method', 'La venta no tiene método de pago (ni la empresa uno predeterminado).');
+        }
+
+        $violation = SalePaymentRules::violation($form, $method);
+
+        if ($violation !== null) {
+            $errors[] = $this->error($violation, 'payment_form', SalePaymentRules::message($violation));
         }
     }
 
