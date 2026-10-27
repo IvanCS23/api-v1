@@ -248,16 +248,23 @@ FASE 6.26 — Validación SAT al capturar:
 - Frontend: Clientes con régimen/uso filtrados, validación espejo, aviso de datos inválidos y tarjetas responsivas; Productos con búsqueda de claves (`SatKeySearch`), objeto 02 por omisión e IVA como tasa; Ventas con forma de pago del catálogo y mensajes nuevos.
 - Commits api-v1: `5409a98`, `1c527d9`, `6d4c6ac`, `d062f69`, `add0f03`. app-front: `fe25bb2`, `aeffc06`, `ad60844`.
 
+FASE 6.26.1 — Funciones simuladas dentro de pantallas reales:
+- `app/components/ui/ComingSoon.tsx`: marca funciones parciales dentro de pantallas reales con el criterio de la 6.24 (deshabilitada, `aria-disabled`, `title`, etiqueta "Próximamente" de la navegación; sección con `<fieldset disabled>` y una nota de lo que el sistema sí hace). Nunca abre una maqueta ni simula un resultado.
+- "Carga masiva" de Clientes y Productos: deshabilitada como "Próximamente"; se eliminaron sus modales (seis botones sin acción, sin campo de archivo ni endpoint).
+- Productos: IVA RET, IEPS, ISR, cuenta predial, pedimento e impuestos locales se guardaban pero no llegaban a la venta, la factura ni al PAC. Ahora se muestran deshabilitados con su valor guardado, con la nota "Por ahora el sistema solo aplica IVA (16 %, 0 % o Exento)" y, si el producto tiene alguno, un aviso explícito. El frontend ya no los envía; el backend los conserva y sigue aceptándolos (prueba de contrato en `ProductFiscalValidationTest`).
+- RFC genérico: un régimen distinto de 616 responde "Con un RFC genérico el régimen fiscal debe ser 616." antes de revisar el tipo de persona (antes, con 601, decía "no aplica a una persona física"). Backend y espejo del frontend.
+- Commits api-v1: `8b46fe8`. app-front: `5a876e9`, `20bbbf2`, `22f933f`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.26 (verificada el 2026-10-26 sobre
+Línea base al cierre de la FASE 6.26.1 (verificada el 2026-10-27 sobre
 `changes-ivan` e `integracion-ivan`):
-- Backend: 1332 pruebas aprobadas, 5651 assertions, 0 fallidas.
-- Frontend: 186 pruebas aprobadas en 21 archivos, 0 fallidas.
+- Backend: 1336 pruebas aprobadas, 5663 assertions, 0 fallidas.
+- Frontend: 193 pruebas aprobadas en 22 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 31 páginas generadas.
 - ESLint global del frontend: 31 errores / 52 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -290,6 +297,13 @@ Hallazgos de producto pendientes (verificados en el código):
 - RFC genéricos en la unicidad de clientes: excluir `XAXX010101000` y `XEXX010101000` del único `(company_id, rfc)` para permitir varios clientes extranjeros (y más de un "público en general") en la misma empresa. Hoy el índice de BD y `Store/UpdateClientRequest` lo impiden; requiere migración (p. ej. columna generada que sea null para los genéricos) y ajustar la regla `unique`.
 - IVA 8 % del estímulo fiscal de la región fronteriza: agregarlo a `tax_rates` con sus condiciones de aplicación (contribuyentes inscritos en el padrón del estímulo, operaciones realizadas en la región, vigencia del decreto) y validarlas al capturar y facturar. Fase propia. Mientras tanto se retiró de Productos porque no existe en `tax_rates`.
 - Objeto de impuesto 05–08 no se valida contra el IVA.
+- Importación masiva real (fase propia): CSV con plantilla, validación por fila con las mismas reglas de la 6.26 vía los Form Requests (`StoreClientRequest` / `StoreProductRequest`, nunca `create()` directo) y reporte de errores por renglón. Falta decidir si un archivo con errores no guarda nada o importa solo las filas válidas. Mientras tanto el botón de Clientes y Productos se muestra como "Próximamente".
+- IEPS, retenciones (IVA RET, ISR), cuenta predial, pedimento e impuestos locales: soporte real de punta a punta (fase propia): captura, cálculo en la línea de venta, copia a la factura y envío al PAC (hoy el PAC rechaza retenciones con `INVOICE_ITEM_WITHHOLDING_UNSUPPORTED`). Hoy esas columnas de `products` se guardan pero nada las lee; Productos las muestra deshabilitadas y ya no las envía (en la BD local, el producto 2 tiene IVA RET 8, IEPS 50 e ISR 5.4). Problemas de diseño encontrados que esa fase no debe heredar:
+  - Precisión de dos decimales: las columnas son `decimal(5,2)`, así que 10.6667 % se guarda como 10.67 (y 0.5333 % como 0.53).
+  - IEPS tasa y cuota en la misma columna `ieps`: no se distingue cuál es, y al editar siempre vuelve como tasa, así que la cuota se pierde.
+  - Solo se guarda la primera cuenta predial y el primer pedimento; los demás se descartaban sin aviso.
+  - Impuestos locales como JSON en un texto de 255 caracteres: a partir de unas tres entradas el guardado falla con 422.
+  - Esa fase debe rediseñar el modelo de impuestos por línea (varios impuestos por concepto, traslado/retención, tasa/cuota, precisión del SAT), no reutilizar estas columnas.
 - `default_payment_form` de la empresa no tiene endpoint y `CompanyBillingReadinessService` sólo exige 2 dígitos; uno fuera de catálogo aparece como `SALE_PAYMENT_FORM_INVALID` en el readiness de la venta.
 - Los datos existentes inválidos (ver estado de la BD local) deben corregirse a mano desde las pantallas; `sat:audit-catalog-data` los lista.
 
@@ -336,7 +350,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada y verificada es la FASE 6.26 (ver sección 7).
+La última fase completada y verificada es la FASE 6.26.1 (ver sección 7).
 
 Hoja de ruta:
 - FASE 6.27 — Organización Facturapi por empresa: llave/organización por empresa en lugar de la llave global, y tratamiento de las facturas 1-3.
