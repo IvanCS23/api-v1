@@ -3,6 +3,8 @@
 namespace App\Http\Requests;
 
 use App\Http\Requests\Concerns\NormalizesEmptyStrings;
+use App\Http\Requests\Concerns\ValidatesClientFiscalData;
+use App\Models\Client;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
@@ -10,6 +12,7 @@ use Illuminate\Validation\Rule;
 class UpdateClientRequest extends FormRequest
 {
     use NormalizesEmptyStrings;
+    use ValidatesClientFiscalData;
 
     /**
      * Auditoría (revisión post-Etapa D): `ClientPolicy::update()` sí
@@ -31,6 +34,15 @@ class UpdateClientRequest extends FormRequest
     protected function prepareForValidation(): void
     {
         $this->nullifyEmptyStrings(['no_exterior', 'no_interior', 'colonia', 'localidad', 'municipio']);
+        $this->normalizeFiscalData();
+    }
+
+    /** @return array<string, ?string> */
+    protected function currentFiscalData(): array
+    {
+        $client = Client::find($this->route('id'));
+
+        return $client === null ? [] : $client->only(['rfc', 'codigo_postal', 'regimen_fiscal', 'uso_cfdi']);
     }
 
     /**

@@ -156,6 +156,63 @@ repetir folios.
 `per_page`) y cada venta trae su factura vigente resumida. Las mutaciones de
 líneas bloquean la venta, así que ninguna se cuela mientras se factura.
 
+## Validación SAT al capturar (Fase 6.26)
+
+**Fuente de los catálogos.** El archivo oficial del Anexo 20
+(`catCFDI_V_4_20261015.xls`, sat.gob.mx) convertido a CSV en
+`database/data/sat` con un script versionado y repetible (procedencia,
+versiones y SHA-256 en su README). Los catálogos pequeños (régimen fiscal,
+uso de CFDI con la matriz régimen ↔ uso ↔ tipo de persona, forma de pago y
+objeto de impuesto) se leen de los CSV; `c_ClaveProdServ` (52 513 claves) y
+`c_ClaveUnidad` (2 418) viven en `sat_product_keys` / `sat_unit_keys`,
+cargadas con `php artisan sat:import-catalogs` (idempotente). Sólo cuentan
+claves vigentes. **Nada de esto consulta al PAC**: capturar y validar
+funciona aunque Facturapi no responda. Facturapi sólo ofrece búsqueda de
+claves de producto y unidad, no de régimen, uso o forma de pago.
+
+Endpoints: `GET /api/sat/catalogs` (catálogos pequeños con la matriz),
+`GET /api/sat/product-keys?q=` y `GET /api/sat/unit-keys?q=` (prefijo de
+clave o texto, máximo 20).
+
+**Reglas** (`App\Services\Sat\SatFiscalValidator`, compartido por Form
+Requests, readiness, reporte y Resources):
+
+| Dato | Regla | Código |
+|---|---|---|
+| RFC | moral 12 (3 letras), física 13 (4 letras); fecha AAMMDD válida; homoclave de 3 | `CLIENT_RFC_INVALID` |
+| RFC genérico | `XAXX010101000` / `XEXX010101000` exigen régimen 616 y uso S01 | `CLIENT_REGIME_USE_INCOMPATIBLE` |
+| Código postal | 5 dígitos | `CLIENT_POSTAL_CODE_INVALID` |
+| Régimen | en `c_RegimenFiscal` y aplicable al tipo de persona | `CLIENT_FISCAL_REGIME_INVALID` |
+| Uso de CFDI | en `c_UsoCFDI`, aplicable al tipo de persona y admitido por el régimen | `CLIENT_CFDI_USE_INVALID` / `CLIENT_REGIME_USE_INCOMPATIBLE` |
+| Clave de producto | 8 dígitos y existente | `PRODUCT_SAT_KEY_INVALID` (venta: `ITEM_PRODUCT_SAT_KEY_INVALID`) |
+| Unidad | obligatoria y existente | `PRODUCT_UNIT_KEY_INVALID` (venta: `ITEM_PRODUCT_UNIT_KEY_INVALID`, misma severidad que la faltante) |
+| Objeto de impuesto | en `c_ObjetoImp`; 02 exige IVA, 01/03/04 no lo admiten; 05–08 sin validar | `PRODUCT_TAX_OBJECT_INVALID` / `PRODUCT_TAX_OBJECT_MISMATCH` (venta: `ITEM_PRODUCT_OBJETO_IMP_INVALID`, `ITEM_TAX_OBJECT_MISMATCH` contra el IVA de la línea) |
+| Forma de pago de la venta | en `c_FormaPago` (22), además de PPD ↔ 99 | 422 al guardar; `SALE_PAYMENT_FORM_INVALID` en el readiness |
+
+Al editar se valida la combinación final (lo guardado más lo enviado): tocar
+un dato fiscal obliga a corregir el conjunto; editar sólo nombre, correo,
+domicilio o precio no lo exige. `clave_producto` ya no es única por empresa
+(es una clasificación); el identificador propio sigue siendo
+`no_identificacion`.
+
+**IVA del producto como tasa.** `products.iva` (decimal) no distinguía exento
+de tasa 0 %: "Exento" llegaba como null, se guardaba el default 16 al crear y
+respondía 500 al editar. Ahora `products.tax_rate_id` referencia IVA 16 %,
+IVA 0 % o IVA Exento de `tax_rates` e `iva` queda derivado (el campo heredado
+16/0 se traduce a su tasa). En el PAC, una línea exenta se envía con
+`factor: "Exento"`; antes llegaba como IVA tasa 0 %.
+
+**Datos existentes.** `php artisan sat:audit-catalog-data` (solo lectura,
+`--company=`, `--format=table|json`, `--fail-on-issues`) lista los clientes y
+productos que ya no cumplen; de los clientes sólo muestra códigos y campos,
+nunca el RFC. La API expone lo mismo en `fiscal_issues` de clientes y
+productos, y las pantallas avisan al editar. Nada se corrige solo.
+
+**Pendiente:** el RFC genérico exige además el código postal del emisor
+(lugar de expedición), y `companies.postal_code` aún no se configura; se
+valida en la 6.27. La unicidad de `(company_id, rfc)` impide registrar dos
+clientes con `XEXX010101000` en la misma empresa.
+
 ## Endpoints compatibles
 
 - `/invoices/{id}/ready`: ERP local, vigente.

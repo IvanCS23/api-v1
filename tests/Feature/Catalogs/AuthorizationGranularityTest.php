@@ -44,7 +44,9 @@ test('cualquier rol autenticado de la empresa puede crear clientes, productos y 
         'name' => 'Producto creado por rol employee',
         'descripcion' => 'Descripción',
         'precio_unitario' => 10,
-        'clave_producto' => 'ROLEMPL1',
+        'clave_producto' => '43232408',
+        'clave_unidad' => 'H87',
+        'objeto_imp' => '01',
     ])->assertCreated();
 
     $this->actingAs($employeeRoleUser, 'api')->postJson('/api/employees', [

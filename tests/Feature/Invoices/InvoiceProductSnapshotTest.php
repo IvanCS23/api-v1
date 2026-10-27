@@ -7,6 +7,7 @@ use App\Models\InvoiceItem;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\Scopes\CompanyScope;
+use App\Models\TaxRate;
 use App\Models\User;
 use App\Support\Tenant\CurrentTenant;
 
@@ -18,7 +19,9 @@ use App\Support\Tenant\CurrentTenant;
 function billableSaleForProductSnapshot(User $user, Client $client, Product $product): Sale
 {
     $sale = test()->actingAs($user, 'api')->postJson('/api/sales', ['client_id' => $client->id])->json();
-    test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/items", ['product_id' => $product->id, 'quantity' => 1])->assertCreated();
+    // Fase 6.26: con objeto 02 la línea necesita su IVA (ITEM_TAX_OBJECT_MISMATCH).
+    $tax = $product->objeto_imp === '02' ? ['tax_rate_id' => TaxRate::factory()->create()->id] : [];
+    test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/items", ['product_id' => $product->id, 'quantity' => 1, ...$tax])->assertCreated();
     test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/submit")->assertOk();
     test()->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/confirm")->assertOk();
 
@@ -92,7 +95,7 @@ test('los snapshots de producto permanecen iguales después de modificar el Prod
         'no_identificacion' => 'ORIGINAL-ID',
         'descripcion' => 'Descripción original',
         'objeto_imp' => '02',
-        'clave_producto' => 'ORIG1234',
+        'clave_producto' => '84111506',
         'clave_unidad' => 'H87',
     ]);
     $sale = billableSaleForProductSnapshot($user, $client, $product);
@@ -115,7 +118,7 @@ test('los snapshots de producto permanecen iguales después de modificar el Prod
     expect($item->product_no_identificacion)->toBe('ORIGINAL-ID')
         ->and($item->product_description)->toBe('Descripción original')
         ->and($item->product_objeto_imp)->toBe('02')
-        ->and($item->product_clave_producto)->toBe('ORIG1234')
+        ->and($item->product_clave_producto)->toBe('84111506')
         ->and($item->product_clave_unidad)->toBe('H87');
 });
 

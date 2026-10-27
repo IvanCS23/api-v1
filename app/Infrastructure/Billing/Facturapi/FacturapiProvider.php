@@ -6,6 +6,7 @@ use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
+use App\Enums\TaxFactorType;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
@@ -449,10 +450,13 @@ class FacturapiProvider implements PacProvider
                     // `false` explícitamente, nunca se deja el default de
                     // Facturapi ni se recalcula `price` para compensar.
                     'tax_included' => false,
-                    'taxes' => $item->tax_code !== null ? [[
+                    // Fase 6.26: el exento se distingue de la tasa 0 % con
+                    // `factor: 'Exento'` (sin él Facturapi asume Tasa y el CFDI
+                    // saldría como IVA 0 %). Tasa no lo envía: es el default.
+                    'taxes' => $item->tax_code !== null ? [array_merge([
                         'type' => self::TAX_CODE_NAMES[$item->tax_code],
                         'rate' => (float) $item->tax_rate_value,
-                    ]] : [],
+                    ], $item->tax_factor_type === TaxFactorType::Exento->value ? ['factor' => 'Exento'] : [])] : [],
                 ], fn (mixed $value): bool => $value !== null),
             ])->all(),
             'use' => $invoice->client_uso_cfdi,

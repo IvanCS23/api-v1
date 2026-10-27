@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Concerns;
 
 use App\Support\Billing\SalePaymentRules;
+use App\Support\Sat\SatCatalog;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Validator;
 
@@ -17,7 +18,10 @@ trait ValidatesSalePayment
     protected function paymentRules(): array
     {
         return [
-            'payment_form' => ['nullable', 'string', 'regex:'.SalePaymentRules::FORM_PATTERN],
+            // Fase 6.26: catálogo c_FormaPago completo (antes, cualquier par de
+            // dígitos). El regex va primero porque `in` no compara estricto
+            // ("003" == "03" en PHP).
+            'payment_form' => ['nullable', 'string', 'regex:/^\d{2}$/', Rule::in(array_keys(SatCatalog::paymentForms()))],
             'payment_method' => ['nullable', 'string', Rule::in(SalePaymentRules::PAYMENT_METHODS)],
         ];
     }
@@ -26,7 +30,8 @@ trait ValidatesSalePayment
     protected function paymentMessages(): array
     {
         return [
-            'payment_form.regex' => 'La forma de pago debe ser una clave de 2 dígitos del catálogo del SAT (por ejemplo 01, 03 o 99).',
+            'payment_form.regex' => 'La forma de pago debe ser una clave de 2 dígitos del catálogo c_FormaPago del SAT.',
+            'payment_form.in' => 'La forma de pago no existe en el catálogo c_FormaPago del SAT (por ejemplo 01, 03 o 99).',
             'payment_method.in' => 'El método de pago debe ser PUE o PPD.',
         ];
     }

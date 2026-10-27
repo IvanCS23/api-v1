@@ -238,16 +238,26 @@ FASE 6.25 — Flujo real venta → factura:
 - `GET /api/tax-rates`, `GET /api/sales` paginado y `SaleResource` explícito; las líneas bloquean la venta.
 - Pantallas reales `/pages/sales`, `/pages/sales/new` y `/pages/sales/[id]` (responsivas, panel "Antes de facturar", "Facturar" con una sola llamada y redirección a `/pages/invoices/{id}`). "Nueva venta" conectada en menú, Navbar y Dashboard. Maqueta `/pages/invoices/invoice` eliminada.
 - Commits api-v1: `c66ab12`, `06637e6`, `3867a3a`, `990f307`. app-front: `39d012d`, `c7e264f`, `b7538f0`, `8370bbd`.
+
+FASE 6.26 — Validación SAT al capturar:
+- Catálogos locales desde el archivo oficial del Anexo 20 (`catCFDI_V_4_20261015.xls`, SHA-256 en `database/data/sat/README.md`), convertidos con un script propio repetible (`database/data/sat/tools`). Pequeños en CSV (`SatCatalog`); `c_ClaveProdServ` y `c_ClaveUnidad` en `sat_product_keys` / `sat_unit_keys` (`sat:import-catalogs`). Sin dependencia del PAC.
+- `SatFiscalValidator`: RFC por tipo de persona, genéricos con 616/S01, C.P., régimen y uso con la matriz oficial; clave de producto, unidad y objeto de impuesto coherente con el IVA. Form Requests validan la combinación final al editar.
+- `clave_producto` ya no es única por empresa. IVA del producto como `tax_rate_id` (16 %, 0 %, exento); el PAC recibe `factor: "Exento"` en líneas exentas (antes, IVA tasa 0 %).
+- Ventas con el catálogo `c_FormaPago` completo; readiness con códigos de valores inválidos (`*_INVALID`, `CLIENT_REGIME_USE_INCOMPATIBLE`, `ITEM_TAX_OBJECT_MISMATCH`).
+- `sat:audit-catalog-data` (solo lectura) y `fiscal_issues` en las APIs de clientes y productos.
+- Frontend: Clientes con régimen/uso filtrados, validación espejo, aviso de datos inválidos y tarjetas responsivas; Productos con búsqueda de claves (`SatKeySearch`), objeto 02 por omisión e IVA como tasa; Ventas con forma de pago del catálogo y mensajes nuevos.
+- Commits api-v1: `5409a98`, `1c527d9`, `6d4c6ac`, `d062f69`, `add0f03`. app-front: `fe25bb2`, `aeffc06`, `ad60844`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.25 (verificada el 2026-10-26 sobre
+Línea base al cierre de la FASE 6.26 (verificada el 2026-10-26 sobre
 `changes-ivan` e `integracion-ivan`):
-- Backend: 1256 pruebas aprobadas, 5294 assertions, 0 fallidas.
-- Frontend: 163 pruebas aprobadas en 16 archivos, 0 fallidas.
+- Backend: 1332 pruebas aprobadas, 5651 assertions, 0 fallidas.
+- Frontend: 186 pruebas aprobadas en 21 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 31 páginas generadas.
 - ESLint global del frontend: 31 errores / 52 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -260,6 +270,8 @@ validado. (Histórico: FASE 6.17 reportó 937 backend / 81 frontend.)
 Estado de la BD local de desarrollo:
 - Company 1 tiene `default_payment_form='03'` y `default_payment_method='PUE'` escritos manualmente (antes null); no hay endpoint para configurarlos.
 - Migraciones de la 6.21, 6.22 y 6.25 (`cfdi_artifacts_started_at`, `cancellation_receipt_started_at`, `add_payment_to_sales_table`, `scope_invoice_sale_uniqueness_to_active_invoices`) aplicadas.
+- Migraciones de la 6.26 aplicadas (`create_sat_product_keys_table`, `create_sat_unit_keys_table`, `drop_unique_clave_producto_on_products_table`, `add_tax_rate_id_to_products_table`) y catálogos importados (52 513 / 2 418). Cada ambiente nuevo debe correr `php artisan sat:import-catalogs`.
+- `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
 - Lint global frontend: 31 errores / 52 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
@@ -274,8 +286,10 @@ Hallazgos de producto pendientes (verificados en el código):
 - 18 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Folios de cotizaciones: `QuoteNumberGenerator` ignora las cotizaciones borradas (suave); borrar la última y crear otra repite el folio y choca con el único `(company_id, folio)` (500). Facturas y ventas ya se corrigieron en la 6.25; cotizaciones quedaron fuera de alcance.
 - Aprobación de ventas: `submit`/`confirm` se conservan, pero `SalePolicy` no distingue roles (cualquiera de la empresa confirma su propia venta) y no se registra quién confirmó.
-- Formas de pago: la UI ofrece las más comunes y el backend sólo exige 2 dígitos; el catálogo completo llega en la 6.26.
-- Sin validación SAT al capturar: clientes validan `rfc` solo con `max:13` y `regimen_fiscal`, `uso_cfdi` y `codigo_postal` como texto libre; productos no validan `clave_unidad` ni `objeto_imp` contra catálogo. Los errores llegan hasta el PAC. Además, `clave_producto` es única por empresa, lo que impide dos productos con la misma clave SAT.
+- RFC genérico: el SAT exige además que el C.P. del receptor sea el del lugar de expedición; `companies.postal_code` no se configura todavía (6.27). La unicidad `(company_id, rfc)` impide dos clientes `XEXX010101000` en la misma empresa.
+- Objeto de impuesto 05–08 no se valida contra el IVA; el "IVA 8 %" (frontera) se retiró de Productos porque no existe en `tax_rates`.
+- `default_payment_form` de la empresa no tiene endpoint y `CompanyBillingReadinessService` sólo exige 2 dígitos; uno fuera de catálogo aparece como `SALE_PAYMENT_FORM_INVALID` en el readiness de la venta.
+- Los datos existentes inválidos (ver estado de la BD local) deben corregirse a mano desde las pantallas; `sat:audit-catalog-data` los lista.
 
 Riesgos pendientes:
 - Zona horaria de la conexión MySQL: la sesión usa `SYSTEM` (America/Mexico_City); `NOW()` en SQL da hora local y fijar `+00:00` desplazaría las fechas guardadas. Requiere fase propia con migración de datos (documentado en `BILLING_LIFECYCLE.md`).
@@ -320,20 +334,19 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada y verificada es la FASE 6.25 (ver sección 7).
+La última fase completada y verificada es la FASE 6.26 (ver sección 7).
 
 Hoja de ruta:
-- FASE 6.26 — Validación SAT al capturar: RFC, régimen, uso CFDI, C.P., clave de producto, unidad y objeto de impuesto en frontend y backend; decidir la unicidad de `clave_producto` por empresa.
 - FASE 6.27 — Organización Facturapi por empresa: llave/organización por empresa en lugar de la llave global, y tratamiento de las facturas 1-3.
 - FASE 6.28 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.26 antes de modificar archivos:
+Prepara la FASE 6.27 antes de modificar archivos:
 
 1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Revisa las validaciones actuales de clientes y productos (Form Requests y pantallas) y el catálogo de formas de pago.
-3. Decide la unicidad de `clave_producto` por empresa (y el impacto en pruebas y datos).
+2. Revisa cómo se resuelve hoy la llave de Facturapi (`services.facturapi.test_key`, `PacCredentialGuard`, `FacturapiProvider`) y qué datos de la empresa faltan para su organización (incluido `companies.postal_code`, lugar de expedición y regla del RFC genérico).
+3. Decide el tratamiento de las facturas 1-3 de la organización anterior.
 4. Propón alcance, archivos, migraciones, pruebas, riesgos y orden de commits.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.

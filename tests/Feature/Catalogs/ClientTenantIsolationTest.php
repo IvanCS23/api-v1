@@ -30,8 +30,8 @@ test('store asigna company_id automáticamente desde el usuario autenticado, no 
         'email' => 'cliente@example.com',
         'rfc' => 'XAXX010101000',
         'codigo_postal' => '12345',
-        'regimen_fiscal' => '601',
-        'uso_cfdi' => 'G03',
+        'regimen_fiscal' => '616', // Fase 6.26: un RFC genérico exige 616 y S01.
+        'uso_cfdi' => 'S01',
         'company_id' => $companyB->id, // intento de inyectar otra empresa vía payload
     ]);
 

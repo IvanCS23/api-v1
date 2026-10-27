@@ -7,6 +7,7 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
+use App\Support\Sat\SatCatalog;
 
 class ProductController extends Controller
 {
@@ -17,7 +18,14 @@ class ProductController extends Controller
     {
         $this->authorize('viewAny', Product::class);
 
-        return ProductResource::collection(Product::all());
+        $products = Product::all();
+
+        // Fase 6.26: existencia de claves SAT en una consulta por catálogo
+        // para calcular `fiscal_issues` de todo el listado.
+        $productKeys = SatCatalog::existingProductKeys($products->pluck('clave_producto')->map(fn ($code) => trim((string) $code)));
+        $unitKeys = SatCatalog::existingUnitKeys($products->pluck('clave_unidad')->map(fn ($code) => mb_strtoupper(trim((string) $code))));
+
+        return $products->map(fn (Product $product) => (new ProductResource($product))->withCatalogLookup($productKeys, $unitKeys))->values();
     }
 
     /**

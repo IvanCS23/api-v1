@@ -1,5 +1,9 @@
 <?php
 
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\Support\SatCatalogFixture;
+use Tests\TestCase;
+
 /*
 |--------------------------------------------------------------------------
 | Test Case
@@ -11,8 +15,10 @@
 |
 */
 
-pest()->extend(Tests\TestCase::class)
-    ->use(Illuminate\Foundation\Testing\RefreshDatabase::class)
+pest()->extend(TestCase::class)
+    ->use(RefreshDatabase::class)
+    // Fase 6.26: muestra de los catálogos SAT grandes (ver SatCatalogFixture).
+    ->beforeEach(fn () => SatCatalogFixture::seed())
     ->in('Feature');
 
 /*

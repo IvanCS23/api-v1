@@ -2,10 +2,16 @@
 
 use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
+use App\Enums\TaxType;
+use App\Models\Client;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\Product;
+use App\Models\Scopes\CompanyScope;
+use App\Models\TaxRate;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -123,12 +129,12 @@ test('el payload no consulta valores modificados de Client ni Product después d
     // Modifica el Client y el Product REALES (si existen) después de
     // que la Invoice ya tiene su snapshot congelado.
     if ($invoice->client_id !== null) {
-        \App\Models\Client::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)
+        Client::withoutGlobalScope(CompanyScope::class)
             ->where('id', $invoice->client_id)
             ->update(['name' => 'NOMBRE CAMBIADO DESPUES', 'rfc' => 'CAMBIADO99']);
     }
     if ($item->product_id !== null) {
-        \App\Models\Product::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)
+        Product::withoutGlobalScope(CompanyScope::class)
             ->where('id', $item->product_id)
             ->update(['clave_producto' => 'CAMBIADO99']);
     }
@@ -206,7 +212,7 @@ test('el payload de una empresa nunca mezcla datos de otra empresa (aislamiento 
 
 test('sku ausente en el payload cuando el snapshot no lo trae, incluso si el Product vivo tiene un SKU distinto — nunca consulta el Product vivo', function () {
     $company = Company::factory()->create();
-    $product = \App\Models\Product::factory()->create([
+    $product = Product::factory()->create([
         'company_id' => $company->id,
         'no_identificacion' => 'SKU-ORIGINAL',
     ]);
@@ -226,10 +232,10 @@ test('sku ausente en el payload cuando el snapshot no lo trae, incluso si el Pro
     Http::fake(['*' => Http::response(['id' => 'inv_sku_null', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    \Illuminate\Support\Facades\DB::enableQueryLog();
+    DB::enableQueryLog();
     app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
-    $queries = \Illuminate\Support\Facades\DB::getQueryLog();
-    \Illuminate\Support\Facades\DB::disableQueryLog();
+    $queries = DB::getQueryLog();
+    DB::disableQueryLog();
 
     // buildBasePayload() nunca consulta la tabla `products` — el payload
     // se construye exclusivamente desde el snapshot de InvoiceItem.
@@ -379,7 +385,7 @@ test('el objeto taxes[] nunca fabrica una clave "withholding": Facturapi no docu
     // nunca es una retención — InvoicePacReadinessService ya bloquea
     // tax_type=retencion antes de que IssueInvoiceService/
     // CreatePacDraftInvoiceService lleguen a llamar a este Provider.
-    expect($item->tax_type)->toBe(\App\Enums\TaxType::Traslado->value);
+    expect($item->tax_type)->toBe(TaxType::Traslado->value);
 
     Http::fake(['*' => Http::response(['id' => 'inv_no_withholding', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
@@ -425,7 +431,7 @@ test('IVA 0% (tasa cero, ya soportado): tax_included sigue false, rate=0.0, sin 
     });
 });
 
-test('exento (sin tax_code): tax_included sigue false, taxes=[] vacío, sin regresión', function () {
+test('sin impuesto (sin tax_code): tax_included sigue false, taxes=[] vacío, sin regresión (el exento real lleva factor Exento, Fase 6.26)', function () {
     $company = Company::factory()->create();
     $invoice = Invoice::factory()->create(['company_id' => $company->id]);
     InvoiceItem::factory()->create([
@@ -455,9 +461,9 @@ test('exento (sin tax_code): tax_included sigue false, taxes=[] vacío, sin regr
 
 test('no cambia con modificaciones del TaxRate vivo: el payload usa exclusivamente el snapshot de InvoiceItem', function () {
     $company = Company::factory()->create();
-    $taxRate = \App\Models\TaxRate::factory()->create([
+    $taxRate = TaxRate::factory()->create([
         'rate' => 0.16,
-        'tax_type' => \App\Enums\TaxType::Traslado,
+        'tax_type' => TaxType::Traslado,
     ]);
     $invoice = Invoice::factory()->create(['company_id' => $company->id]);
     InvoiceItem::factory()->create([
@@ -472,15 +478,15 @@ test('no cambia con modificaciones del TaxRate vivo: el payload usa exclusivamen
 
     // Modifica el TaxRate REAL después de que la Invoice ya congeló su
     // snapshot.
-    $taxRate->update(['rate' => 0.99, 'tax_type' => \App\Enums\TaxType::Retencion]);
+    $taxRate->update(['rate' => 0.99, 'tax_type' => TaxType::Retencion]);
 
     Http::fake(['*' => Http::response(['id' => 'inv_taxrate_live', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    \Illuminate\Support\Facades\DB::enableQueryLog();
+    DB::enableQueryLog();
     app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
-    $queries = \Illuminate\Support\Facades\DB::getQueryLog();
-    \Illuminate\Support\Facades\DB::disableQueryLog();
+    $queries = DB::getQueryLog();
+    DB::disableQueryLog();
 
     expect(collect($queries)->contains(fn ($q) => str_contains(strtolower($q['query']), 'from `tax_rates`') || str_contains(strtolower($q['query']), 'from "tax_rates"')))
         ->toBeFalse();

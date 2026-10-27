@@ -1,0 +1,84 @@
+{
+    "source_file": "catCFDI_V_4_20261015.xls",
+    "source_sha256": "fde78b456d1e0d90366bfc68f8312f9edce5703ad5dc8ccebf09c462db13a079",
+    "catalogs": {
+        "regimen_fiscal": {
+            "sheet": "c_RegimenFiscal",
+            "rows": 19,
+            "version": {
+                "version_cfdi": "4",
+                "version_catalogo": "1",
+                "revision": "0",
+                "fecha_publicacion": "",
+                "vigencia_inicio": "2022-01-01",
+                "vigencia_fin": ""
+            },
+            "csv_sha256": "25b967de76314da73aabb150dc708993548afa021ffc27a4150cc1d6dcc1a449"
+        },
+        "uso_cfdi": {
+            "sheet": "c_UsoCFDI",
+            "rows": 24,
+            "version": {
+                "version_cfdi": "4",
+                "version_catalogo": "2",
+                "revision": "0",
+                "fecha_publicacion": "2023-04-22",
+                "vigencia_inicio": "2022-01-01",
+                "vigencia_fin": ""
+            },
+            "csv_sha256": "b352cdae10bcc4277ab79fb7fecbc3229c8bb5df5f3f5d40663a3cb40af48ddb"
+        },
+        "forma_pago": {
+            "sheet": "c_FormaPago",
+            "rows": 22,
+            "version": {
+                "version_cfdi": "4",
+                "version_catalogo": "1",
+                "revision": "0",
+                "fecha_publicacion": "",
+                "vigencia_inicio": "2022-01-01",
+                "vigencia_fin": ""
+            },
+            "csv_sha256": "9cb4381ad7759b105a0b8c2d0d5b8d12aea3680238fcf837f6d4d592b4d049ab"
+        },
+        "objeto_imp": {
+            "sheet": "c_ObjetoImp",
+            "rows": 8,
+            "version": {
+                "version_cfdi": "4",
+                "version_catalogo": "4",
+                "revision": "0",
+                "fecha_publicacion": "2024-12-13",
+                "vigencia_inicio": "2022-01-01",
+                "vigencia_fin": ""
+            },
+            "csv_sha256": "27b9bfb66a413d8875bce7563352e4119bd107ca0b84c51378d759c82f1f48b9"
+        },
+        "clave_prod_serv": {
+            "sheet": "c_ClaveProdServ",
+            "rows": 52513,
+            "version": {
+                "version_cfdi": "4",
+                "version_catalogo": "2",
+                "revision": "2",
+                "fecha_publicacion": "2025-12-31",
+                "vigencia_inicio": "2022-01-01",
+                "vigencia_fin": ""
+            },
+            "csv_sha256": "3d1e67642cf0dc893019d8ffaf9b8f43fa18d092045d4ac1cab49bb374ac1fb0"
+        },
+        "clave_unidad": {
+            "sheet": "c_ClaveUnidad",
+            "rows": 2418,
+            "version": {
+                "version_cfdi": "4",
+                "version_catalogo": "1",
+                "revision": "0",
+                "fecha_publicacion": "",
+                "vigencia_inicio": "2022-01-01",
+                "vigencia_fin": ""
+            },
+            "csv_sha256": "dad8ab5f38cc8e2d02ac352b7a4c69426cc0b4b26bd341e44a37adce03b613c2"
+        }
+    }
+}
