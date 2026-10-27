@@ -286,8 +286,10 @@ Hallazgos de producto pendientes (verificados en el código):
 - 18 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Folios de cotizaciones: `QuoteNumberGenerator` ignora las cotizaciones borradas (suave); borrar la última y crear otra repite el folio y choca con el único `(company_id, folio)` (500). Facturas y ventas ya se corrigieron en la 6.25; cotizaciones quedaron fuera de alcance.
 - Aprobación de ventas: `submit`/`confirm` se conservan, pero `SalePolicy` no distingue roles (cualquiera de la empresa confirma su propia venta) y no se registra quién confirmó.
-- RFC genérico: el SAT exige además que el C.P. del receptor sea el del lugar de expedición; `companies.postal_code` no se configura todavía (6.27). La unicidad `(company_id, rfc)` impide dos clientes `XEXX010101000` en la misma empresa.
-- Objeto de impuesto 05–08 no se valida contra el IVA; el "IVA 8 %" (frontera) se retiró de Productos porque no existe en `tax_rates`.
+- RFC genérico: el SAT exige además que el C.P. del receptor sea el del lugar de expedición; `companies.postal_code` no se configura todavía (6.27).
+- RFC genéricos en la unicidad de clientes: excluir `XAXX010101000` y `XEXX010101000` del único `(company_id, rfc)` para permitir varios clientes extranjeros (y más de un "público en general") en la misma empresa. Hoy el índice de BD y `Store/UpdateClientRequest` lo impiden; requiere migración (p. ej. columna generada que sea null para los genéricos) y ajustar la regla `unique`.
+- IVA 8 % del estímulo fiscal de la región fronteriza: agregarlo a `tax_rates` con sus condiciones de aplicación (contribuyentes inscritos en el padrón del estímulo, operaciones realizadas en la región, vigencia del decreto) y validarlas al capturar y facturar. Fase propia. Mientras tanto se retiró de Productos porque no existe en `tax_rates`.
+- Objeto de impuesto 05–08 no se valida contra el IVA.
 - `default_payment_form` de la empresa no tiene endpoint y `CompanyBillingReadinessService` sólo exige 2 dígitos; uno fuera de catálogo aparece como `SALE_PAYMENT_FORM_INVALID` en el readiness de la venta.
 - Los datos existentes inválidos (ver estado de la BD local) deben corregirse a mano desde las pantallas; `sat:audit-catalog-data` los lista.
 
