@@ -214,3 +214,32 @@ test('16 %, 0 % y exento llegan distintos a la factura y al PAC', function (stri
     'IVA 0 %' => ['IVA 0%', ['type' => 'IVA', 'rate' => 0.0]],
     'IVA exento' => ['IVA Exento', ['type' => 'IVA', 'rate' => 0.0, 'factor' => 'Exento']],
 ]);
+
+test('actualizar sin enviar retenciones, IEPS, ISR, predial, pedimento ni impuestos locales los conserva', function () {
+    // Fase 6.26.1: el frontend ya no envía esos campos (no llegan a la
+    // factura); lo capturado antes debe quedar intacto en el producto.
+    $user = productUser();
+    $product = Product::factory()->create([
+        'company_id' => $user->company_id,
+        'iva_retenido' => 8,
+        'ieps' => 50,
+        'isr' => 5.4,
+        'cuenta_predial' => 'CP-001',
+        'no_pedimento' => '23 47 3807 3000123',
+        'impuesto_local' => '[{"nombre":"ISH","tasa":"0.03"}]',
+    ]);
+
+    $this->actingAs($user, 'api')
+        ->putJson("/api/products/{$product->id}", fiscalProductPayload(['name' => 'Hospedaje']))
+        ->assertOk()
+        ->assertJsonPath('name', 'Hospedaje');
+
+    expect($product->fresh()->only(['iva_retenido', 'ieps', 'isr', 'cuenta_predial', 'no_pedimento', 'impuesto_local']))->toBe([
+        'iva_retenido' => '8.00',
+        'ieps' => '50.00',
+        'isr' => '5.40',
+        'cuenta_predial' => 'CP-001',
+        'no_pedimento' => '23 47 3807 3000123',
+        'impuesto_local' => '[{"nombre":"ISH","tasa":"0.03"}]',
+    ]);
+});

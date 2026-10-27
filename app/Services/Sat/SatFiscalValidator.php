@@ -99,10 +99,16 @@ final class SatFiscalValidator
         $uses = SatCatalog::cfdiUses();
         $regimeOk = false;
         $useOk = false;
+        // Fase 6.26.1: con un RFC genérico lo que importa es 616/S01; se revisa
+        // antes que el tipo de persona, que con XAXX/XEXX confundía ("no aplica
+        // a una persona física").
+        $generic = $this->isGenericRfc($rfc);
 
         if ($regime !== '') {
             if (! isset($regimes[$regime])) {
                 $issues[] = $this->issue('CLIENT_FISCAL_REGIME_INVALID', 'regimen_fiscal', "El régimen fiscal {$regime} no existe en el catálogo del SAT.");
+            } elseif ($generic && $regime !== self::GENERIC_REGIME) {
+                $issues[] = $this->issue('CLIENT_REGIME_USE_INCOMPATIBLE', 'regimen_fiscal', 'Con un RFC genérico el régimen fiscal debe ser 616.');
             } elseif ($person !== null && ! $regimes[$regime][$person === self::PERSON_MORAL ? 'moral' : 'physical']) {
                 $issues[] = $this->issue('CLIENT_FISCAL_REGIME_INVALID', 'regimen_fiscal', "El régimen fiscal {$regime} no aplica a una persona ".$this->personLabel($person).'.');
             } else {
@@ -113,21 +119,12 @@ final class SatFiscalValidator
         if ($use !== '') {
             if (! isset($uses[$use])) {
                 $issues[] = $this->issue('CLIENT_CFDI_USE_INVALID', 'uso_cfdi', "El uso de CFDI {$use} no existe en el catálogo del SAT.");
+            } elseif ($generic && $use !== self::GENERIC_USE) {
+                $issues[] = $this->issue('CLIENT_REGIME_USE_INCOMPATIBLE', 'uso_cfdi', 'Con un RFC genérico el uso de CFDI debe ser S01 (Sin efectos fiscales).');
             } elseif ($person !== null && ! $uses[$use][$person === self::PERSON_MORAL ? 'moral' : 'physical']) {
                 $issues[] = $this->issue('CLIENT_CFDI_USE_INVALID', 'uso_cfdi', "El uso de CFDI {$use} no aplica a una persona ".$this->personLabel($person).'.');
             } else {
                 $useOk = true;
-            }
-        }
-
-        if ($this->isGenericRfc($rfc)) {
-            if ($regimeOk && $regime !== self::GENERIC_REGIME) {
-                $issues[] = $this->issue('CLIENT_REGIME_USE_INCOMPATIBLE', 'regimen_fiscal', 'Con un RFC genérico el régimen fiscal debe ser 616 (Sin obligaciones fiscales).');
-                $regimeOk = false;
-            }
-            if ($useOk && $use !== self::GENERIC_USE) {
-                $issues[] = $this->issue('CLIENT_REGIME_USE_INCOMPATIBLE', 'uso_cfdi', 'Con un RFC genérico el uso de CFDI debe ser S01 (Sin efectos fiscales).');
-                $useOk = false;
             }
         }
 
