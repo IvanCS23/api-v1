@@ -280,6 +280,23 @@ class FacturapiProvider implements PacProvider
      * DownloadInvoiceArtifactsService, que es quien conoce la semántica
      * de negocio de "un archivo fiscal válido".
      */
+    /**
+     * Fase 6.27: organización a la que pertenece la llave
+     * (GET /organizations/me). No es parte de PacProvider: es propio de
+     * Facturapi y sólo lo usan el vínculo inicial y billing:pac-check.
+     * Lectura segura de repetir; pasa por el mismo guard que el resto.
+     */
+    public function currentOrganization(): FacturapiOrganizationSnapshot
+    {
+        $response = $this->client()->get('/organizations/me');
+
+        $this->assertSuccessful($response);
+
+        $data = $this->safeJsonObject($response);
+
+        return FacturapiOrganizationSnapshot::fromResponse($data);
+    }
+
     public function downloadPdf(string $externalId): string
     {
         $response = $this->client()->get("/invoices/{$externalId}/pdf");
