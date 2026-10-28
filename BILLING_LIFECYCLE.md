@@ -298,12 +298,19 @@ una reserva más vieja que `billing.cancellation_receipt.pending_minutes`
 
 `billing.pac_mode` (`BILLING_PAC_MODE`, por omisión `test`) define qué llave
 se acepta: `test` exige prefijo `sk_test_`; `live` (`sk_live_`) **no está
-soportado** en esta fase. `PacCredentialGuard` se evalúa en
-`FacturapiProvider::client()` antes de construir cualquier petición
-(escrituras, consultas y descargas) y en los orquestadores antes de cualquier
-transición ERP. Una configuración inválida lanza `PacConfigurationException`
-(fallo definitivo, `503 PAC_CONFIGURATION_INVALID`): el PAC nunca recibe la
-petición y el ERP no cambia.
+soportado** en esta fase. Desde la Fase 6.27 la llave es la de la organización
+de Facturapi de la empresa de cada factura (`facturapi_organizations`); no hay
+llave global en ejecución (ver "Organización de Facturapi por empresa").
+
+`PacCredentialGuard::forCompany()` se evalúa en `FacturapiProvider::client()`
+antes de construir cualquier petición (escrituras, consultas y descargas) y en
+los orquestadores antes de cualquier transición ERP. Motivos, en este orden:
+`pac_mode_unsupported`, `pac_organization_missing`, `pac_key_missing`,
+`pac_key_mode_mismatch`. Una configuración inválida lanza
+`PacConfigurationException` (fallo definitivo, `503 PAC_CONFIGURATION_INVALID`):
+el PAC nunca recibe la petición y el ERP no cambia. La respuesta no incluye el
+motivo y hoy tampoco se registra en `laravel.log` (pendiente en el documento
+maestro); `billing:pac-check` lo muestra.
 
 Los comandos `billing:facturapi-test-*` usan el trait
 `GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test` y llave
@@ -471,6 +478,8 @@ estado de la factura ni dispara `--fail-on`.
 | `cancellation_receipt_identity_mismatch` (acuse bloqueado: `Acuse/Folios/UUID` no corresponde al CFDI) | valid (informativo) con `billing.pac_mode=test`; recoverable con `live` | manual_review |
 | `cancellation_receipt_retry_pending` (acuse en `reconciliation_required` por otro motivo: no disponible, 5xx, archivo local faltante) | valid (informativo) | fetch_receipt |
 | `remote_draft_date_window_risk` | transient (≥48 h) / recoverable (≥72 h) | operations_issue / manual_review |
+| `pac_organization_archived` (factura de otra organización, archivada con `billing:archive-inaccessible-invoices`; sustituye a todos sus demás hallazgos) | valid (informativo) | — |
+| `pac_organization_mismatch` (factura de otra organización sin archivar; sustituye a todos sus demás hallazgos) | invalid | manual_review |
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
 | `identity_uuid_without_external_id`, `erp_behind_cfdi`, `issue_succeeded_without_valid_cfdi`, `pac_status_without_identity`, `idempotency_key_mismatch` | invalid | manual_review |
 
@@ -518,6 +527,82 @@ comando, no un valor aceptado), `--format=table|json`, `--limit=50` y `--fail-on
 alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
 folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
 idempotencia, `pac_external_id` ni `cfdi_uuid`.
+
+## Organización de Facturapi por empresa (Fase 6.27a)
+
+Cada empresa opera con su propia organización de Facturapi. La tabla
+`facturapi_organizations` (una fila por empresa, `organization_id` único)
+guarda el id de la organización, su llave Test cifrada (`test_secret_key`,
+cast `encrypted`, oculta en serialización) y sólo una pista para mostrar
+(`test_key_hint`, `sk_test_…últimos 4`), además de la copia local de sus datos
+fiscales y su CSD tal como los reporta `GET /organizations/me`.
+`companies.api_key` se eliminó.
+
+`PacProviderResolver::forInvoice()` / `forCompany()` construye el provider con
+la llave de la empresa de la factura. Nunca lanza: sin organización o con una
+llave inválida devuelve un provider cuyo guard falla antes de cualquier HTTP.
+
+Comandos del operador (todos en dry-run salvo `--apply`):
+
+- `billing:facturapi-link --company= --organization= [--apply]`: vincula la
+  empresa con la llave de `services.facturapi.test_key` (`.env`). Sólo hace
+  `GET /organizations/me` y exige que el id coincida con `--organization`.
+  Muestra las facturas de la empresa por organización y las diferencias de
+  datos fiscales, que **no corrige**: los datos de la empresa se corrigen a
+  mano.
+- `billing:backfill-pac-organization [--company=*] [--apply]`: llena
+  `invoices.pac_organization_id` desde la respuesta guardada del PAC, sólo
+  donde está vacío. Las facturas nuevas lo llenan solas al guardar cada
+  respuesta.
+- `billing:archive-inaccessible-invoices --invoice=* --reason= [--apply]`:
+  archiva facturas de otra organización (`pac_organization_archived_at` y
+  motivo, más el evento `organization_archived`). Es todo o nada: rechaza el
+  lote si alguna es de la organización actual, de organización desconocida o
+  no existe. No toca datos fiscales.
+- `billing:pac-check [--company=*] [--format=table|json] [--fail-on=fail|warn|none]`:
+  solo lectura. Verifica la organización, el guard, que la llave pertenezca a
+  la organización (`GET /organizations/me`), RFC, régimen y C.P. contra
+  Facturapi, el CSD (ausente: aviso en `test`, porque Facturapi timbra sin él;
+  fallo en cualquier otro modo; vencido: fallo; menos de 30 días: aviso) y las
+  facturas sin organización, de otra organización o archivadas. Sin User Key
+  (6.27b) no verifica que la organización pertenezca a la cuenta.
+
+Identidad por factura: una factura cuyo `pac_organization_id` no es el de su
+empresa (`PacOrganizationAccess`: `other` o `archived`) no ofrece acciones
+(`InvoiceBusinessCapabilitiesService`) y cualquier operación PAC responde
+`409 PAC_ORGANIZATION_MISMATCH` antes de cualquier HTTP o transición ERP
+(orquestadores, controlador y provider). El provider rechaza además una
+respuesta del PAC que traiga otra `organization`. El panel fiscal muestra
+"Factura archivada" o "Factura de otra organización fiscal".
+
+### Llaves cifradas con APP_KEY
+
+Las columnas cifradas usan `APP_KEY`: `facturapi_organizations.test_secret_key`,
+`invoices.pac_response`, `invoices.pac_draft_response` e
+`invoice_pac_events.context`. Perder `APP_KEY` las vuelve ilegibles. Hoy no hay
+comando para reemplazar la llave de una organización ya vinculada
+(`billing:facturapi-link` no sobrescribe un vínculo); queda para la 6.27b.
+
+Rotación de `APP_KEY` (Laravel descifra con `APP_KEY` y, si falla, con cada
+llave de `APP_PREVIOUS_KEYS`, separadas por comas; cifra siempre con
+`APP_KEY`):
+
+1. Pasa la llave actual a `APP_PREVIOUS_KEYS` y pon la nueva en `APP_KEY`
+   (`php artisan key:generate --show` la genera sin escribir el `.env`).
+2. Limpia y vuelve a generar la caché de configuración y reinicia los
+   workers de cola.
+3. Los valores existentes siguen cifrados con la llave anterior hasta que se
+   vuelven a guardar. No hay todavía un comando que los vuelva a cifrar.
+4. Retira la llave anterior de `APP_PREVIOUS_KEYS` sólo cuando todas las
+   columnas cifradas se hayan vuelto a guardar; si no, esas filas quedan
+   ilegibles.
+
+Respaldos: un respaldo de la base de datos junto con el `.env` (o cualquier
+copia de `APP_KEY`) expone en claro todas las llaves de Facturapi y las
+respuestas del PAC. Guárdalos por separado y con acceso restringido. Si ambos
+se filtran, renueva la llave Test de cada organización en Facturapi (la
+anterior queda invalidada), reemplázala en `facturapi_organizations` (sin
+comando hasta la 6.27b) y rota `APP_KEY`.
 
 ## Riesgos pendientes
 

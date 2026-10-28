@@ -1,8 +1,11 @@
 <?php
 
 use App\Enums\InvoiceStatus;
+use App\Infrastructure\Billing\Facturapi\FacturapiOrganizationSnapshot;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Services\Billing\PacCheckService;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
@@ -140,7 +143,7 @@ test('reporta las diferencias de datos fiscales con Facturapi sin corregirlas', 
         ->and($company->fresh()->rfc)->toBe('XAXX010101000');
 });
 
-test('el CSD: vigente ok, por vencer warn, vencido o ausente fail', function (array $certificate, string $status, int $exitDefault, int $exitWarn) {
+test('el CSD en modo test: vigente ok, por vencer o ausente warn, vencido fail', function (array $certificate, string $status, int $exitDefault, int $exitWarn) {
     Http::fake(['example-pac.test/v2/organizations/me' => Http::response(phase627CheckOrganization(['certificate' => $certificate]))]);
     $company = phase627CheckCompany();
 
@@ -154,7 +157,20 @@ test('el CSD: vigente ok, por vencer warn, vencido o ausente fail', function (ar
     'vigente' => [['expires_at' => '2027-06-01T00:00:00.000Z'], 'ok', 0, 0],
     'vence en 10 días' => [['expires_at' => '2026-11-07T12:00:00.000Z'], 'warn', 0, 1],
     'vencido' => [['expires_at' => '2026-10-01T00:00:00.000Z'], 'fail', 1, 1],
-    'sin CSD' => [['has_certificate' => false], 'fail', 1, 1],
+    'sin CSD' => [['has_certificate' => false], 'warn', 0, 1],
+]);
+
+test('el CSD ausente es aviso en modo test y fallo en modo live', function (string $mode, string $status) {
+    config(['billing.pac_mode' => $mode]);
+    $snapshot = FacturapiOrganizationSnapshot::fromResponse(phase627CheckOrganization(['certificate' => ['has_certificate' => false]]));
+
+    $check = app(PacCheckService::class)->certificateCheck($snapshot, CarbonImmutable::now());
+
+    expect($check['code'])->toBe('certificate')
+        ->and($check['status'])->toBe($status);
+})->with([
+    'test' => ['test', 'warn'],
+    'live' => ['live', 'fail'],
 ]);
 
 test('cuenta las facturas sin organización, de otra organización y archivadas', function () {

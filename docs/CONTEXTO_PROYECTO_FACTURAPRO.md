@@ -255,16 +255,28 @@ FASE 6.26.1 — Funciones simuladas dentro de pantallas reales:
 - RFC genérico: un régimen distinto de 616 responde "Con un RFC genérico el régimen fiscal debe ser 616." antes de revisar el tipo de persona (antes, con 601, decía "no aplica a una persona física"). Backend y espejo del frontend.
 - Commits api-v1: `8b46fe8`. app-front: `5a876e9`, `20bbbf2`, `22f933f`.
 
+FASE 6.27a — Organización de Facturapi por empresa (sin User Key):
+- `facturapi_organizations`: una organización por empresa con su llave Test cifrada (`encrypted`, oculta, sólo se muestra `test_key_hint`) y la copia de sus datos fiscales y CSD. `companies.api_key` eliminado.
+- `PacProviderResolver` construye el provider con la llave de la empresa de cada factura; no hay llave global en ejecución. `PacCredentialGuard::forCompany()` agrega `pac_organization_missing`. `.env` (`services.facturapi.test_key`) sólo lo usa `billing:facturapi-link`.
+- Identidad por factura: `invoices.pac_organization_id` (llenado al guardar cada respuesta del PAC y con `billing:backfill-pac-organization`). Una factura de otra organización no ofrece acciones y responde `409 PAC_ORGANIZATION_MISMATCH` antes de cualquier HTTP o transición ERP; el provider rechaza respuestas de otra organización.
+- `billing:archive-inaccessible-invoices` (todo o nada, con motivo y evento `organization_archived`); `billing:health` reporta `pac_organization_mismatch` (invalid) y `pac_organization_archived` (informativo).
+- `billing:pac-check` (solo lectura): organización, guard, identidad remota, RFC/régimen/C.P. contra Facturapi, CSD (ausente: aviso en test, fallo en live) y facturas por organización.
+- Frontend: el panel fiscal explica "Factura archivada" / "Factura de otra organización fiscal" y el error `PAC_ORGANIZATION_MISMATCH`.
+- Desviación del plan: no hay hallazgo `pac_organization_unknown` en `billing:health`; las facturas sin organización las reporta `pac-check` (`invoices_without_organization`).
+- `BILLING_LIFECYCLE.md`: sección "Organización de Facturapi por empresa", rotación de `APP_KEY` con `APP_PREVIOUS_KEYS` y riesgo de respaldo de BD junto con `.env`.
+- Aplicado en la BD local el 2026-10-28: migraciones, vínculo de la empresa 1 con `6ad00a7079761a6ddec6026a`, backfill de 11 facturas y archivado de #1–#3 (organización `69e1341a…`).
+- Commits api-v1: `95841df`, `4063952`, `1765639`, `ad7258e`, `1f4da67`, `e2821ec`, `d5a10e1` y el de documentación. app-front: `0c564c6`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.26.1 (verificada el 2026-10-27 sobre
+Línea base al cierre de la FASE 6.27a (verificada el 2026-10-28 sobre
 `changes-ivan` e `integracion-ivan`):
-- Backend: 1336 pruebas aprobadas, 5663 assertions, 0 fallidas.
-- Frontend: 193 pruebas aprobadas en 22 archivos, 0 fallidas.
+- Backend: 1409 pruebas aprobadas, 5869 assertions, 0 fallidas.
+- Frontend: 198 pruebas aprobadas en 22 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 31 páginas generadas.
 - ESLint global del frontend: 31 errores / 52 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -278,6 +290,7 @@ Estado de la BD local de desarrollo:
 - Company 1 tiene `default_payment_form='03'` y `default_payment_method='PUE'` escritos manualmente (antes null); no hay endpoint para configurarlos.
 - Migraciones de la 6.21, 6.22 y 6.25 (`cfdi_artifacts_started_at`, `cancellation_receipt_started_at`, `add_payment_to_sales_table`, `scope_invoice_sale_uniqueness_to_active_invoices`) aplicadas.
 - Migraciones de la 6.26 aplicadas (`create_sat_product_keys_table`, `create_sat_unit_keys_table`, `drop_unique_clave_producto_on_products_table`, `add_tax_rate_id_to_products_table`) y catálogos importados (52 513 / 2 418). Cada ambiente nuevo debe correr `php artisan sat:import-catalogs`.
+- Migraciones de la 6.27 aplicadas. Empresa 1 vinculada con la organización `6ad00a7079761a6ddec6026a` (llave `sk_test_…hMMB`); #1–#3 archivadas; `billing:health`: 17 facturas `valid`. `billing:pac-check` falla por los datos de la empresa 1, que difieren de Facturapi y se corrigen a mano: RFC `XAXX010101000` frente a `XIA190128J61`, C.P. vacío frente a `06010` y razón social "Mi Empresa" frente a "TECNOLOGIAS S.A". La organización no tiene CSD (en TEST timbra igual).
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
@@ -293,7 +306,7 @@ Hallazgos de producto pendientes (verificados en el código):
 - 18 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Folios de cotizaciones: `QuoteNumberGenerator` ignora las cotizaciones borradas (suave); borrar la última y crear otra repite el folio y choca con el único `(company_id, folio)` (500). Facturas y ventas ya se corrigieron en la 6.25; cotizaciones quedaron fuera de alcance.
 - Aprobación de ventas: `submit`/`confirm` se conservan, pero `SalePolicy` no distingue roles (cualquiera de la empresa confirma su propia venta) y no se registra quién confirmó.
-- RFC genérico: el SAT exige además que el C.P. del receptor sea el del lugar de expedición; `companies.postal_code` no se configura todavía (6.27).
+- RFC genérico: el SAT exige además que el C.P. del receptor sea el del lugar de expedición; `companies.postal_code` no tiene endpoint para configurarse (`billing:pac-check` lo compara con Facturapi desde la 6.27a).
 - RFC genéricos en la unicidad de clientes: excluir `XAXX010101000` y `XEXX010101000` del único `(company_id, rfc)` para permitir varios clientes extranjeros (y más de un "público en general") en la misma empresa. Hoy el índice de BD y `Store/UpdateClientRequest` lo impiden; requiere migración (p. ej. columna generada que sea null para los genéricos) y ajustar la regla `unique`.
 - IVA 8 % del estímulo fiscal de la región fronteriza: agregarlo a `tax_rates` con sus condiciones de aplicación (contribuyentes inscritos en el padrón del estímulo, operaciones realizadas en la región, vigencia del decreto) y validarlas al capturar y facturar. Fase propia. Mientras tanto se retiró de Productos porque no existe en `tax_rates`.
 - Objeto de impuesto 05–08 no se valida contra el IVA.
@@ -306,11 +319,11 @@ Hallazgos de producto pendientes (verificados en el código):
   - Esa fase debe rediseñar el modelo de impuestos por línea (varios impuestos por concepto, traslado/retención, tasa/cuota, precisión del SAT), no reutilizar estas columnas.
 - `default_payment_form` de la empresa no tiene endpoint y `CompanyBillingReadinessService` sólo exige 2 dígitos; uno fuera de catálogo aparece como `SALE_PAYMENT_FORM_INVALID` en el readiness de la venta.
 - Los datos existentes inválidos (ver estado de la BD local) deben corregirse a mano desde las pantallas; `sat:audit-catalog-data` los lista.
+- Los rechazos del guard PAC no quedan en `laravel.log`: `InvoicePacActionExceptionResponder` convierte `PacConfigurationException` en `PAC_CONFIGURATION_INVALID` sin registrar nada, así que el código interno (`pac_mode_unsupported`, `pac_organization_missing`, `pac_key_missing`, `pac_key_mode_mismatch`) solo se conoce reproduciendo el error. Registrar el código interno, la empresa y la factura, sin llaves ni respuestas del PAC, para que un operador diagnostique desde el log (encontrado el 2026-10-28, cuando la empresa 1 aún no tenía vínculo).
 
 Riesgos pendientes:
 - Zona horaria de la conexión MySQL: la sesión usa `SYSTEM` (America/Mexico_City); `NOW()` en SQL da hora local y fijar `+00:00` desplazaría las fechas guardadas. Requiere fase propia con migración de datos (documentado en `BILLING_LIFECYCLE.md`).
-- Organización Facturapi por empresa: hay una sola llave global (`services.facturapi.test_key`); todas las empresas timbran en la misma organización.
-- Facturas 1-3 huérfanas: pertenecen a una organización Facturapi sin acceso con la llave actual (`invoice_not_found`); no se pueden reconciliar ni descargar.
+- Respaldos: una copia de la BD junto con el `.env` (`APP_KEY`) expone las llaves de Facturapi; ver `BILLING_LIFECYCLE.md` (rotación con `APP_PREVIOUS_KEYS`). No hay comando para volver a cifrar las columnas ni para reemplazar la llave de una organización ya vinculada.
 - Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación.
 - Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 
@@ -350,20 +363,20 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada y verificada es la FASE 6.26.1 (ver sección 7).
+La última fase completada y verificada es la FASE 6.27a (ver sección 7). Los riesgos "una sola llave global" y "facturas 1-3 huérfanas" quedaron resueltos en ella.
 
 Hoja de ruta:
-- FASE 6.27 — Organización Facturapi por empresa: llave/organización por empresa en lugar de la llave global, y tratamiento de las facturas 1-3.
+- FASE 6.27b — Operaciones con User Key: `FacturapiOrganizationClient`, datos fiscales y CSD de la organización, creación de organizaciones sólo por comando Artisan del operador (nunca endpoint de la API). En la API el `organization_id` sale siempre de la fila de la empresa autenticada, nunca de la petición (prueba: el Admin de la empresa A no puede afectar la organización de B). Contraseña del CSD en `dontFlash`, con prueba que provoque una excepción durante la subida y verifique que no aparece en logs, reportes ni respuestas. Los registros de CSD y datos fiscales guardan el usuario que hizo el cambio. Incluir un comando para reemplazar la llave de una organización vinculada.
 - FASE 6.28 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.27 antes de modificar archivos:
+Prepara la FASE 6.27b antes de modificar archivos (requiere la User Key de Facturapi):
 
 1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Revisa cómo se resuelve hoy la llave de Facturapi (`services.facturapi.test_key`, `PacCredentialGuard`, `FacturapiProvider`) y qué datos de la empresa faltan para su organización (incluido `companies.postal_code`, lugar de expedición y regla del RFC genérico).
-3. Decide el tratamiento de las facturas 1-3 de la organización anterior.
-4. Propón alcance, archivos, migraciones, pruebas, riesgos y orden de commits.
+2. Revisa `facturapi_organizations`, `PacProviderResolver`, `PacCredentialGuard` y `PacCheckService` (6.27a).
+3. Confirma con la documentación de Facturapi los endpoints con User Key (datos fiscales, CSD, organizaciones, llaves Test) antes de diseñar.
+4. Propón alcance, archivos, migraciones, pruebas, riesgos y orden de commits, con los requisitos de la hoja de ruta.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.
