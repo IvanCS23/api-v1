@@ -12,10 +12,10 @@ namespace App\Exceptions\Billing;
  */
 class PacConfigurationException extends PacAuthenticationException
 {
-    public function __construct(string $reason)
+    public function __construct(string $reason, ?string $message = null)
     {
         parent::__construct(
-            "La configuración del PAC no permite operar ({$reason}); no se contactó al proveedor.",
+            $message ?? "La configuración del PAC no permite operar ({$reason}); no se contactó al proveedor.",
             null,
             $reason,
         );

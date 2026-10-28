@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\InvoiceStatus;
 use App\Models\Concerns\BelongsToCompany;
+use App\Support\Billing\StoredPacOrganization;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -159,7 +160,30 @@ class Invoice extends Model
         'cancellation_receipt_pdf_size' => 'integer',
         'cancellation_receipt_downloaded_at' => 'immutable_datetime',
         'cancellation_receipt_started_at' => 'immutable_datetime',
+        'pac_organization_archived_at' => 'immutable_datetime',
     ];
+
+    /**
+     * Fase 6.27: `pac_organization_id` sigue a la respuesta del PAC. Cada vez
+     * que un servicio guarda `pac_response` o `pac_draft_response`, se toma
+     * su `organization` (si las dos coinciden), sin repetir la regla en cada
+     * servicio. No es fillable; el backfill lo llena para las facturas
+     * anteriores a la columna.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (Invoice $invoice): void {
+            if (! $invoice->isDirty(['pac_response', 'pac_draft_response'])) {
+                return;
+            }
+
+            $organization = StoredPacOrganization::of($invoice);
+
+            if ($organization !== null) {
+                $invoice->pac_organization_id = $organization;
+            }
+        });
+    }
 
     // company() ya la provee el trait BelongsToCompany.
 

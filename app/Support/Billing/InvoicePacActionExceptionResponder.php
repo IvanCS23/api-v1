@@ -16,6 +16,7 @@ use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
+use App\Exceptions\Billing\PacOrganizationMismatchException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
 use App\Exceptions\Billing\PacResourceCanceledException;
@@ -134,6 +135,12 @@ class InvoicePacActionExceptionResponder
                 422,
                 'PAC_VALIDATION_FAILED',
                 'El proveedor fiscal rechazó los datos de la operación.',
+            ],
+            // Fase 6.27: antes que PacConfigurationException, de la que hereda.
+            $error instanceof PacOrganizationMismatchException => [
+                409,
+                'PAC_ORGANIZATION_MISMATCH',
+                'La factura pertenece a otra organización de Facturapi y la llave de esta empresa no tiene acceso a ella. No se contactó al proveedor fiscal.',
             ],
             $error instanceof PacConfigurationException => [
                 503,

@@ -14,6 +14,7 @@ use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
+use App\Exceptions\Billing\PacOrganizationMismatchException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
@@ -65,6 +66,7 @@ class FacturapiProvider implements PacProvider
         private readonly ?string $stampTimezone = FacturapiDates::DEFAULT_STAMP_TIMEZONE,
         private readonly ?string $organizationId = null,
         private readonly bool $organizationRequired = false,
+        private readonly ?PacOrganizationMismatchException $blockedBy = null,
     ) {}
 
     public function name(): string
@@ -524,6 +526,12 @@ class FacturapiProvider implements PacProvider
         // la organización de la empresa (pac_organization_missing).
         (new PacCredentialGuard($this->mode, $this->apiKey, $this->organizationRequired, $this->organizationId))->assertConfigured();
 
+        // Fase 6.27: una factura de otra organización (o archivada) se rechaza
+        // con un error claro en vez del 404 ambiguo que daría Facturapi.
+        if ($this->blockedBy !== null) {
+            throw $this->blockedBy;
+        }
+
         // Fase 6.20: sin una zona válida no se puede interpretar
         // `stamp.date`; se rechaza antes de la red, nunca después de timbrar.
         if (! FacturapiDates::isValidTimezone($this->stampTimezone)) {
@@ -620,6 +628,8 @@ class FacturapiProvider implements PacProvider
      */
     private function mapInvoiceArray(array $data): PacInvoiceResult
     {
+        $this->assertSameOrganization($data);
+
         $stamp = isset($data['stamp']) && is_array($data['stamp']) ? $data['stamp'] : null;
 
         return new PacInvoiceResult(
@@ -679,6 +689,8 @@ class FacturapiProvider implements PacProvider
         if ($data['livemode'] === true) {
             throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
         }
+
+        $this->assertSameOrganization($data, $response->status());
 
         $status = $data['status'] ?? null;
 
@@ -769,6 +781,31 @@ class FacturapiProvider implements PacProvider
             $status >= 500 && $status <= 599 => new PacUnavailableException($message, $status, $code),
             default => new PacUnexpectedResponseException($message, $status, $code),
         };
+    }
+
+    /**
+     * Fase 6.27: la Invoice que devuelve el PAC trae `organization`. Si no es
+     * la de la empresa, la llave guardada no corresponde a su organización:
+     * se rechaza como respuesta inesperada (ambigua tras una escritura, igual
+     * que cualquier respuesta que no se puede procesar de forma segura). Sin
+     * el campo, o sin organización esperada (vínculo inicial), no se compara.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertSameOrganization(array $data, int $httpStatus = 200): void
+    {
+        $received = $data['organization'] ?? null;
+
+        if (! $this->organizationRequired || blank($this->organizationId) || ! is_string($received) || $received === '') {
+            return;
+        }
+
+        if ($received !== $this->organizationId) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC pertenece a la organización {$received}, no a la de la empresa ({$this->organizationId}).",
+                $httpStatus,
+            );
+        }
     }
 
     /**
