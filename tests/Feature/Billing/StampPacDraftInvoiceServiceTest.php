@@ -40,6 +40,7 @@ use Illuminate\Support\Facades\Log;
  * justificación completa de esa decisión).
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_STAMP_SERVICE',
@@ -94,7 +95,7 @@ test('stampDraftInvoice existe en el contrato PacProvider', function () {
 test('stampDraftInvoice llama POST /invoices/{id}/stamp, nunca envía async=true', function () {
     Http::fake(['*' => Http::response(['id' => 'inv_contract_1', 'status' => 'valid', 'livemode' => false], 200)]);
 
-    app(PacProvider::class)->stampDraftInvoice('inv_contract_1');
+    facturapiProviderFromConfig()->stampDraftInvoice('inv_contract_1');
 
     Http::assertSent(fn ($request) => $request->method() === 'POST'
         && str_ends_with($request->url(), '/invoices/inv_contract_1/stamp')
@@ -109,7 +110,7 @@ test('el DTO devuelto es PacInvoiceResult, nunca PacInvoiceDraftResult', functio
         'livemode' => false,
     ], 200)]);
 
-    $result = app(PacProvider::class)->stampDraftInvoice('inv_contract_2');
+    $result = facturapiProviderFromConfig()->stampDraftInvoice('inv_contract_2');
 
     expect($result)->toBeInstanceOf(PacInvoiceResult::class)
         ->and($result->externalId)->toBe('inv_contract_2')
@@ -120,14 +121,14 @@ test('el DTO devuelto es PacInvoiceResult, nunca PacInvoiceDraftResult', functio
 test('una respuesta sin id/status produce PacUnexpectedResponseException', function () {
     Http::fake(['*' => Http::response(['livemode' => false], 200)]);
 
-    expect(fn () => app(PacProvider::class)->stampDraftInvoice('inv_missing_fields'))
+    expect(fn () => facturapiProviderFromConfig()->stampDraftInvoice('inv_missing_fields'))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
 test('ausencia del campo livemode produce PacUnexpectedResponseException (nunca se asume false)', function () {
     Http::fake(['*' => Http::response(['id' => 'inv_no_livemode', 'status' => 'valid'], 200)]);
 
-    expect(fn () => app(PacProvider::class)->stampDraftInvoice('inv_no_livemode'))
+    expect(fn () => facturapiProviderFromConfig()->stampDraftInvoice('inv_no_livemode'))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
@@ -135,7 +136,7 @@ test('livemode=true bloquea con PacUnexpectedEnvironmentException, nunca se inte
     Http::fake(['*' => Http::response(['id' => 'inv_live', 'status' => 'valid', 'livemode' => true], 200)]);
 
     try {
-        app(PacProvider::class)->stampDraftInvoice('inv_live');
+        facturapiProviderFromConfig()->stampDraftInvoice('inv_live');
         test()->fail('Se esperaba PacUnexpectedEnvironmentException');
     } catch (PacUnexpectedEnvironmentException $e) {
         expect($e->remoteId)->toBe('inv_live')
@@ -146,7 +147,7 @@ test('livemode=true bloquea con PacUnexpectedEnvironmentException, nunca se inte
 test('409 se mapea a PacConflictException, nunca a un error de validación genérico', function () {
     Http::fake(['*' => Http::response(['message' => 'Conflicto de estado', 'code' => 'conflict'], 409)]);
 
-    expect(fn () => app(PacProvider::class)->stampDraftInvoice('inv_409'))
+    expect(fn () => facturapiProviderFromConfig()->stampDraftInvoice('inv_409'))
         ->toThrow(PacConflictException::class);
 });
 
@@ -154,7 +155,7 @@ test('la API key nunca aparece en el mensaje de una excepción lanzada desde sta
     Http::fake(['*' => Http::response(['message' => 'No autorizado', 'code' => 'unauthorized'], 401)]);
 
     try {
-        app(PacProvider::class)->stampDraftInvoice('inv_401');
+        facturapiProviderFromConfig()->stampDraftInvoice('inv_401');
         test()->fail('Se esperaba PacAuthenticationException');
     } catch (PacAuthenticationException $e) {
         expect($e->getMessage())->not->toContain('sk_test_STAMP_SERVICE');

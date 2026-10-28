@@ -5,6 +5,7 @@ use App\Exceptions\Billing\PacValidationException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\IssueInvoiceService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Support\Facades\Http;
@@ -18,6 +19,7 @@ use Illuminate\Support\Facades\Http;
  * externalIdFor().
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_IDEMPOTENCY',
@@ -122,7 +124,7 @@ test('la reserva marca pending, fija pac_issue_started_at e incrementa pac_issue
 
     $stateDuringCall = null;
     Http::fake(function () use (&$stateDuringCall, $invoice) {
-        $stateDuringCall = \App\Models\Invoice::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)
+        $stateDuringCall = Invoice::withoutGlobalScope(CompanyScope::class)
             ->find($invoice->id);
 
         return Http::response(['id' => 'inv_pending_check', 'status' => 'valid'], 200);

@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Http;
  * únicamente refleja localmente lo que Facturapi reporta.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_SYNC_DRAFT_SERVICE',

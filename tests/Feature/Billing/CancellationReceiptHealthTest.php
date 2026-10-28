@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Http;
  * disponible es informativo en ambos modos.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config(['services.facturapi.test_key' => 'sk_test_PHASE_622_HEALTH', 'billing.pac_mode' => 'test']);
     Http::preventStrayRequests();
 });

@@ -1,6 +1,6 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Enums\InvoiceStatus;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -11,14 +11,15 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Storage;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config(['services.facturapi.test_key' => 'sk_test_ARTIFACT_API_SECRET']);
     Http::preventStrayRequests();
     Http::fake();
     Storage::fake('local');
     Storage::fake('public');
 
-    $this->app->bind(PacProvider::class, function (): never {
-        throw new RuntimeException('PacProvider no debe resolverse desde endpoints de artifacts locales.');
+    $this->app->bind(PacProviderResolver::class, function (): never {
+        throw new RuntimeException('El provider PAC no debe resolverse desde endpoints de artifacts locales.');
     });
 });
 

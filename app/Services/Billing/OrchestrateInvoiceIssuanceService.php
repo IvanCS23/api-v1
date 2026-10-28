@@ -53,7 +53,7 @@ class OrchestrateInvoiceIssuanceService
 
         // Fase 6.19: una configuración PAC inválida se rechaza antes de la
         // transición ERP ready -> issued, no después.
-        PacCredentialGuard::fromConfig()->assertConfigured();
+        PacCredentialGuard::forCompany((int) $current->company_id)->assertConfigured();
 
         $issued = $this->workflow->prepareForOrchestratedIssue($current);
         $result = $this->pacIssuance->issue($issued);

@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\InvoicePacEventType;
 use App\Events\Billing\InvoiceIssued;
@@ -17,6 +18,7 @@ use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -70,7 +72,7 @@ use Throwable;
 class StampPacDraftInvoiceService
 {
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly SyncPacDraftInvoiceService $syncDraft,
         private readonly ReconcileInvoiceWithPacService $reconcile,
         private readonly InvoicePacAuditService $audit,
@@ -123,7 +125,7 @@ class StampPacDraftInvoiceService
         $startedAt = microtime(true);
 
         try {
-            $result = $this->pacProvider->stampDraftInvoice($reserved->pac_draft_external_id);
+            $result = $this->pacProvider($reserved)->stampDraftInvoice($reserved->pac_draft_external_id);
         } catch (Throwable $e) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $failed = $this->recordStampFailure($reserved, $e);
@@ -188,7 +190,7 @@ class StampPacDraftInvoiceService
      */
     private function reserve(Invoice $invoice): Invoice
     {
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($invoice)->name();
 
         return DB::transaction(function () use ($invoice, $providerSlug): Invoice {
             $locked = Invoice::withoutGlobalScope(CompanyScope::class)
@@ -238,7 +240,7 @@ class StampPacDraftInvoiceService
             ), null);
         }
 
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($reserved)->name();
 
         return DB::transaction(function () use ($reserved, $result, $providerSlug): Invoice {
             $locked = Invoice::withoutGlobalScope(CompanyScope::class)
@@ -339,11 +341,7 @@ class StampPacDraftInvoiceService
         $code = $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null;
         $prefix = $code !== null && $code !== '' ? "[{$code}] " : '';
         $message = $prefix.$e->getMessage();
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $message = str_replace($apiKey, '[redacted]', $message);
-        }
+        $message = PacSecretRedactor::redact($message);
 
         return mb_substr(
             preg_replace('/\b(?:Authorization|Bearer)(?:\s+[^\s]+)?/i', '[redacted]', $message) ?? '[redacted]',
@@ -409,5 +407,11 @@ class StampPacDraftInvoiceService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

@@ -58,11 +58,13 @@ class FacturapiProvider implements PacProvider
 
     public function __construct(
         private readonly string $baseUrl,
-        private readonly string $apiKey,
+        private readonly ?string $apiKey,
         private readonly int $timeout,
         private readonly int $connectTimeout,
         private readonly ?string $mode = PacCredentialGuard::MODE_TEST,
         private readonly ?string $stampTimezone = FacturapiDates::DEFAULT_STAMP_TIMEZONE,
+        private readonly ?string $organizationId = null,
+        private readonly bool $organizationRequired = false,
     ) {}
 
     public function name(): string
@@ -518,7 +520,9 @@ class FacturapiProvider implements PacProvider
         // Fase 6.19: toda petición (escritura, consulta o descarga) pasa
         // por aquí; si la llave no corresponde al modo configurado se
         // aborta antes de construir el request — el PAC nunca recibe nada.
-        (new PacCredentialGuard($this->mode, $this->apiKey))->assertConfigured();
+        // Fase 6.27: construido por FacturapiProviderResolver exige además
+        // la organización de la empresa (pac_organization_missing).
+        (new PacCredentialGuard($this->mode, $this->apiKey, $this->organizationRequired, $this->organizationId))->assertConfigured();
 
         // Fase 6.20: sin una zona válida no se puede interpretar
         // `stamp.date`; se rechaza antes de la red, nunca después de timbrar.
@@ -527,7 +531,7 @@ class FacturapiProvider implements PacProvider
         }
 
         $request = Http::baseUrl($this->baseUrl)
-            ->withToken($this->apiKey)
+            ->withToken((string) $this->apiKey)
             ->acceptJson()
             ->asJson()
             ->connectTimeout($this->connectTimeout)

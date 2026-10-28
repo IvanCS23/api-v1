@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Http;
  * pac_issue_status=succeeded — un borrador no es un CFDI.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_CREATE_DRAFT_SERVICE',

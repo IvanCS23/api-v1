@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Storage;
  * CFDI cancelado responden 200 con el mismo UUID.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_621_ARTIFACTS',

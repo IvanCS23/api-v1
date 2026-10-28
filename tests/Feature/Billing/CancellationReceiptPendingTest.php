@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Storage;
  * Mismo patrón que cfdi_artifacts_started_at (Fase 6.21).
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_622_RECEIPT',

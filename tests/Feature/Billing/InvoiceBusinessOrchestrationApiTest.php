@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\User;
+use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Services\Billing\OrchestrateInvoiceIssuanceService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Http\Client\ConnectionException;
@@ -15,6 +16,7 @@ use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_616_SECRET',
@@ -50,7 +52,7 @@ function phase616SuccessfulIssueFake(Invoice $invoice, ?callable $duringStamp = 
 {
     $draftId = 'inv_business_'.$invoice->id;
 
-    Http::fake(function (Request $request) use ($invoice, $draftId, $duringStamp) {
+    Http::fake(function (Request $request) use ($draftId, $duringStamp) {
         $path = (string) parse_url($request->url(), PHP_URL_PATH);
 
         if ($request->method() === 'POST' && $path === '/v2/invoices') {
@@ -214,7 +216,7 @@ test('rechazo definitivo al crear draft deja ERP issued pero reintento empresari
     expect($fresh->status)->toBe(InvoiceStatus::Issued)
         ->and($fresh->cfdi_uuid)->toBeNull()
         ->and($fresh->pac_reconciliation_required)->toBeFalse()
-        ->and(app(\App\Services\Billing\InvoiceBusinessCapabilitiesService::class)->canIssueByState($fresh))->toBeTrue();
+        ->and(app(InvoiceBusinessCapabilitiesService::class)->canIssueByState($fresh))->toBeTrue();
     Http::assertSentCount(1);
 });
 

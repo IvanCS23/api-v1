@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoicePacEventType;
@@ -17,6 +18,7 @@ use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -42,7 +44,7 @@ class CancelInvoiceWithPacService
     public const REQUEST_RECONCILIATION_REQUIRED = 'reconciliation_required';
 
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacAuditService $audit,
     ) {}
 
@@ -71,7 +73,7 @@ class CancelInvoiceWithPacService
         ], static fn (mixed $value): bool => $value !== null));
 
         try {
-            $result = $this->pacProvider->cancelInvoice(
+            $result = $this->pacProvider($current)->cancelInvoice(
                 $expectedExternalId,
                 $motive->value,
                 $substitutionUuid,
@@ -396,11 +398,7 @@ class CancelInvoiceWithPacService
     private function sanitizeErrorMessage(Throwable $e): string
     {
         $message = $e->getMessage();
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $message = str_replace($apiKey, '[redacted]', $message);
-        }
+        $message = PacSecretRedactor::redact($message);
 
         return mb_substr($message, 0, 500);
     }
@@ -432,5 +430,11 @@ class CancelInvoiceWithPacService
             ],
             $error instanceof PacException ? ($error->pacCode ?? (string) $error->httpStatus) : null,
         );
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

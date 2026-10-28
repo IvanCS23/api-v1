@@ -4,6 +4,7 @@ use App\Enums\InvoiceStatus;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\Http;
  * persistencia: nunca escribe pac_external_id/cfdi_uuid/pac_issue_status.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_MUY_SECRETA_COMMAND_5566',
@@ -45,12 +47,14 @@ test('prohibido en production: falla inmediatamente, sin pedir confirmación ni 
     Http::assertNothingSent();
 });
 
-test('falla sin FACTURAPI_TEST_KEY, con un mensaje sanitizado, antes de pedir confirmación', function () {
+test('falla sin la organización Facturapi de la empresa (no la llave de .env), con un mensaje sanitizado, antes de pedir confirmación', function () {
     config(['services.facturapi.test_key' => null]);
     $invoice = readyInvoiceForCommandTest();
 
+    DB::table('facturapi_organizations')->delete();
+
     $this->artisan('billing:facturapi-test-validate', ['invoice' => $invoice->id])
-        ->expectsOutputToContain('FACTURAPI_TEST_KEY no está configurada')
+        ->expectsOutputToContain('no tiene organización de Facturapi vinculada')
         ->assertExitCode(1);
 
     Http::assertNothingSent();

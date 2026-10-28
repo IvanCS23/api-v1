@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Http;
  * draftExternalId y sólo lo vincula si la llave coincide.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_620_DRAFT',

@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\CancellationReceiptResult;
 use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
@@ -15,6 +16,7 @@ use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
 use DOMDocument;
@@ -41,7 +43,7 @@ class DownloadCancellationReceiptService
     private const DISK = 'local';
 
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacAuditService $audit,
         private readonly InvoiceBusinessCapabilitiesService $capabilities,
     ) {}
@@ -77,10 +79,10 @@ class DownloadCancellationReceiptService
                 'cancellation_receipt_status' => $reserved->cancellation_receipt_status,
             ]);
 
-            $xml = $this->pacProvider->downloadCancellationReceiptXml((string) $reserved->pac_external_id);
+            $xml = $this->pacProvider($reserved)->downloadCancellationReceiptXml((string) $reserved->pac_external_id);
             $this->assertValidXml($reserved, $xml);
 
-            $pdf = $this->pacProvider->downloadCancellationReceiptPdf((string) $reserved->pac_external_id);
+            $pdf = $this->pacProvider($reserved)->downloadCancellationReceiptPdf((string) $reserved->pac_external_id);
             $this->assertValidPdf($reserved, $pdf);
 
             $paths = $this->paths($reserved);
@@ -425,11 +427,7 @@ class DownloadCancellationReceiptService
         $code = $e instanceof PacException ? ($e->pacCode ?? (string) $e->httpStatus) : null;
         $prefix = $code !== null && $code !== '' ? "[{$code}] " : '';
         $message = $prefix.$e->getMessage();
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $message = str_replace($apiKey, '[redacted]', $message);
-        }
+        $message = PacSecretRedactor::redact($message);
 
         return mb_substr(str_ireplace(['Authorization', 'Bearer'], '[redacted]', $message), 0, 500);
     }
@@ -598,5 +596,11 @@ class DownloadCancellationReceiptService
             ->where('company_id', $invoice->company_id)
             ->lockForUpdate()
             ->firstOrFail();
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

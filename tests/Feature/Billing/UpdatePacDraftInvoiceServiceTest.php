@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Log;
  * conserva el payload viejo hasta actualizarse explícitamente.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_UPDATE_DRAFT_SERVICE',
@@ -102,7 +103,7 @@ test('updateDraftInvoice llama PUT /invoices/{id} (el mismo id recibido), nunca 
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->updateDraftInvoice('inv_contract_upd', new PacInvoiceRequest(
+    facturapiProviderFromConfig()->updateDraftInvoice('inv_contract_upd', new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: 'erp-invoice-draft:1:1:v1',
         externalId: 'company-1-invoice-1-draft',
@@ -121,7 +122,7 @@ test('el payload de updateDraftInvoice incluye status=draft y tax_included=false
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id, 'tax_code' => '002', 'tax_rate_value' => 0.16]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->updateDraftInvoice('inv_contract_payload', new PacInvoiceRequest(
+    facturapiProviderFromConfig()->updateDraftInvoice('inv_contract_payload', new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: 'erp-invoice-draft:1:1:v1',
         externalId: 'company-1-invoice-1-draft',
@@ -143,7 +144,7 @@ test('devuelve PacInvoiceDraftResult, incluyendo total cuando Facturapi lo trae'
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
-    $result = app(PacProvider::class)->updateDraftInvoice('inv_total', new PacInvoiceRequest(
+    $result = facturapiProviderFromConfig()->updateDraftInvoice('inv_total', new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: 'k',
         externalId: 'e',
@@ -162,7 +163,7 @@ test('si la respuesta confirma un id remoto distinto del solicitado, lanza PacUn
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
-    expect(fn () => app(PacProvider::class)->updateDraftInvoice('inv_solicitado', new PacInvoiceRequest(
+    expect(fn () => facturapiProviderFromConfig()->updateDraftInvoice('inv_solicitado', new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: 'k',
         externalId: 'e',
@@ -177,7 +178,7 @@ test('livemode=true bloquea con PacUnexpectedEnvironmentException', function () 
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
     app(CurrentTenant::class)->set($company->id);
 
-    expect(fn () => app(PacProvider::class)->updateDraftInvoice('inv_live', new PacInvoiceRequest(
+    expect(fn () => facturapiProviderFromConfig()->updateDraftInvoice('inv_live', new PacInvoiceRequest(
         invoice: $invoice->fresh(['items']),
         idempotencyKey: 'k',
         externalId: 'e',
@@ -456,12 +457,14 @@ test('comando: prohibido en production', function () {
     Http::assertNothingSent();
 });
 
-test('comando: requiere FACTURAPI_TEST_KEY', function () {
+test('comando: requiere la organización Facturapi de la empresa (no la llave de .env)', function () {
     config(['services.facturapi.test_key' => null]);
     $invoice = draftedInvoiceForUpdateTest(Company::factory()->create());
 
+    DB::table('facturapi_organizations')->delete();
+
     $this->artisan('billing:facturapi-test-draft-update', ['invoice' => $invoice->id])
-        ->expectsOutputToContain('FACTURAPI_TEST_KEY no está configurada')
+        ->expectsOutputToContain('no tiene organización de Facturapi vinculada')
         ->assertExitCode(1);
 
     Http::assertNothingSent();

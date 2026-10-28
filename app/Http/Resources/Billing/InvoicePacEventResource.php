@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Billing;
 
 use App\Enums\InvoicePacEventType;
+use App\Support\Billing\PacSecretRedactor;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -133,11 +134,7 @@ class InvoicePacEventResource extends JsonResource
             return null;
         }
 
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $value = str_replace($apiKey, '[redacted]', $value);
-        }
+        $value = PacSecretRedactor::redact($value);
 
         $value = preg_replace('/\bBearer\s+[^\s]+/i', '[redacted]', $value) ?? '[redacted]';
         $value = preg_replace('/\bsk_(?:live|test)_[A-Za-z0-9._-]+\b/i', '[redacted]', $value) ?? '[redacted]';

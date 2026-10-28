@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Tenant\CurrentTenant;
@@ -24,7 +25,7 @@ class InspectCancellationReceiptXmlService
 
     private const UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i';
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(private readonly PacProviderResolver $pacProviders) {}
 
     /**
      * @return array{
@@ -41,7 +42,7 @@ class InspectCancellationReceiptXmlService
         $current = $this->requireCurrentTenantInvoice($invoice);
         $this->assertReceiptCanBeInspected($current);
 
-        $xml = $this->pacProvider->downloadCancellationReceiptXml((string) $current->pac_external_id);
+        $xml = $this->pacProvider($current)->downloadCancellationReceiptXml((string) $current->pac_external_id);
 
         return $this->inspectXml($current, $xml);
     }
@@ -284,5 +285,11 @@ class InspectCancellationReceiptXmlService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

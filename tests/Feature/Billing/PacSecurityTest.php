@@ -1,8 +1,8 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\InvoiceStatus;
+use App\Exceptions\Billing\PacException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
@@ -19,6 +19,7 @@ use Illuminate\Support\Facades\Log;
  * respuesta cruda del PAC llegan a los logs.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_MUY_SECRETA_SECURITY_112233',
@@ -78,14 +79,14 @@ test('la API key nunca aparece en ninguna excepción lanzada por FacturapiProvid
     );
 
     foreach ([
-        fn () => app(PacProvider::class)->createInvoice($request),
-        fn () => app(PacProvider::class)->retrieveInvoice('inv_x'),
-        fn () => app(PacProvider::class)->findInvoiceByExternalId('company-1-invoice-1'),
+        fn () => facturapiProviderFromConfig()->createInvoice($request),
+        fn () => facturapiProviderFromConfig()->retrieveInvoice('inv_x'),
+        fn () => facturapiProviderFromConfig()->findInvoiceByExternalId('company-1-invoice-1'),
     ] as $call) {
         try {
             $call();
             test()->fail('Se esperaba una excepción PAC');
-        } catch (\App\Exceptions\Billing\PacException $e) {
+        } catch (PacException $e) {
             expect($e->getMessage())->not->toContain($secret)
                 ->and((string) $e->pacCode)->not->toContain($secret)
                 ->and((string) $e)->not->toContain($secret);

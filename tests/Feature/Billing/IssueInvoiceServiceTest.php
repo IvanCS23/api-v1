@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Log;
  * IssueInvoiceFailureHandlingTest) para mantener cada uno enfocado.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_ISSUE_SERVICE',

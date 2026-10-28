@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\InvoicePacEventType;
 use App\Events\Billing\InvoiceIssued;
@@ -13,6 +14,7 @@ use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacIdentifiers;
+use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -36,7 +38,7 @@ class ReconcileInvoiceWithPacService
     private const REMOTE_STATUSES = ['draft', 'pending', 'valid', 'canceled'];
 
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacAuditService $audit,
         private readonly InvoiceBusinessCapabilitiesService $capabilities,
     ) {}
@@ -65,9 +67,9 @@ class ReconcileInvoiceWithPacService
 
         try {
             $result = match (true) {
-                $current->pac_external_id !== null => $this->pacProvider->retrieveInvoice($current->pac_external_id),
-                $current->pac_draft_external_id !== null => $this->pacProvider->retrieveInvoice($current->pac_draft_external_id),
-                default => $this->pacProvider->findInvoiceByExternalId(
+                $current->pac_external_id !== null => $this->pacProvider($current)->retrieveInvoice($current->pac_external_id),
+                $current->pac_draft_external_id !== null => $this->pacProvider($current)->retrieveInvoice($current->pac_draft_external_id),
+                default => $this->pacProvider($current)->findInvoiceByExternalId(
                     PacIdentifiers::externalId($tenantId, $current->id),
                 ),
             };
@@ -118,7 +120,7 @@ class ReconcileInvoiceWithPacService
             throw $exception;
         }
 
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($current)->name();
         $postCommitException = null;
 
         $updated = DB::transaction(function () use (
@@ -260,8 +262,8 @@ class ReconcileInvoiceWithPacService
         $startedAt = microtime(true);
 
         try {
-            $found = $this->pacProvider->findInvoiceByExternalId($expectedExternalId);
-            $draft = $found === null ? null : $this->pacProvider->retrieveDraftInvoice($found->externalId);
+            $found = $this->pacProvider($current)->findInvoiceByExternalId($expectedExternalId);
+            $draft = $found === null ? null : $this->pacProvider($current)->retrieveDraftInvoice($found->externalId);
         } catch (PacUnexpectedEnvironmentException $e) {
             $this->recordReconciliationFailure($current, $tenantId, $e, 'billing.invoice.pac_draft_recovery_wrong_environment');
 
@@ -324,7 +326,7 @@ class ReconcileInvoiceWithPacService
             throw $exception;
         }
 
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($current)->name();
 
         $updated = DB::transaction(function () use ($current, $tenantId, $draft, $providerSlug): Invoice {
             if (app(CurrentTenant::class)->id() !== $tenantId) {
@@ -489,11 +491,7 @@ class ReconcileInvoiceWithPacService
     private function sanitizeErrorMessage(Throwable $e): string
     {
         $message = $e->getMessage();
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $message = str_replace($apiKey, '[redacted]', $message);
-        }
+        $message = PacSecretRedactor::redact($message);
 
         return mb_substr($message, 0, 500);
     }
@@ -550,5 +548,11 @@ class ReconcileInvoiceWithPacService
             $fields,
             fn (string $field): bool => $before->getAttribute($field) !== $after->getAttribute($field),
         ));
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config(['services.facturapi.test_key' => 'sk_test_PHASE_618_SECRET']);
     Http::preventStrayRequests();
     Http::fake();

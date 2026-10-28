@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\InvoicePacEventType;
 use App\Exceptions\InvoiceIssuanceInProgressException;
@@ -58,7 +59,7 @@ use RuntimeException;
 class UpdatePacDraftInvoiceService
 {
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly SyncPacDraftInvoiceService $syncDraft,
         private readonly ReconcileInvoiceWithPacService $reconcile,
         private readonly InvoicePacAuditService $audit,
@@ -97,7 +98,7 @@ class UpdatePacDraftInvoiceService
         );
 
         $startedAt = microtime(true);
-        $result = $this->pacProvider->updateDraftInvoice($synced->pac_draft_external_id, $pacRequest);
+        $result = $this->pacProvider($synced)->updateDraftInvoice($synced->pac_draft_external_id, $pacRequest);
         $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
         $updated = DB::transaction(function () use ($synced, $result): Invoice {
@@ -184,5 +185,11 @@ class UpdatePacDraftInvoiceService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

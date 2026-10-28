@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\InvoicePacEventType;
 use App\Models\Invoice;
@@ -37,7 +38,7 @@ use Illuminate\Support\Facades\Log;
 class CreatePacDraftInvoiceService
 {
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacReadinessService $readiness,
         private readonly SyncPacDraftInvoiceService $sync,
         private readonly InvoicePacAuditService $audit,
@@ -55,7 +56,7 @@ class CreatePacDraftInvoiceService
 
         $this->readiness->assertReady($current);
 
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($current)->name();
         $idempotencyKey = $current->pac_draft_idempotency_key
             ?? PacIdentifiers::draftIdempotencyKey($current->company_id, $current->id);
 
@@ -76,7 +77,7 @@ class CreatePacDraftInvoiceService
 
         $startedAt = microtime(true);
 
-        $result = $this->pacProvider->createDraftInvoice($pacRequest);
+        $result = $this->pacProvider($reserved)->createDraftInvoice($pacRequest);
 
         $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
@@ -174,5 +175,11 @@ class CreatePacDraftInvoiceService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

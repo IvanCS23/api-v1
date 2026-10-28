@@ -3,6 +3,7 @@
 use App\Enums\InvoiceStatus;
 use App\Models\Company;
 use App\Models\Invoice;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -11,6 +12,7 @@ use Illuminate\Support\Facades\Http;
  * silencio.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_DRAFT_SYNC_CMD',
@@ -46,12 +48,14 @@ test('prohibido en production', function () {
     Http::assertNothingSent();
 });
 
-test('requiere FACTURAPI_TEST_KEY', function () {
+test('requiere la organización Facturapi de la empresa (no la llave de .env)', function () {
     config(['services.facturapi.test_key' => null]);
     $invoice = draftedInvoiceForSyncCommandTest();
 
+    DB::table('facturapi_organizations')->delete();
+
     $this->artisan('billing:facturapi-test-draft-sync', ['invoice' => $invoice->id])
-        ->expectsOutputToContain('FACTURAPI_TEST_KEY no está configurada')
+        ->expectsOutputToContain('no tiene organización de Facturapi vinculada')
         ->assertExitCode(1);
 
     Http::assertNothingSent();

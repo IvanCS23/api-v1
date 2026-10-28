@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Http;
  * verifican la delegación en sí, no repiten cada caso ya cubierto allí.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_WORKFLOW',

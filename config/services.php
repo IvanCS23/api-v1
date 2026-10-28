@@ -45,6 +45,11 @@ return [
     | de entorno de pruebas de Facturapi (nunca la llave live) — jamás se
     | expone al frontend ni se registra en logs/excepciones.
     |
+    | Fase 6.27: cada empresa timbra con la llave de su organización
+    | (tabla facturapi_organizations, cifrada). `test_key` ya no se usa en
+    | tiempo de ejecución: sólo la lee `billing:facturapi-link` para el
+    | vínculo inicial de una empresa con la organización de esta llave.
+    |
     */
 
     'facturapi' => [

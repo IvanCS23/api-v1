@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Models\Client;
 use App\Models\Company;
@@ -202,7 +201,7 @@ test('16 %, 0 % y exento llegan distintos a la factura y al PAC', function (stri
         ->and($invoice->items[0]->product_objeto_imp)->toBe('02');
 
     Http::fake(['*' => Http::response(['id' => 'inv_tax', 'status' => 'pending'], 200)]);
-    app(PacProvider::class)->createInvoice(new PacInvoiceRequest(invoice: $invoice, idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1", externalId: 'ext-tax'));
+    facturapiProviderFromConfig()->createInvoice(new PacInvoiceRequest(invoice: $invoice, idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1", externalId: 'ext-tax'));
 
     Http::assertSent(function ($request) use ($expectedTax) {
         expect($request->data()['items'][0]['product']['taxes'])->toBe([$expectedTax]);

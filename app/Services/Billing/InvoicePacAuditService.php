@@ -6,6 +6,7 @@ use App\Enums\InvoicePacEventType;
 use App\Models\Invoice;
 use App\Models\InvoicePacEvent;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use BackedEnum;
 use DateTimeInterface;
@@ -166,11 +167,7 @@ class InvoicePacAuditService
 
     private function redactSecrets(string $value): string
     {
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $value = str_replace($apiKey, '[redacted]', $value);
-        }
+        $value = PacSecretRedactor::redact($value);
 
         $value = preg_replace('/\bBearer\s+[^\s]+/i', '[redacted]', $value) ?? '[redacted]';
 

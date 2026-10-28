@@ -73,7 +73,7 @@ class OrchestrateInvoiceCancellationService
             throw new InvoiceCannotBeCancelledException($invoice, 'la cancelación fiscal requiere motivo SAT');
         }
 
-        PacCredentialGuard::fromConfig()->assertConfigured();
+        PacCredentialGuard::forCompany((int) $invoice->company_id)->assertConfigured();
 
         $result = $this->workflow->cancelWithPac($invoice, $motive, $substitutionUuid);
 

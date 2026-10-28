@@ -25,6 +25,7 @@ use Illuminate\Support\Facades\Storage;
  * real, cero escritura fuera del disk fake de test.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_ARTIFACTS_SERVICE',

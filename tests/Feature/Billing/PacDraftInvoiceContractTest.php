@@ -10,6 +10,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -20,6 +21,7 @@ use Illuminate\Support\Facades\Http;
  * Http::preventStrayRequests() cuando está disponible.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_DRAFT_CONTRACT',
@@ -73,7 +75,7 @@ test('createDraftInvoice y retrieveDraftInvoice existen en el contrato PacProvid
 test('createDraftInvoice llama POST /invoices (mismo endpoint que createInvoice, distinguido por status=draft)', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(), 200)]);
 
-    app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+    facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
 
     Http::assertSent(fn ($request) => $request->method() === 'POST' && str_ends_with(parse_url($request->url(), PHP_URL_PATH), '/invoices'));
 });
@@ -81,7 +83,7 @@ test('createDraftInvoice llama POST /invoices (mismo endpoint que createInvoice,
 test('retrieveDraftInvoice llama GET /invoices/{id}', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(), 200)]);
 
-    app(PacProvider::class)->retrieveDraftInvoice('inv_draft_123');
+    facturapiProviderFromConfig()->retrieveDraftInvoice('inv_draft_123');
 
     Http::assertSent(fn ($request) => $request->method() === 'GET' && str_ends_with($request->url(), '/invoices/inv_draft_123'));
 });
@@ -89,7 +91,7 @@ test('retrieveDraftInvoice llama GET /invoices/{id}', function () {
 test('el DTO devuelto es PacInvoiceDraftResult, nunca PacInvoiceResult', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(), 200)]);
 
-    $result = app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+    $result = facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
 
     expect($result)->toBeInstanceOf(PacInvoiceDraftResult::class);
 });
@@ -110,7 +112,7 @@ test('el payload incluye status=draft, customer, items, payment_form, currency, 
     Http::fake(['*' => Http::response(fakeDraftResponseBody(), 200)]);
 
     $request = draftRequestFor($invoice->fresh(['items']), "company-{$company->id}-invoice-{$invoice->id}-draft");
-    app(PacProvider::class)->createDraftInvoice($request);
+    facturapiProviderFromConfig()->createDraftInvoice($request);
 
     Http::assertSent(function ($request) use ($company, $invoice) {
         $body = $request->data();
@@ -138,7 +140,7 @@ test('payment_method solo se incluye cuando el snapshot lo trae', function () {
 
     Http::fake(['*' => Http::response(fakeDraftResponseBody(), 200)]);
 
-    app(PacProvider::class)->createDraftInvoice(draftRequestFor($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor($invoice->fresh(['items'])));
 
     Http::assertSent(fn ($request) => ($request->data()['payment_method'] ?? null) === 'PPD');
 });
@@ -148,13 +150,13 @@ test('payment_method solo se incluye cuando el snapshot lo trae', function () {
 test('id, status draft, livemode false e is_ready_to_stamp se mapean correctamente', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(['is_ready_to_stamp' => true]), 200)]);
 
-    $result = app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+    $result = facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
 
     expect($result->externalId)->toBe('inv_draft_123')
         ->and($result->status)->toBe('draft')
         ->and($result->livemode)->toBeFalse()
         ->and($result->isReadyToStamp)->toBeTrue()
-        ->and($result->createdAt)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($result->createdAt)->toBeInstanceOf(CarbonImmutable::class)
         ->and($result->externalReference)->toBe('company-1-invoice-1-draft')
         ->and($result->idempotencyKey)->toBe('erp-invoice-draft:1:1:v1')
         ->and($result->rawResponse['id'])->toBe('inv_draft_123');
@@ -163,7 +165,7 @@ test('id, status draft, livemode false e is_ready_to_stamp se mapean correctamen
 test('is_ready_to_stamp = false se mapea correctamente (no es un error)', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(['is_ready_to_stamp' => false]), 200)]);
 
-    $result = app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+    $result = facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
 
     expect($result->isReadyToStamp)->toBeFalse();
 });
@@ -171,7 +173,7 @@ test('is_ready_to_stamp = false se mapea correctamente (no es un error)', functi
 test('una respuesta inesperada (sin id) produce PacUnexpectedResponseException', function () {
     Http::fake(['*' => Http::response(['status' => 'draft', 'livemode' => false, 'is_ready_to_stamp' => true], 200)]);
 
-    expect(fn () => app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
+    expect(fn () => facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
@@ -180,7 +182,7 @@ test('status "valid"/"pending"/"canceled" (transición ya ocurrida del lado del 
     unset($body['is_ready_to_stamp']);
     Http::fake(['*' => Http::response($body, 200)]);
 
-    $result = app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+    $result = facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
 
     expect($result->status)->toBe($status)
         ->and($result->isReadyToStamp)->toBeNull();
@@ -189,7 +191,7 @@ test('status "valid"/"pending"/"canceled" (transición ya ocurrida del lado del 
 test('un status realmente no reconocido por el catálogo (ej. "bogus") produce PacUnexpectedResponseException', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(['status' => 'bogus']), 200)]);
 
-    expect(fn () => app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
+    expect(fn () => facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
@@ -198,7 +200,7 @@ test('ausencia de is_ready_to_stamp produce PacUnexpectedResponseException', fun
     unset($body['is_ready_to_stamp']);
     Http::fake(['*' => Http::response($body, 200)]);
 
-    expect(fn () => app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
+    expect(fn () => facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
@@ -206,7 +208,7 @@ test('livemode=true bloquea con PacUnexpectedEnvironmentException, nunca se inte
     Http::fake(['*' => Http::response(fakeDraftResponseBody(['livemode' => true]), 200)]);
 
     try {
-        app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+        facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
         test()->fail('Se esperaba PacUnexpectedEnvironmentException');
     } catch (PacUnexpectedEnvironmentException $e) {
         expect($e->remoteId)->toBe('inv_draft_123')
@@ -217,7 +219,7 @@ test('livemode=true bloquea con PacUnexpectedEnvironmentException, nunca se inte
 test('livemode=true también bloquea en retrieveDraftInvoice', function () {
     Http::fake(['*' => Http::response(fakeDraftResponseBody(['livemode' => true]), 200)]);
 
-    expect(fn () => app(PacProvider::class)->retrieveDraftInvoice('inv_draft_123'))
+    expect(fn () => facturapiProviderFromConfig()->retrieveDraftInvoice('inv_draft_123'))
         ->toThrow(PacUnexpectedEnvironmentException::class);
 });
 
@@ -226,14 +228,14 @@ test('ausencia del campo livemode produce PacUnexpectedResponseException (nunca 
     unset($body['livemode']);
     Http::fake(['*' => Http::response($body, 200)]);
 
-    expect(fn () => app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
+    expect(fn () => facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
 test('errores HTTP (401) se mapean igual que en createInvoice', function () {
     Http::fake(['*' => Http::response(['message' => 'No autorizado', 'code' => 'unauthorized'], 401)]);
 
-    expect(fn () => app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
+    expect(fn () => facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest())))
         ->toThrow(PacAuthenticationException::class);
 });
 
@@ -242,7 +244,7 @@ test('la API key nunca aparece en el mensaje de una excepción lanzada desde cre
     Http::fake(['*' => Http::response(['message' => 'No autorizado'], 401)]);
 
     try {
-        app(PacProvider::class)->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
+        facturapiProviderFromConfig()->createDraftInvoice(draftRequestFor(invoiceForDraftTest()));
         test()->fail('Se esperaba PacAuthenticationException');
     } catch (PacAuthenticationException $e) {
         expect($e->getMessage())->not->toContain('sk_test_MUY_SECRETA_DRAFT_99887')

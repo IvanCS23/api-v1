@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Enums\InvoicePacEventType;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
@@ -27,7 +28,7 @@ use RuntimeException;
 class SyncPacDraftInvoiceService
 {
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacAuditService $audit,
     ) {}
 
@@ -44,7 +45,7 @@ class SyncPacDraftInvoiceService
 
         $startedAt = microtime(true);
 
-        $result = $this->pacProvider->retrieveDraftInvoice($current->pac_draft_external_id);
+        $result = $this->pacProvider($current)->retrieveDraftInvoice($current->pac_draft_external_id);
 
         $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
@@ -102,5 +103,11 @@ class SyncPacDraftInvoiceService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

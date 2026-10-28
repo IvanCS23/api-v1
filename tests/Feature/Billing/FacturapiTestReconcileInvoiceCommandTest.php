@@ -3,9 +3,11 @@
 use App\Enums\InvoiceStatus;
 use App\Models\Company;
 use App\Models\Invoice;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_RECONCILE_COMMAND_SECRET',
@@ -49,13 +51,15 @@ test('comando de reconciliación está bloqueado en production', function () {
     Http::assertNothingSent();
 });
 
-test('comando exige FACTURAPI_TEST_KEY', function () {
+test('comando exige la organización Facturapi de la empresa (no la llave de .env)', function () {
     $invoice = phase64CommandInvoice();
     config(['services.facturapi.test_key' => null]);
     Http::fake();
 
+    DB::table('facturapi_organizations')->delete();
+
     $this->artisan('billing:facturapi-test-reconcile', ['invoice' => $invoice->id])
-        ->expectsOutputToContain('FACTURAPI_TEST_KEY no está configurada')
+        ->expectsOutputToContain('no tiene organización de Facturapi vinculada')
         ->assertExitCode(1);
 
     Http::assertNothingSent();

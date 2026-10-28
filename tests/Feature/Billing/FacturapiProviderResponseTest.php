@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 use App\Exceptions\Billing\PacAuthenticationException;
@@ -11,9 +10,12 @@ use App\Exceptions\Billing\PacValidationException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Support\Tenant\CurrentTenant;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_RESPONSE',
@@ -22,11 +24,11 @@ beforeEach(function () {
 
 function fakeInvoiceForResponseTest(): Invoice
 {
-    $company = \App\Models\Company::factory()->create();
-    $invoice = \App\Models\Invoice::factory()->create(['company_id' => $company->id]);
-    \App\Models\InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+    $company = Company::factory()->create();
+    $invoice = Invoice::factory()->create(['company_id' => $company->id]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
 
-    app(\App\Support\Tenant\CurrentTenant::class)->set($company->id);
+    app(CurrentTenant::class)->set($company->id);
 
     return $invoice->fresh(['items']);
 }
@@ -55,13 +57,13 @@ test('una respuesta exitosa se mapea correctamente a PacInvoiceResult, leyendo s
         'extra_field' => 'algo',
     ], 200)]);
 
-    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+    $result = facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
 
     expect($result)->toBeInstanceOf(PacInvoiceResult::class)
         ->and($result->externalId)->toBe('inv_789')
         ->and($result->status)->toBe('valid')
         ->and($result->uuid)->toBe('AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE')
-        ->and($result->stampedAt)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
+        ->and($result->stampedAt)->toBeInstanceOf(CarbonImmutable::class)
         ->and($result->stampedAt->toIso8601String())->toContain('2026-07-28')
         ->and($result->cancellationStatus)->toBeNull()
         ->and($result->rawResponse['extra_field'])->toBe('algo');
@@ -70,7 +72,7 @@ test('una respuesta exitosa se mapea correctamente a PacInvoiceResult, leyendo s
 test('stamp.date sin offset (formato real de Facturapi) se interpreta en hora del centro y se normaliza a UTC (Fase 6.20)', function (string $raw, string $expectedUtc) {
     Http::fake(['*' => Http::response(['id' => 'inv_tz', 'status' => 'valid', 'stamp' => ['date' => $raw]], 200)]);
 
-    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+    $result = facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
 
     expect($result->stampedAt->toIso8601String())->toBe($expectedUtc)
         ->and($result->stampedAt->getTimezone()->getName())->toBe('UTC');
@@ -83,7 +85,7 @@ test('stamp.date sin offset (formato real de Facturapi) se interpreta en hora de
 test('stamp.date con offset explícito respeta ese offset y no la zona configurada', function (string $raw, string $expectedUtc) {
     Http::fake(['*' => Http::response(['id' => 'inv_tz', 'status' => 'valid', 'stamp' => ['date' => $raw]], 200)]);
 
-    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+    $result = facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
 
     expect($result->stampedAt->toIso8601String())->toBe($expectedUtc);
 })->with([
@@ -95,7 +97,7 @@ test('la zona de stamp.date se toma de billing.facturapi.stamp_timezone', functi
     config(['billing.facturapi.stamp_timezone' => 'America/Cancun']);
     Http::fake(['*' => Http::response(['id' => 'inv_tz', 'status' => 'valid', 'stamp' => ['date' => '2026-10-20T14:52:54']], 200)]);
 
-    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+    $result = facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
 
     expect($result->stampedAt->toIso8601String())->toBe('2026-10-20T19:52:54+00:00');
 });
@@ -109,7 +111,7 @@ test('created_at de un borrador (UTC con Z) se conserva sin desplazamiento', fun
         'created_at' => '2026-10-20T19:52:47.123Z',
     ], 200)]);
 
-    $result = app(PacProvider::class)->createDraftInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+    $result = facturapiProviderFromConfig()->createDraftInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
 
     expect($result->createdAt->toIso8601String())->toBe('2026-10-20T19:52:47+00:00');
 });
@@ -120,7 +122,7 @@ test('una respuesta sin objeto stamp (aún no timbrada) mapea stampedAt como nul
         'status' => 'pending',
     ], 200)]);
 
-    $result = app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+    $result = facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
 
     expect($result->status)->toBe('pending')
         ->and($result->stampedAt)->toBeNull();
@@ -129,42 +131,42 @@ test('una respuesta sin objeto stamp (aún no timbrada) mapea stampedAt como nul
 test('400 y 422 se mapean a PacValidationException', function (int $status) {
     Http::fake(['*' => Http::response(['message' => 'RFC inválido', 'code' => 'invalid_rfc'], $status)]);
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
         ->toThrow(PacValidationException::class, 'RFC inválido');
 })->with([400, 422]);
 
 test('401 y 403 se mapean a PacAuthenticationException', function (int $status) {
     Http::fake(['*' => Http::response(['message' => 'No autorizado', 'code' => 'unauthorized'], $status)]);
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
         ->toThrow(PacAuthenticationException::class, 'No autorizado');
 })->with([401, 403]);
 
 test('429 se mapea a PacRateLimitException', function () {
     Http::fake(['*' => Http::response(['message' => 'Demasiadas solicitudes', 'code' => 'rate_limited'], 429)]);
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
         ->toThrow(PacRateLimitException::class, 'Demasiadas solicitudes');
 });
 
 test('500-599 se mapean a PacUnavailableException', function (int $status) {
     Http::fake(['*' => Http::response(['message' => 'Error interno del PAC'], $status)]);
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
         ->toThrow(PacUnavailableException::class, 'Error interno del PAC');
 })->with([500, 502, 503, 599]);
 
 test('un JSON inesperado (sin id/status) produce PacUnexpectedResponseException', function () {
     Http::fake(['*' => Http::response(['foo' => 'bar'], 200)]);
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
 test('un cuerpo no-JSON en una respuesta exitosa también produce PacUnexpectedResponseException', function () {
     Http::fake(['*' => Http::response('<html>no soy json</html>', 200, ['Content-Type' => 'text/html'])]);
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest())))
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
@@ -172,7 +174,7 @@ test('se usa el campo code de Facturapi cuando está disponible', function () {
     Http::fake(['*' => Http::response(['message' => 'Error de validación', 'code' => 'field_invalid_rfc'], 422)]);
 
     try {
-        app(PacProvider::class)->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
+        facturapiProviderFromConfig()->createInvoice(requestForResponseTest(fakeInvoiceForResponseTest()));
         $this->fail('Se esperaba PacValidationException');
     } catch (PacValidationException $e) {
         expect($e->pacCode)->toBe('field_invalid_rfc')
