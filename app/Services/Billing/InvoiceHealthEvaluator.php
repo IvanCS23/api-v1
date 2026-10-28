@@ -12,6 +12,7 @@ use App\Support\Billing\InvoiceHealthReport;
 use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacIdentifiers;
+use App\Support\Billing\PacOrganizationAccess;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
@@ -42,7 +43,26 @@ class InvoiceHealthEvaluator
         Invoice $invoice,
         CarbonImmutable $now,
         ?CarbonImmutable $cancellationRequestedAt = null,
+        ?string $companyOrganizationId = null,
     ): InvoiceHealthReport {
+        // Fase 6.27: una factura de otra organización de Facturapi no admite
+        // ninguna acción PAC, así que sus demás hallazgos (reconciliar,
+        // descargar…) no aplican. Archivada, queda sólo como informativa; sin
+        // archivar, es inválida y requiere revisión (o archivarla).
+        $organization = PacOrganizationAccess::status($invoice, $companyOrganizationId);
+
+        if ($organization === PacOrganizationAccess::ARCHIVED) {
+            return InvoiceHealthReport::fromFindings((int) $invoice->id, (int) $invoice->company_id, [
+                new Finding('pac_organization_archived', Health::Valid, Action::ManualReview),
+            ]);
+        }
+
+        if ($organization === PacOrganizationAccess::OTHER) {
+            return InvoiceHealthReport::fromFindings((int) $invoice->id, (int) $invoice->company_id, [
+                new Finding('pac_organization_mismatch', Health::Invalid, Action::ManualReview),
+            ]);
+        }
+
         $findings = [
             ...$this->issuanceFindings($invoice, $now),
             ...$this->cancellationFindings($invoice, $now, $cancellationRequestedAt),

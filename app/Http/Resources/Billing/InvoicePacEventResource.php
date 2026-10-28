@@ -85,6 +85,7 @@ class InvoicePacEventResource extends JsonResource
                 'pac_external_id_masked', 'elapsed_ms',
                 'cancellation_receipt_status',
             ],
+            InvoicePacEventType::OrganizationArchived => ['reason'],
             default => [],
         };
 
