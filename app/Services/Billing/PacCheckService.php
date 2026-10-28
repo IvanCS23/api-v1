@@ -145,11 +145,19 @@ class PacCheckService
         return $checks;
     }
 
-    /** @return array{code: string, status: string, detail: string} */
-    private function certificateCheck(FacturapiOrganizationSnapshot $snapshot, CarbonImmutable $now): array
+    /**
+     * Facturapi timbra en modo test sin CSD, así que ahí su ausencia es un
+     * aviso. En cualquier otro modo (live) es un fallo. Pública para poder
+     * probar la regla de live, que hoy el guard rechaza antes de llegar aquí.
+     *
+     * @return array{code: string, status: string, detail: string}
+     */
+    public function certificateCheck(FacturapiOrganizationSnapshot $snapshot, CarbonImmutable $now): array
     {
         if (! $snapshot->hasCertificate) {
-            return $this->result('certificate', self::FAIL, 'La organización no tiene CSD cargado.');
+            return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+                ? $this->result('certificate', self::WARN, 'La organización no tiene CSD cargado. En modo test Facturapi timbra sin él; en live es obligatorio.')
+                : $this->result('certificate', self::FAIL, 'La organización no tiene CSD cargado.');
         }
 
         $serial = $snapshot->certificateSerialNumber ?? '(sin serie)';
