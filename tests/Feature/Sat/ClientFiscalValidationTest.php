@@ -150,3 +150,17 @@ test('SatFiscalValidator distingue persona moral, física y RFC inválido', func
         ->toBe(['CLIENT_RFC_INVALID', 'CLIENT_POSTAL_CODE_INVALID', 'CLIENT_FISCAL_REGIME_INVALID', 'CLIENT_CFDI_USE_INVALID'])
         ->and($validator->clientIssues(['rfc' => '', 'codigo_postal' => null]))->toBe([]);
 });
+
+test('con un RFC genérico el régimen debe ser 616 aunque el elegido aplique a otro tipo de persona', function (string $rfc, string $regime) {
+    $response = $this->actingAs(fiscalUser(), 'api')
+        ->postJson('/api/clients', fiscalClientPayload(['rfc' => $rfc, 'regimen_fiscal' => $regime, 'uso_cfdi' => 'S01']))
+        ->assertStatus(422);
+
+    // Fase 6.26.1: antes respondía "no aplica a una persona física" para 601.
+    expect($response->json('errors.regimen_fiscal'))->toBe(['Con un RFC genérico el régimen fiscal debe ser 616.'])
+        ->and($response->json('errors'))->not->toHaveKey('uso_cfdi');
+})->with([
+    'nacional con régimen de moral' => ['XAXX010101000', '601'],
+    'nacional con régimen de física' => ['XAXX010101000', '612'],
+    'extranjero con régimen de moral' => ['XEXX010101000', '601'],
+]);
