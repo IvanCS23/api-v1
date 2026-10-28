@@ -10,9 +10,10 @@ use App\Enums\CompanyMode;
 use App\Enums\CompanyStatus;
 use App\Enums\CompanyTheme;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Str;
 
 class Company extends Model
@@ -62,7 +63,6 @@ class Company extends Model
         'expedition_place',
         'fiscal_provider',
         'sandbox',
-        'api_key',
         'integration_status',
     ];
 
@@ -93,6 +93,12 @@ class Company extends Model
                 $company->uuid = (string) Str::uuid();
             }
         });
+    }
+
+    /** Fase 6.27: organización de Facturapi donde timbra la empresa. */
+    public function facturapiOrganization(): HasOne
+    {
+        return $this->hasOne(FacturapiOrganization::class);
     }
 
     public function users(): HasMany

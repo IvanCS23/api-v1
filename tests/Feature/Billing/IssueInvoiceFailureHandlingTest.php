@@ -1,11 +1,18 @@
 <?php
 
 use App\Enums\InvoiceStatus;
+use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
+use App\Exceptions\Billing\PacAuthenticationException;
+use App\Exceptions\Billing\PacRateLimitException;
+use App\Exceptions\Billing\PacUnavailableException;
+use App\Exceptions\Billing\PacUnexpectedResponseException;
+use App\Exceptions\Billing\PacValidationException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\Billing\IssueInvoiceService;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 
@@ -19,6 +26,7 @@ use Illuminate\Support\Facades\Http;
  * fallo del PAC).
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_MUY_SECRETA_FAILURE_998877',
@@ -42,7 +50,7 @@ test('error de validación (400/422) es DEFINITIVO: pac_issue_status=failed, rec
     Http::fake(['*' => Http::response(['message' => 'RFC inválido', 'code' => 'invalid_rfc'], $status)]);
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacValidationException::class);
+        ->toThrow(PacValidationException::class);
 
     $fresh = $invoice->fresh();
     expect($fresh->pac_issue_status)->toBe('failed')
@@ -57,7 +65,7 @@ test('error de autenticación (401/403) es DEFINITIVO: pac_issue_status=failed',
     Http::fake(['*' => Http::response(['message' => 'No autorizado', 'code' => 'unauthorized'], $status)]);
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacAuthenticationException::class);
+        ->toThrow(PacAuthenticationException::class);
 
     expect($invoice->fresh()->pac_issue_status)->toBe('failed');
 })->with([401, 403]);
@@ -68,7 +76,7 @@ test('rate limit (429) es DEFINITIVO: pac_issue_status=failed', function () {
     Http::fake(['*' => Http::response(['message' => 'Demasiadas solicitudes', 'code' => 'rate_limited'], 429)]);
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacRateLimitException::class);
+        ->toThrow(PacRateLimitException::class);
 
     expect($invoice->fresh()->pac_issue_status)->toBe('failed');
 });
@@ -82,7 +90,7 @@ test('un snapshot fiscal incompleto es DEFINITIVO (no se intentó ninguna llamad
     Http::fake();
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice))
-        ->toThrow(\App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException::class);
+        ->toThrow(InvoiceFiscalSnapshotIncompleteException::class);
 
     Http::assertNothingSent();
     expect($invoice->fresh()->pac_issue_status)->toBe('failed');
@@ -94,7 +102,7 @@ test('5xx del PAC es AMBIGUO: pac_issue_status=reconciliation_required, pac_reco
     Http::fake(['*' => Http::response(['message' => 'Error interno del PAC'], 500)]);
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacUnavailableException::class);
+        ->toThrow(PacUnavailableException::class);
 
     $fresh = $invoice->fresh();
     expect($fresh->pac_issue_status)->toBe('reconciliation_required')
@@ -123,7 +131,7 @@ test('una respuesta 200 no parseable/inesperada es AMBIGUA: pac_issue_status=rec
     Http::fake(['*' => Http::response(['foo' => 'bar'], 200)]);
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice))
-        ->toThrow(\App\Exceptions\Billing\PacUnexpectedResponseException::class);
+        ->toThrow(PacUnexpectedResponseException::class);
 
     expect($invoice->fresh()->pac_issue_status)->toBe('reconciliation_required');
 });
@@ -135,7 +143,7 @@ test('pac_last_error nunca contiene la API key, Authorization, Bearer, ni el pay
 
     try {
         app(IssueInvoiceService::class)->issue($invoice);
-    } catch (\App\Exceptions\Billing\PacValidationException) {
+    } catch (PacValidationException) {
         // esperado
     }
 
@@ -166,7 +174,7 @@ test('si el PAC responde con éxito pero la persistencia local falla (violación
     ], 200)]);
 
     expect(fn () => app(IssueInvoiceService::class)->issue($invoice->fresh(['items'])))
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 
     $fresh = $invoice->fresh();
     // pac_provider SÍ queda fijado: se marca durante la RESERVA (que ya

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Console\Command;
 
@@ -75,11 +76,7 @@ class InspectInvoicePacAudit extends Command
         }
 
         $encoded = json_encode($summary, JSON_UNESCAPED_SLASHES) ?: '[unavailable]';
-        $apiKey = (string) config('services.facturapi.test_key');
-
-        if ($apiKey !== '') {
-            $encoded = str_replace($apiKey, '[redacted]', $encoded);
-        }
+        $encoded = PacSecretRedactor::redact($encoded);
 
         $encoded = preg_replace('/\bBearer\s+[^\s"}]+/i', '[redacted]', $encoded) ?? '[redacted]';
         $encoded = preg_replace('/\bsk_(?:live|test)_[A-Za-z0-9._-]+\b/i', '[redacted]', $encoded) ?? '[redacted]';

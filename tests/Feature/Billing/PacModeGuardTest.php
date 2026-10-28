@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
@@ -21,6 +20,7 @@ use Illuminate\Support\Facades\Http;
  * de cualquier HTTP; sólo el modo test está soportado.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_619_SECRET',
@@ -74,7 +74,7 @@ test('el provider no envia ninguna peticion con configuracion invalida, en escri
     config(['billing.pac_mode' => $mode, 'services.facturapi.test_key' => $key]);
     [, , $invoice] = phase619Invoice();
     $request = new PacInvoiceRequest($invoice, 'erp-invoice:1:1:v1', 'company-1-invoice-1');
-    $provider = app(PacProvider::class);
+    $provider = facturapiProviderFromConfig();
 
     $calls = [
         'createInvoice' => fn () => $provider->createInvoice($request),
@@ -185,9 +185,13 @@ test('los comandos de prueba exigen pac_mode test', function (string $command) {
 })->with('facturapi test commands');
 
 test('los comandos de prueba rechazan una llave live sin mostrarla', function (string $command) {
+    // Fase 6.27: la llave es la de la organización de la empresa de la factura.
     config(['services.facturapi.test_key' => 'sk_live_PHASE_619_SECRET']);
+    [, , $invoice] = phase619Invoice();
+    config(['services.facturapi.test_key' => 'sk_test_PHASE_619_SECRET']);
+    app(CurrentTenant::class)->clear();
 
-    $this->artisan($command, ['invoice' => 1])
+    $this->artisan($command, ['invoice' => $invoice->id])
         ->expectsOutputToContain('no corresponde al modo TEST')
         ->doesntExpectOutputToContain('PHASE_619_SECRET')
         ->assertExitCode(1);

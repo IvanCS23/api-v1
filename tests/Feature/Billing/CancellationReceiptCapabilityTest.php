@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Http;
  * queda la revisión manual. pac.mode publica el modo sin la llave.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.test_key' => 'sk_test_PHASE_622_CAPABILITY',
         'billing.pac_mode' => 'test',

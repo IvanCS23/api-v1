@@ -9,6 +9,7 @@ use App\Support\Tenant\CurrentTenant;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config(['services.facturapi.test_key' => 'sk_test_COMMAND_AUDIT_SECRET']);
     Http::preventStrayRequests();
 });

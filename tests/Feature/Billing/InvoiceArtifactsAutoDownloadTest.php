@@ -29,6 +29,7 @@ use Illuminate\Support\Facades\Storage;
 const PHASE621_UUID = 'aaaaaaaa-1111-4222-8333-444444444444';
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_621_QUEUE',

@@ -1,5 +1,8 @@
 <?php
 
+use App\Infrastructure\Billing\Facturapi\FacturapiProvider;
+use App\Models\Company;
+use App\Models\FacturapiOrganization;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\Support\SatCatalogFixture;
 use Tests\TestCase;
@@ -50,4 +53,42 @@ expect()->extend('toBeOne', function () {
 function something()
 {
     // ..
+}
+
+/**
+ * Fase 6.27: las pruebas de la clase FacturapiProvider (payload, respuestas,
+ * descargas) la construyen con la llave de config; la resolución por
+ * empresa se prueba aparte (PacProviderResolverTest).
+ */
+function facturapiProviderFromConfig(): FacturapiProvider
+{
+    return new FacturapiProvider(
+        baseUrl: (string) config('services.facturapi.base_url'),
+        apiKey: config('services.facturapi.test_key'),
+        timeout: (int) config('services.facturapi.timeout'),
+        connectTimeout: (int) config('services.facturapi.connect_timeout'),
+        mode: config('billing.pac_mode'),
+        stampTimezone: config('billing.facturapi.stamp_timezone'),
+    );
+}
+
+/**
+ * Fase 6.27: en el archivo que lo llama, cada empresa creada queda
+ * vinculada a una organización de Facturapi con la llave que tenga
+ * `services.facturapi.test_key` en ese momento (como tras
+ * billing:facturapi-link). Con la llave en null la empresa queda sin
+ * organización. Opt-in por archivo: phpunit.xml no sobrescribe la llave de
+ * .env, y el resto de la suite no debe vincular empresas con ella.
+ */
+function facturapiOrganizationsFromConfigKey(): void
+{
+    Company::created(function (Company $company): void {
+        $key = config('services.facturapi.test_key');
+
+        if (! is_string($key)) {
+            return;
+        }
+
+        FacturapiOrganization::factory()->testKey($key)->create(['company_id' => $company->id]);
+    });
 }

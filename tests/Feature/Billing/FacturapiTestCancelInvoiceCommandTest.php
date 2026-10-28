@@ -3,9 +3,11 @@
 use App\Enums\InvoiceStatus;
 use App\Models\Company;
 use App\Models\Invoice;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_CANCEL_COMMAND_SECRET',
@@ -50,15 +52,17 @@ test('comando cancel está bloqueado en production', function () {
     Http::assertNothingSent();
 });
 
-test('comando cancel exige FACTURAPI_TEST_KEY', function () {
+test('comando cancel exige la organización Facturapi de la empresa (no la llave de .env)', function () {
     $invoice = phase65CommandInvoice();
     config(['services.facturapi.test_key' => null]);
     Http::fake();
 
+    DB::table('facturapi_organizations')->delete();
+
     $this->artisan('billing:facturapi-test-cancel', [
         'invoice' => $invoice->id,
         '--motive' => '02',
-    ])->expectsOutputToContain('FACTURAPI_TEST_KEY no está configurada')
+    ])->expectsOutputToContain('no tiene organización de Facturapi vinculada')
         ->assertExitCode(1);
 
     Http::assertNothingSent();

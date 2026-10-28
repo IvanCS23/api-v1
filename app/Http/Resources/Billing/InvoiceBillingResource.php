@@ -4,6 +4,7 @@ namespace App\Http\Resources\Billing;
 
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Support\Billing\PacErrorCode;
+use App\Support\Billing\PacOrganizationAccess;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -34,6 +35,10 @@ class InvoiceBillingResource extends JsonResource
                 'issue_status' => $this->pac_issue_status,
                 'reconciliation_required' => (bool) $this->pac_reconciliation_required,
                 'last_sync_at' => $this->last_pac_sync_at?->toIso8601String(),
+                // Fase 6.27: current | other | archived | unknown (null si la
+                // factura nunca llegó al PAC). Nunca el ID de la organización.
+                'organization_status' => PacOrganizationAccess::status($this->resource, PacOrganizationAccess::companyOrganizationId((int) $this->company_id)),
+                'organization_archived_at' => $this->pac_organization_archived_at?->toIso8601String(),
             ],
             'cfdi' => [
                 'uuid' => $this->cfdi_uuid,

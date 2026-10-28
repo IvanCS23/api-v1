@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Tenant\CurrentTenant;
@@ -23,7 +24,7 @@ class AuditCancellationIdentityService
 {
     private const UUID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\z/i';
 
-    public function __construct(private readonly PacProvider $pacProvider) {}
+    public function __construct(private readonly PacProviderResolver $pacProviders) {}
 
     /**
      * @return array<string, mixed>
@@ -33,8 +34,8 @@ class AuditCancellationIdentityService
         $current = $this->requireCurrentTenantInvoice($invoice);
         $this->assertAuditable($current);
 
-        $remote = $this->pacProvider->retrieveInvoice((string) $current->pac_external_id);
-        $receiptXml = $this->pacProvider->downloadCancellationReceiptXml((string) $current->pac_external_id);
+        $remote = $this->pacProvider($current)->retrieveInvoice((string) $current->pac_external_id);
+        $receiptXml = $this->pacProvider($current)->downloadCancellationReceiptXml((string) $current->pac_external_id);
         $receiptUuids = $this->extractReceiptUuids($receiptXml);
         $cfdi = $this->inspectStoredCfdi($current);
 
@@ -368,5 +369,11 @@ class AuditCancellationIdentityService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

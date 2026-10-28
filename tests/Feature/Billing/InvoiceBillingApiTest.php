@@ -1,6 +1,6 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Http\Resources\Billing\InvoicePacEventResource;
@@ -17,24 +17,15 @@ use Illuminate\Support\Facades\Http;
 use Mockery\MockInterface;
 
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config(['services.facturapi.test_key' => 'sk_test_BILLING_API_SECRET']);
     Http::preventStrayRequests();
     Http::fake();
 
-    $this->mock(PacProvider::class, function (MockInterface $mock): void {
-        $mock->shouldNotReceive('name');
-        $mock->shouldNotReceive('createInvoice');
-        $mock->shouldNotReceive('retrieveInvoice');
-        $mock->shouldNotReceive('findInvoiceByExternalId');
-        $mock->shouldNotReceive('createDraftInvoice');
-        $mock->shouldNotReceive('retrieveDraftInvoice');
-        $mock->shouldNotReceive('updateDraftInvoice');
-        $mock->shouldNotReceive('stampDraftInvoice');
-        $mock->shouldNotReceive('downloadXml');
-        $mock->shouldNotReceive('downloadPdf');
-        $mock->shouldNotReceive('cancelInvoice');
-        $mock->shouldNotReceive('downloadCancellationReceiptXml');
-        $mock->shouldNotReceive('downloadCancellationReceiptPdf');
+    // Fase 6.27: el endpoint de billing es de solo lectura; nunca pide un provider.
+    $this->mock(PacProviderResolver::class, function (MockInterface $mock): void {
+        $mock->shouldNotReceive('forInvoice');
+        $mock->shouldNotReceive('forCompany');
     });
 });
 
@@ -101,6 +92,7 @@ test('endpoint autenticado expone snapshot fiscal explícito compatible con Invo
             'pac' => [
                 'mode', 'provider', 'status', 'cancellation_status', 'issue_status',
                 'reconciliation_required', 'last_sync_at',
+                'organization_status', 'organization_archived_at',
             ],
             'cfdi' => [
                 'uuid', 'stamped_at',

@@ -10,6 +10,7 @@ use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
@@ -53,7 +54,9 @@ class OrchestrateInvoiceIssuanceService
 
         // Fase 6.19: una configuración PAC inválida se rechaza antes de la
         // transición ERP ready -> issued, no después.
-        PacCredentialGuard::fromConfig()->assertConfigured();
+        PacCredentialGuard::forCompany((int) $current->company_id)->assertConfigured();
+        // Fase 6.27: una factura de otra organización se rechaza antes de transicionar.
+        PacOrganizationAccess::assertAccessible($current);
 
         $issued = $this->workflow->prepareForOrchestratedIssue($current);
         $result = $this->pacIssuance->issue($issued);

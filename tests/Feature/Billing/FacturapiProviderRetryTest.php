@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoiceStatus;
@@ -20,6 +19,7 @@ use Illuminate\Support\Facades\Http;
  * No modifica el adaptador — solo agrega la cobertura faltante.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_RETRY',
@@ -59,7 +59,7 @@ test('createInvoice reintenta ante un fallo transitorio de conexión y tiene éx
         return Http::response(['id' => 'inv_retry_ok', 'status' => 'valid'], 200);
     });
 
-    $result = app(PacProvider::class)->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest()));
+    $result = facturapiProviderFromConfig()->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest()));
 
     expect($attempts)->toBe(2)
         ->and($result->externalId)->toBe('inv_retry_ok');
@@ -74,7 +74,7 @@ test('createInvoice agota los reintentos y propaga ConnectionException si todos 
         throw new ConnectionException('Connection timed out después de 5 segundos');
     });
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest())))
         ->toThrow(ConnectionException::class);
 
     expect($attempts)->toBe(2);
@@ -89,7 +89,7 @@ test('createInvoice NO reintenta ante una respuesta HTTP de error ya recibida (5
         return Http::response(['message' => 'Error interno del PAC'], 500);
     });
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest())))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForRetryTest(fakeInvoiceForRetryTest())))
         ->toThrow(PacUnavailableException::class);
 
     expect($attempts)->toBe(1);
@@ -123,7 +123,7 @@ test('cada operación PAC respeta la política de reintentos ante ConnectionExce
         throw new ConnectionException('cURL error 28: Operation timed out');
     });
     $request = requestForRetryTest(fakeInvoiceForRetryTest());
-    $provider = app(PacProvider::class);
+    $provider = facturapiProviderFromConfig();
 
     $call = match ($operation) {
         'createInvoice', 'createDraftInvoice' => fn () => $provider->{$operation}($request),

@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
@@ -38,7 +37,7 @@ test('la petición usa la URL base configurada', function () {
     Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'pending'], 200)]);
 
     $invoice = fakeInvoiceForConfigTest();
-    app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
+    facturapiProviderFromConfig()->createInvoice(requestForConfigTest($invoice));
 
     Http::assertSent(fn ($request) => str_starts_with($request->url(), 'https://example-pac.test/v2/invoices'));
 });
@@ -51,7 +50,7 @@ test('la petición envía Authorization Bearer con la llave configurada', functi
     Http::fake(['*' => Http::response(['id' => 'x', 'status' => 'pending'], 200)]);
 
     $invoice = fakeInvoiceForConfigTest();
-    app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
+    facturapiProviderFromConfig()->createInvoice(requestForConfigTest($invoice));
 
     Http::assertSent(fn ($request) => $request->hasHeader('Authorization', 'Bearer sk_test_SECRET_ABC'));
 });
@@ -64,7 +63,7 @@ test('el adaptador se construye con el timeout y connect_timeout configurados', 
         'services.facturapi.connect_timeout' => 3,
     ]);
 
-    $provider = app(PacProvider::class);
+    $provider = facturapiProviderFromConfig();
     $reflection = new ReflectionClass($provider);
 
     expect($reflection->getProperty('timeout')->getValue($provider))->toBe(30)
@@ -80,7 +79,7 @@ test('sin API key configurada no se envía ninguna petición (Fase 6.19: antes s
 
     $invoice = fakeInvoiceForConfigTest();
 
-    expect(fn () => app(PacProvider::class)->createInvoice(requestForConfigTest($invoice)))
+    expect(fn () => facturapiProviderFromConfig()->createInvoice(requestForConfigTest($invoice)))
         ->toThrow(PacConfigurationException::class);
 
     Http::assertNothingSent();
@@ -97,13 +96,13 @@ test('una stamp_timezone inválida o vacía bloquea toda petición antes de la r
     $invoice = fakeInvoiceForConfigTest();
 
     try {
-        app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
+        facturapiProviderFromConfig()->createInvoice(requestForConfigTest($invoice));
         $this->fail('Se esperaba PacConfigurationException.');
     } catch (PacConfigurationException $e) {
         expect($e->pacCode)->toBe('stamp_timezone_invalid');
     }
 
-    expect(fn () => app(PacProvider::class)->stampDraftInvoice('inv_tz_invalid'))
+    expect(fn () => facturapiProviderFromConfig()->stampDraftInvoice('inv_tz_invalid'))
         ->toThrow(PacConfigurationException::class);
 
     Http::assertNothingSent();
@@ -123,7 +122,7 @@ test('la API key nunca aparece en el mensaje ni en el código de una excepción 
     $invoice = fakeInvoiceForConfigTest();
 
     try {
-        app(PacProvider::class)->createInvoice(requestForConfigTest($invoice));
+        facturapiProviderFromConfig()->createInvoice(requestForConfigTest($invoice));
         test()->fail('Se esperaba PacAuthenticationException');
     } catch (PacAuthenticationException $e) {
         expect($e->getMessage())->not->toContain('sk_test_MUY_SECRETA_12345')
@@ -133,5 +132,5 @@ test('la API key nunca aparece en el mensaje ni en el código de una excepción 
 });
 
 test('name() identifica el proveedor de forma estable, sin Reflection sobre la clase concreta', function () {
-    expect(app(PacProvider::class)->name())->toBe('facturapi');
+    expect(facturapiProviderFromConfig()->name())->toBe('facturapi');
 });

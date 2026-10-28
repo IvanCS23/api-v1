@@ -3,6 +3,7 @@
 namespace Database\Factories;
 
 use App\Models\Company;
+use App\Models\FacturapiOrganization;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 /**
@@ -32,5 +33,18 @@ class CompanyFactory extends Factory
             'rfc' => strtoupper(fake()->unique()->bothify('???######???')),
             'fiscal_regime' => '601',
         ];
+    }
+
+    /** Fase 6.27: empresa con su organización de Facturapi y llave Test. */
+    public function withFacturapiOrganization(?string $testKey = 'sk_test_FACTORY_ORGANIZATION_KEY', ?string $organizationId = null): static
+    {
+        return $this->afterCreating(function (Company $company) use ($testKey, $organizationId): void {
+            FacturapiOrganization::factory()
+                ->testKey($testKey)
+                ->create(array_filter([
+                    'company_id' => $company->id,
+                    'organization_id' => $organizationId,
+                ], fn (mixed $value): bool => $value !== null));
+        });
     }
 }

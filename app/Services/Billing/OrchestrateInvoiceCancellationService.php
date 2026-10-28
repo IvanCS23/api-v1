@@ -12,6 +12,7 @@ use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
@@ -73,7 +74,9 @@ class OrchestrateInvoiceCancellationService
             throw new InvoiceCannotBeCancelledException($invoice, 'la cancelación fiscal requiere motivo SAT');
         }
 
-        PacCredentialGuard::fromConfig()->assertConfigured();
+        PacCredentialGuard::forCompany((int) $invoice->company_id)->assertConfigured();
+        // Fase 6.27: una factura de otra organización no registra solicitud de cancelación.
+        PacOrganizationAccess::assertAccessible($invoice);
 
         $result = $this->workflow->cancelWithPac($invoice, $motive, $substitutionUuid);
 

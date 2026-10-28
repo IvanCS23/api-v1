@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\TaxType;
 use App\Models\Client;
@@ -25,6 +24,7 @@ use Illuminate\Support\Facades\Http;
  * eso no afecta estas pruebas de estructura.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PAYLOAD',
@@ -76,7 +76,7 @@ test('el payload de creación se construye únicamente desde el snapshot de Invo
     Http::fake(['*' => Http::response(['id' => 'inv_123', 'status' => 'pending'], 200)]);
 
     app(CurrentTenant::class)->set($company->id);
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items']), 'company-'.$company->id.'-invoice-'.$invoice->id));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items']), 'company-'.$company->id.'-invoice-'.$invoice->id));
 
     Http::assertSent(function ($request) use ($company, $invoice) {
         $body = $request->data();
@@ -142,7 +142,7 @@ test('el payload no consulta valores modificados de Client ni Product después d
     Http::fake(['*' => Http::response(['id' => 'inv_456', 'status' => 'pending'], 200)]);
 
     app(CurrentTenant::class)->set($company->id);
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $body = $request->data();
@@ -169,7 +169,7 @@ test('el payload de una empresa nunca mezcla datos de otra empresa (aislamiento 
 
     Http::fake(['*' => Http::response(['id' => 'inv_a', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($companyA->id);
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoiceA->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoiceA->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $body = $request->data();
@@ -182,7 +182,7 @@ test('el payload de una empresa nunca mezcla datos de otra empresa (aislamiento 
 
     Http::fake(['*' => Http::response(['id' => 'inv_b', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($companyB->id);
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoiceB->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoiceB->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $body = $request->data();
@@ -233,7 +233,7 @@ test('sku ausente en el payload cuando el snapshot no lo trae, incluso si el Pro
     app(CurrentTenant::class)->set($company->id);
 
     DB::enableQueryLog();
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
     $queries = DB::getQueryLog();
     DB::disableQueryLog();
 
@@ -268,7 +268,7 @@ test('sku presente y exacto cuando el snapshot lo trae', function () {
     Http::fake(['*' => Http::response(['id' => 'inv_sku_present', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $body = $request->data();
@@ -298,7 +298,7 @@ test('customer.address omite las claves opcionales sin valor (nunca las envía c
     Http::fake(['*' => Http::response(['id' => 'inv_addr_null', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $body = $request->data();
@@ -346,7 +346,7 @@ test('tax_included se envía explícitamente como false — unit_price es precio
     Http::fake(['*' => Http::response(['id' => 'inv_tax_included', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $product = $request->data()['items'][0]['product'];
@@ -390,7 +390,7 @@ test('el objeto taxes[] nunca fabrica una clave "withholding": Facturapi no docu
     Http::fake(['*' => Http::response(['id' => 'inv_no_withholding', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $taxes = $request->data()['items'][0]['product']['taxes'][0];
@@ -418,7 +418,7 @@ test('IVA 0% (tasa cero, ya soportado): tax_included sigue false, rate=0.0, sin 
     Http::fake(['*' => Http::response(['id' => 'inv_iva_cero', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $product = $request->data()['items'][0]['product'];
@@ -447,7 +447,7 @@ test('sin impuesto (sin tax_code): tax_included sigue false, taxes=[] vacío, si
     Http::fake(['*' => Http::response(['id' => 'inv_exento', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $product = $request->data()['items'][0]['product'];
@@ -484,7 +484,7 @@ test('no cambia con modificaciones del TaxRate vivo: el payload usa exclusivamen
     app(CurrentTenant::class)->set($company->id);
 
     DB::enableQueryLog();
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
     $queries = DB::getQueryLog();
     DB::disableQueryLog();
 
@@ -521,7 +521,7 @@ test('customer.address incluye las claves opcionales cuando el snapshot sí las 
     Http::fake(['*' => Http::response(['id' => 'inv_addr_full', 'status' => 'pending'], 200)]);
     app(CurrentTenant::class)->set($company->id);
 
-    app(PacProvider::class)->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
+    facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items'])));
 
     Http::assertSent(function ($request) {
         $body = $request->data();

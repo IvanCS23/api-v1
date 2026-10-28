@@ -32,4 +32,7 @@ enum InvoicePacEventType: string
     case CancellationReceiptStored = 'cancellation_receipt_stored';
     case CancellationReceiptUnavailable = 'cancellation_receipt_unavailable';
     case CancellationReceiptIdentityMismatch = 'cancellation_receipt_identity_mismatch';
+
+    // Fase 6.27: cierre de una factura de una organización Facturapi inaccesible.
+    case OrganizationArchived = 'organization_archived';
 }

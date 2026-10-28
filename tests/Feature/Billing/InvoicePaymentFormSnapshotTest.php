@@ -1,7 +1,7 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Data\Billing\PacInvoiceRequest;
+use App\Enums\InvoiceStatus;
 use App\Models\Client;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -10,6 +10,7 @@ use App\Models\Product;
 use App\Models\Sale;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
+use App\Services\Billing\IssueInvoiceService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Support\Facades\Http;
 
@@ -23,6 +24,7 @@ use Illuminate\Support\Facades\Http;
  * consultar Sale/Company.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PAYMENT_FORM',
@@ -99,7 +101,7 @@ test('IssueInvoiceService/FacturapiProvider usan exclusivamente el snapshot de I
     $company = Company::factory()->create(['default_payment_form' => '03']);
     $invoice = Invoice::factory()->create([
         'company_id' => $company->id,
-        'status' => \App\Enums\InvoiceStatus::Issued,
+        'status' => InvoiceStatus::Issued,
         'payment_form' => '03',
     ]);
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
@@ -111,7 +113,7 @@ test('IssueInvoiceService/FacturapiProvider usan exclusivamente el snapshot de I
 
     Http::fake(['*' => Http::response(['id' => 'inv_snapshot_check', 'status' => 'valid'], 200)]);
 
-    app(\App\Services\Billing\IssueInvoiceService::class)->issue($invoice->fresh(['items']));
+    app(IssueInvoiceService::class)->issue($invoice->fresh(['items']));
 
     Http::assertSent(fn ($request) => ($request->data()['payment_form'] ?? null) === '03');
 });
@@ -129,7 +131,7 @@ test('el payload enviado a Facturapi incluye payment_form en la raíz', function
         idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
         externalId: "company-{$company->id}-invoice-{$invoice->id}",
     );
-    app(PacProvider::class)->createInvoice($request);
+    facturapiProviderFromConfig()->createInvoice($request);
 
     Http::assertSent(fn ($request) => ($request->data()['payment_form'] ?? null) === '04');
 });
@@ -159,7 +161,7 @@ test('payment_method null: la propiedad payment_method está ausente del payload
         idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
         externalId: "company-{$company->id}-invoice-{$invoice->id}",
     );
-    app(PacProvider::class)->createInvoice($request);
+    facturapiProviderFromConfig()->createInvoice($request);
 
     Http::assertSent(fn ($request) => ! array_key_exists('payment_method', $request->data()));
 });
@@ -177,7 +179,7 @@ test('payment_method PUE: el payload incluye "payment_method": "PUE"', function 
         idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
         externalId: "company-{$company->id}-invoice-{$invoice->id}",
     );
-    app(PacProvider::class)->createInvoice($request);
+    facturapiProviderFromConfig()->createInvoice($request);
 
     Http::assertSent(fn ($request) => ($request->data()['payment_method'] ?? null) === 'PUE');
 });
@@ -195,7 +197,7 @@ test('payment_method PPD: el payload incluye "payment_method": "PPD"', function 
         idempotencyKey: "erp-invoice:{$company->id}:{$invoice->id}:v1",
         externalId: "company-{$company->id}-invoice-{$invoice->id}",
     );
-    app(PacProvider::class)->createInvoice($request);
+    facturapiProviderFromConfig()->createInvoice($request);
 
     Http::assertSent(fn ($request) => ($request->data()['payment_method'] ?? null) === 'PPD');
 });

@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\InvoicePacEventType;
@@ -80,7 +81,7 @@ class IssueInvoiceService
     private const STATUS_RECONCILIATION_REQUIRED = 'reconciliation_required';
 
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacReadinessService $readiness,
         private readonly InvoicePacAuditService $audit,
     ) {}
@@ -110,7 +111,7 @@ class IssueInvoiceService
             // idempotency_key una vez corregido el dato).
             $this->readiness->assertReady($reserved);
 
-            $result = $this->pacProvider->createInvoice($pacRequest);
+            $result = $this->pacProvider($reserved)->createInvoice($pacRequest);
         } catch (Throwable $e) {
             $elapsedMs = $this->elapsedMs($startedAt);
             $failed = $this->recordIssuanceFailure($reserved, $e);
@@ -132,7 +133,7 @@ class IssueInvoiceService
         }
 
         $elapsedMs = $this->elapsedMs($startedAt);
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($reserved)->name();
 
         try {
             $updated = DB::transaction(function () use ($reserved, $result, $providerSlug): Invoice {
@@ -212,7 +213,7 @@ class IssueInvoiceService
     private function reserve(Invoice $invoice): Invoice
     {
         $tenantId = app(CurrentTenant::class)->id();
-        $providerSlug = $this->pacProvider->name();
+        $providerSlug = $this->pacProvider($invoice)->name();
 
         return DB::transaction(function () use ($invoice, $tenantId, $providerSlug): Invoice {
             $locked = $tenantId !== null
@@ -386,5 +387,11 @@ class IssueInvoiceService
         if ($invoice->cfdi_uuid !== null || $invoice->pac_external_id !== null) {
             throw new InvoiceAlreadyIssuedException($invoice);
         }
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

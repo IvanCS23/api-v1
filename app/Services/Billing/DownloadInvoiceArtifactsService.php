@@ -3,6 +3,7 @@
 namespace App\Services\Billing;
 
 use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\InvoiceArtifactsResult;
 use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
@@ -75,7 +76,7 @@ class DownloadInvoiceArtifactsService
     private const DISK = 'local';
 
     public function __construct(
-        private readonly PacProvider $pacProvider,
+        private readonly PacProviderResolver $pacProviders,
         private readonly InvoicePacAuditService $audit,
         private readonly InvoiceBusinessCapabilitiesService $capabilities,
     ) {}
@@ -95,10 +96,10 @@ class DownloadInvoiceArtifactsService
         $startedAt = microtime(true);
 
         try {
-            $xml = $this->pacProvider->downloadXml($reserved->pac_external_id);
+            $xml = $this->pacProvider($reserved)->downloadXml($reserved->pac_external_id);
             $this->assertValidXml($reserved, $xml);
 
-            $pdf = $this->pacProvider->downloadPdf($reserved->pac_external_id);
+            $pdf = $this->pacProvider($reserved)->downloadPdf($reserved->pac_external_id);
             $this->assertValidPdf($reserved, $pdf);
         } catch (Throwable $e) {
             $this->recordFailure($reserved, $e);
@@ -544,5 +545,11 @@ class DownloadInvoiceArtifactsService
         }
 
         return $fresh;
+    }
+
+    /** Fase 6.27: el provider con la organización de la empresa de la factura. */
+    private function pacProvider(Invoice $invoice): PacProvider
+    {
+        return $this->pacProviders->forInvoice($invoice);
     }
 }

@@ -7,6 +7,7 @@ use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\User;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacOrganizationAccess;
 
 /**
  * Deriva capacidades empresariales sanitizadas desde ambas máquinas de
@@ -24,6 +25,19 @@ class InvoiceBusinessCapabilitiesService
     /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string} */
     public function for(Invoice $invoice, ?User $user): array
     {
+        // Fase 6.27: una factura de otra organización (o archivada) no ofrece
+        // ninguna acción PAC; la llave de la empresa no tiene acceso a ella.
+        if (PacOrganizationAccess::isBlocked(PacOrganizationAccess::status($invoice, PacOrganizationAccess::companyOrganizationId((int) $invoice->company_id)))) {
+            return [
+                'can_issue' => false,
+                'can_cancel' => false,
+                'can_reconcile' => false,
+                'can_fetch_artifacts' => false,
+                'can_fetch_cancellation_receipt' => false,
+                'cancellation_mode' => null,
+            ];
+        }
+
         $canIssue = $user?->can('issueBusiness', $invoice) === true
             && $this->canIssueByState($invoice);
         $mode = $this->cancellationMode($invoice);

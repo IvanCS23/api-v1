@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
@@ -16,6 +15,7 @@ use Illuminate\Support\Facades\Http;
  * aquí.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_DOWNLOAD_PROVIDER',
@@ -29,7 +29,7 @@ beforeEach(function () {
 test('downloadXml llama GET /invoices/{id}/xml con Authorization Bearer', function () {
     Http::fake(['*' => Http::response('<xml/>', 200)]);
 
-    app(PacProvider::class)->downloadXml('inv_dl_xml_1');
+    facturapiProviderFromConfig()->downloadXml('inv_dl_xml_1');
 
     Http::assertSent(fn ($request) => $request->method() === 'GET'
         && str_ends_with($request->url(), '/invoices/inv_dl_xml_1/xml')
@@ -39,7 +39,7 @@ test('downloadXml llama GET /invoices/{id}/xml con Authorization Bearer', functi
 test('downloadPdf llama GET /invoices/{id}/pdf con Authorization Bearer', function () {
     Http::fake(['*' => Http::response('%PDF-1.4 fake', 200)]);
 
-    app(PacProvider::class)->downloadPdf('inv_dl_pdf_1');
+    facturapiProviderFromConfig()->downloadPdf('inv_dl_pdf_1');
 
     Http::assertSent(fn ($request) => $request->method() === 'GET'
         && str_ends_with($request->url(), '/invoices/inv_dl_pdf_1/pdf')
@@ -50,7 +50,7 @@ test('downloadXml devuelve los bytes exactos del cuerpo de la respuesta, sin tra
     $rawXml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<cfdi:Comprobante>contenido exacto Ñ é</cfdi:Comprobante>\n";
     Http::fake(['*' => Http::response($rawXml, 200, ['Content-Type' => 'application/xml'])]);
 
-    $result = app(PacProvider::class)->downloadXml('inv_dl_xml_2');
+    $result = facturapiProviderFromConfig()->downloadXml('inv_dl_xml_2');
 
     expect($result)->toBe($rawXml);
 });
@@ -59,7 +59,7 @@ test('downloadPdf devuelve los bytes exactos del cuerpo de la respuesta, sin tra
     $rawPdf = "%PDF-1.4\n%\xE2\xE3\xCF\xD3\nbinary garbage \x00\x01\x02 end";
     Http::fake(['*' => Http::response($rawPdf, 200, ['Content-Type' => 'application/pdf'])]);
 
-    $result = app(PacProvider::class)->downloadPdf('inv_dl_pdf_2');
+    $result = facturapiProviderFromConfig()->downloadPdf('inv_dl_pdf_2');
 
     expect($result)->toBe($rawPdf);
 });
@@ -67,7 +67,7 @@ test('downloadPdf devuelve los bytes exactos del cuerpo de la respuesta, sin tra
 test('downloadXml con content-type inesperado (ej. text/html de un error) igual devuelve el body tal cual — la validación de contenido no es responsabilidad del provider', function () {
     Http::fake(['*' => Http::response('<html><body>not xml</body></html>', 200, ['Content-Type' => 'text/html'])]);
 
-    $result = app(PacProvider::class)->downloadXml('inv_dl_xml_html');
+    $result = facturapiProviderFromConfig()->downloadXml('inv_dl_xml_html');
 
     expect($result)->toBe('<html><body>not xml</body></html>');
 });
@@ -75,7 +75,7 @@ test('downloadXml con content-type inesperado (ej. text/html de un error) igual 
 test('downloadXml con respuesta vacía (200 pero body vacío) devuelve cadena vacía sin lanzar', function () {
     Http::fake(['*' => Http::response('', 200)]);
 
-    $result = app(PacProvider::class)->downloadXml('inv_dl_xml_empty');
+    $result = facturapiProviderFromConfig()->downloadXml('inv_dl_xml_empty');
 
     expect($result)->toBe('');
 });
@@ -83,7 +83,7 @@ test('downloadXml con respuesta vacía (200 pero body vacío) devuelve cadena va
 test('downloadPdf con respuesta vacía (200 pero body vacío) devuelve cadena vacía sin lanzar', function () {
     Http::fake(['*' => Http::response('', 200)]);
 
-    $result = app(PacProvider::class)->downloadPdf('inv_dl_pdf_empty');
+    $result = facturapiProviderFromConfig()->downloadPdf('inv_dl_pdf_empty');
 
     expect($result)->toBe('');
 });
@@ -92,38 +92,38 @@ test('401 en downloadXml/downloadPdf se mapea a PacAuthenticationException, sin 
     Http::fake(['*' => Http::response(['message' => 'No autorizado', 'code' => 'unauthorized'], 401)]);
 
     try {
-        app(PacProvider::class)->downloadXml('inv_dl_401');
+        facturapiProviderFromConfig()->downloadXml('inv_dl_401');
         test()->fail('Se esperaba PacAuthenticationException');
     } catch (PacAuthenticationException $e) {
         expect($e->getMessage())->not->toContain('sk_test_DOWNLOAD_PROVIDER');
     }
 
-    expect(fn () => app(PacProvider::class)->downloadPdf('inv_dl_401'))
+    expect(fn () => facturapiProviderFromConfig()->downloadPdf('inv_dl_401'))
         ->toThrow(PacAuthenticationException::class);
 });
 
 test('429 en downloadXml/downloadPdf se mapea a PacRateLimitException', function () {
     Http::fake(['*' => Http::response(['message' => 'Demasiadas solicitudes'], 429)]);
 
-    expect(fn () => app(PacProvider::class)->downloadXml('inv_dl_429'))
+    expect(fn () => facturapiProviderFromConfig()->downloadXml('inv_dl_429'))
         ->toThrow(PacRateLimitException::class);
-    expect(fn () => app(PacProvider::class)->downloadPdf('inv_dl_429'))
+    expect(fn () => facturapiProviderFromConfig()->downloadPdf('inv_dl_429'))
         ->toThrow(PacRateLimitException::class);
 });
 
 test('500 en downloadXml/downloadPdf se mapea a PacUnavailableException', function () {
     Http::fake(['*' => Http::response(['message' => 'Error interno del PAC'], 500)]);
 
-    expect(fn () => app(PacProvider::class)->downloadXml('inv_dl_500'))
+    expect(fn () => facturapiProviderFromConfig()->downloadXml('inv_dl_500'))
         ->toThrow(PacUnavailableException::class);
-    expect(fn () => app(PacProvider::class)->downloadPdf('inv_dl_500'))
+    expect(fn () => facturapiProviderFromConfig()->downloadPdf('inv_dl_500'))
         ->toThrow(PacUnavailableException::class);
 });
 
 test('con Http::preventStrayRequests() activo, ninguna llamada no simulada se cuela', function () {
     Http::fake(['*/invoices/inv_dl_strict/xml' => Http::response('<xml/>', 200)]);
 
-    app(PacProvider::class)->downloadXml('inv_dl_strict');
+    facturapiProviderFromConfig()->downloadXml('inv_dl_strict');
 
     Http::assertSentCount(1);
 });

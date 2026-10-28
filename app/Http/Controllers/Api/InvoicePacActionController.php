@@ -14,6 +14,7 @@ use App\Services\Billing\InvoiceWorkflow;
 use App\Services\Billing\IssueInvoiceToPacService;
 use App\Services\Billing\LoadInvoiceBillingSnapshotService;
 use App\Support\Billing\InvoicePacActionExceptionResponder;
+use App\Support\Billing\PacOrganizationAccess;
 use Closure;
 use Illuminate\Http\JsonResponse;
 use Throwable;
@@ -74,6 +75,8 @@ class InvoicePacActionController extends Controller
         $this->authorize($ability, $model);
 
         try {
+            // Fase 6.27: antes de que el servicio reserve nada.
+            PacOrganizationAccess::assertAccessible($model);
             $action($model);
         } catch (Throwable $error) {
             $response = $this->errors->respond($error);

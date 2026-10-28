@@ -1,6 +1,5 @@
 <?php
 
-use App\Contracts\Billing\PacProvider;
 use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoiceStatus;
 use App\Enums\UserRole;
@@ -25,6 +24,7 @@ use Illuminate\Support\Facades\Http;
  *   draft_update_in_progress, idempotency_key_in_use → AMBIGUO.
  */
 beforeEach(function () {
+    facturapiOrganizationsFromConfigKey();
     config([
         'services.facturapi.base_url' => 'https://example-pac.test/v2',
         'services.facturapi.test_key' => 'sk_test_PHASE_620_SECRET',
@@ -92,7 +92,7 @@ test('invoice_not_found se mapea a PacInvoiceNotFoundException sin importar el H
     Http::fake(['*' => Http::response(phase620ErrorBody('invoice_not_found'), $status)]);
 
     try {
-        app(PacProvider::class)->retrieveInvoice('inv_missing');
+        facturapiProviderFromConfig()->retrieveInvoice('inv_missing');
         $this->fail('Se esperaba PacInvoiceNotFoundException.');
     } catch (PacInvoiceNotFoundException $e) {
         expect($e->httpStatus)->toBe($status)
@@ -104,7 +104,7 @@ test('los códigos de operación en curso se mapean a PacOperationInProgressExce
     Http::fake(['*' => Http::response(phase620ErrorBody($code), $status)]);
 
     try {
-        app(PacProvider::class)->stampDraftInvoice('inv_busy');
+        facturapiProviderFromConfig()->stampDraftInvoice('inv_busy');
         $this->fail('Se esperaba PacOperationInProgressException.');
     } catch (PacOperationInProgressException $e) {
         expect($e)->toBeInstanceOf(PacConflictException::class)
@@ -122,7 +122,7 @@ test('un código desconocido conserva el mapeo por HTTP status', function () {
     Http::fake(['*' => Http::response(phase620ErrorBody('some_future_code'), 409)]);
 
     try {
-        app(PacProvider::class)->stampDraftInvoice('inv_unknown');
+        facturapiProviderFromConfig()->stampDraftInvoice('inv_unknown');
         $this->fail('Se esperaba PacConflictException.');
     } catch (PacConflictException $e) {
         expect($e)->not->toBeInstanceOf(PacOperationInProgressException::class);
