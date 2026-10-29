@@ -11,6 +11,7 @@ use App\Models\Quote;
 use App\Models\QuoteItem;
 use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Models\User;
 use App\Policies\ClientPolicy;
 use App\Policies\EmployePolicy;
 use App\Policies\InvoiceItemPolicy;
@@ -20,6 +21,7 @@ use App\Policies\QuoteItemPolicy;
 use App\Policies\QuotePolicy;
 use App\Policies\SaleItemPolicy;
 use App\Policies\SalePolicy;
+use App\Policies\UserPolicy;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -72,6 +74,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(QuoteItem::class, QuoteItemPolicy::class);
         Gate::policy(Invoice::class, InvoicePolicy::class);
         Gate::policy(InvoiceItem::class, InvoiceItemPolicy::class);
+        Gate::policy(User::class, UserPolicy::class);
     }
 
     /** Limita acciones PAC por usuario y factura, además del throttle API general. */

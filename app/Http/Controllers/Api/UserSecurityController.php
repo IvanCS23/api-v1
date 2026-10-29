@@ -8,6 +8,7 @@ use App\Http\Requests\ChangePasswordRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\Users\CompanyAdminGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -15,9 +16,17 @@ use Illuminate\Support\Str;
 
 class UserSecurityController extends Controller
 {
+    public function __construct(private readonly CompanyAdminGuard $admins) {}
+
     public function changePassword(ChangePasswordRequest $request, string $id): JsonResponse
     {
         $user = $this->findWithinCompany($request, $id);
+        $this->authorize('manageSecurity', $user);
+
+        if ($violation = $this->admins->passwordViolation($request->user('api'), $user)) {
+            return response()->json($violation, 422);
+        }
+
         $validated = $request->validated();
 
         $user->update([
@@ -35,6 +44,11 @@ class UserSecurityController extends Controller
     public function resetPassword(Request $request, string $id): JsonResponse
     {
         $user = $this->findWithinCompany($request, $id);
+        $this->authorize('manageSecurity', $user);
+
+        if ($violation = $this->admins->passwordViolation($request->user('api'), $user)) {
+            return response()->json($violation, 422);
+        }
 
         $request->validate([
             'must_change_password' => ['nullable', 'boolean'],
@@ -60,6 +74,7 @@ class UserSecurityController extends Controller
     public function revokeSessions(Request $request, string $id): JsonResponse
     {
         $user = $this->findWithinCompany($request, $id);
+        $this->authorize('manageSecurity', $user);
 
         if ($user->id === $request->user('api')->id) {
             return response()->json([
@@ -77,6 +92,7 @@ class UserSecurityController extends Controller
     public function updateMustChangePassword(Request $request, string $id): JsonResponse
     {
         $user = $this->findWithinCompany($request, $id);
+        $this->authorize('manageSecurity', $user);
 
         $validated = $request->validate([
             'must_change_password' => ['required', 'boolean'],

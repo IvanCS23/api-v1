@@ -4,15 +4,23 @@ namespace App\Http\Requests;
 
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
 
 class UpdateUserRequest extends FormRequest
 {
+    /**
+     * Antes de validar (la regla unique revelaría qué correos existen). Un
+     * usuario de otra empresa no se autoriza aquí: el controlador responde 404.
+     */
     public function authorize(): bool
     {
-        return true;
+        $actor = $this->user('api');
+        $target = User::query()->where('company_id', $actor?->company_id)->find($this->route('id'));
+
+        return $target === null || (bool) $actor?->can('update', $target);
     }
 
     /**
