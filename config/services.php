@@ -50,11 +50,16 @@ return [
     | tiempo de ejecución: sólo la lee `billing:facturapi-link` para el
     | vínculo inicial de una empresa con la organización de esta llave.
     |
+    | Fase 6.27b: `user_key` (`sk_user_`) es la User Key de la cuenta. Sólo
+    | la usa FacturapiOrganizationClient (datos fiscales, CSD, llave Test y
+    | creación de organizaciones por comando). Nunca va a la BD.
+    |
     */
 
     'facturapi' => [
         'base_url' => env('FACTURAPI_BASE_URL', 'https://www.facturapi.io/v2'),
         'test_key' => env('FACTURAPI_TEST_KEY'),
+        'user_key' => env('FACTURAPI_USER_KEY'),
         'timeout' => (int) env('FACTURAPI_TIMEOUT', 15),
         'connect_timeout' => (int) env('FACTURAPI_CONNECT_TIMEOUT', 5),
     ],
