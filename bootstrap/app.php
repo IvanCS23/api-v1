@@ -39,5 +39,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->appendToPriorityList(Authenticate::class, EnsureUserIsActive::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
-        //
+        // Fase 6.27b: la contraseña y los archivos del CSD nunca se
+        // conservan en la sesión tras un error de validación.
+        $exceptions->dontFlash(['csd_password', 'cer', 'key']);
     })->create();

@@ -14,6 +14,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
+use SensitiveParameter;
 
 /**
  * Fase 6.27b — Administración de organizaciones con la User Key.
@@ -88,8 +89,12 @@ final class FacturapiOrganizationClient
      * Facturapi toma de él `legal.tax_id`. No se reintenta. La contraseña
      * se borra de cualquier mensaje de error antes de propagarlo.
      */
-    public function uploadCertificate(string $organizationId, string $cer, string $key, string $password): FacturapiOrganizationSnapshot
-    {
+    public function uploadCertificate(
+        string $organizationId,
+        string $cer,
+        #[SensitiveParameter] string $key,
+        #[SensitiveParameter] string $password,
+    ): FacturapiOrganizationSnapshot {
         $response = $this->client(retry: false, json: false)
             ->attach('cer', $cer, 'csd.cer')
             ->attach('key', $key, 'csd.key')
@@ -153,7 +158,7 @@ final class FacturapiOrganizationClient
      * @param  list<string>  $secrets  Valores que nunca deben aparecer en un mensaje.
      * @return array<string, mixed>
      */
-    private function json(Response $response, array $secrets = []): array
+    private function json(Response $response, #[SensitiveParameter] array $secrets = []): array
     {
         $this->assertSuccessful($response, $secrets);
 
@@ -171,7 +176,7 @@ final class FacturapiOrganizationClient
     }
 
     /** @param list<string> $secrets */
-    private function assertSuccessful(Response $response, array $secrets = []): void
+    private function assertSuccessful(Response $response, #[SensitiveParameter] array $secrets = []): void
     {
         if ($response->successful()) {
             return;

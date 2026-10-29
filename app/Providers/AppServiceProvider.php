@@ -94,6 +94,17 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('company-fiscal', function (Request $request): Limit {
             return Limit::perMinute(10)->by('company-fiscal|'.($request->user()?->getAuthIdentifier() ?? $request->ip()));
         });
+
+        // Fase 6.27b: frena intentos de adivinar la contraseña del CSD, por
+        // empresa (aunque cambie el usuario) y por usuario.
+        RateLimiter::for('company-csd', function (Request $request): array {
+            $user = $request->user();
+
+            return [
+                Limit::perMinutes(10, 5)->by('company-csd|company|'.($user?->company_id ?? $request->ip())),
+                Limit::perMinutes(10, 5)->by('company-csd|user|'.($user?->getAuthIdentifier() ?? $request->ip())),
+            ];
+        });
     }
 
     /**
