@@ -3,15 +3,19 @@
 namespace App\Services\Billing;
 
 use App\Exceptions\Billing\PacException;
+use App\Infrastructure\Billing\Facturapi\FacturapiOrganizationClient;
 use App\Infrastructure\Billing\Facturapi\FacturapiOrganizationSnapshot;
 use App\Infrastructure\Billing\Facturapi\FacturapiProviderResolver;
 use App\Models\Company;
 use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
+use App\Support\Billing\FacturapiUserKey;
 use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
+use Illuminate\Http\Client\ConnectionException;
+use InvalidArgumentException;
 
 /**
  * Fase 6.27 — Verificación de credenciales PAC por empresa
@@ -23,8 +27,9 @@ use Carbon\CarbonImmutable;
  * Cada verificación es {code, status, detail} con status ok | warn | fail
  * | info. Nunca incluye la llave, sólo su pista (sk_test_…a1b2).
  *
- * Sin User Key (6.27b) no se verifica que la organización pertenezca a la
- * cuenta de Facturapi.
+ * Fase 6.27b: con User Key, `account` comprueba que la organización
+ * pertenezca a la cuenta (GET /organizations/{id}, también de lectura).
+ * Sin User Key es informativo; con otro prefijo, fallo.
  */
 class PacCheckService
 {
@@ -42,6 +47,7 @@ class PacCheckService
     public function __construct(
         private readonly FacturapiProviderResolver $providers,
         private readonly CurrentTenant $tenant,
+        private readonly FacturapiOrganizationClient $organizations,
     ) {}
 
     /**
@@ -118,9 +124,48 @@ class PacCheckService
             $this->result('pending_steps', self::INFO, $snapshot->pendingSteps === []
                 ? 'Sin pasos pendientes para Live.'
                 : 'Pendiente para Live (fuera de alcance): '.implode(', ', array_column($snapshot->pendingSteps, 'type')).'.'),
-            $this->result('account', self::INFO, 'Sin User Key (6.27b): no se verifica que la organización pertenezca a la cuenta.'),
+            $this->accountCheck($organization->organization_id),
             ...$this->invoiceChecks($organization->organization_id),
         ];
+    }
+
+    /**
+     * La especificación no documenta qué responde Facturapi con una
+     * organización de otra cuenta, así que cualquier respuesta distinta de
+     * 200 con el mismo id es un fallo. El detalle sólo lleva el estado HTTP
+     * y el código, nunca el cuerpo.
+     *
+     * @return array{code: string, status: string, detail: string}
+     */
+    private function accountCheck(string $organizationId): array
+    {
+        $violation = FacturapiUserKey::fromConfig()->violation();
+
+        if ($violation === 'pac_user_key_missing') {
+            return $this->result('account', self::INFO, 'Sin User Key: no se verifica que la organización pertenezca a la cuenta.');
+        }
+
+        if ($violation !== null) {
+            return $this->result('account', self::FAIL, "La User Key no permite operar ({$violation}); no se contactó al PAC.");
+        }
+
+        try {
+            $snapshot = $this->organizations->organization($organizationId);
+        } catch (PacException $e) {
+            return $this->result('account', self::FAIL, sprintf(
+                'La User Key no tiene acceso a la organización (HTTP %s%s).',
+                $e->httpStatus ?? 'sin respuesta',
+                $e->pacCode !== null ? ", {$e->pacCode}" : '',
+            ));
+        } catch (ConnectionException) {
+            return $this->result('account', self::FAIL, 'No se pudo contactar a Facturapi con la User Key.');
+        } catch (InvalidArgumentException) {
+            return $this->result('account', self::FAIL, 'El id de la organización guardada no es válido; no se contactó al PAC.');
+        }
+
+        return $snapshot->id === $organizationId
+            ? $this->result('account', self::OK, 'La organización pertenece a la cuenta de la User Key.')
+            : $this->result('account', self::FAIL, "Facturapi devolvió la organización {$snapshot->id} en lugar de {$organizationId}.");
     }
 
     /** @return list<array{code: string, status: string, detail: string}> */

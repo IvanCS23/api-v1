@@ -173,6 +173,37 @@ test('el CSD ausente es aviso en modo test y fallo en modo live', function (stri
     'live' => ['live', 'fail'],
 ]);
 
+test('con User Key verifica que la organización pertenezca a la cuenta', function (?string $userKey, ?array $accountResponse, string $status, string $detail) {
+    config(['services.facturapi.user_key' => $userKey]);
+    Http::fake(array_filter([
+        'example-pac.test/v2/organizations/me' => Http::response(phase627CheckOrganization()),
+        'example-pac.test/v2/organizations/'.PHASE_627_CHECK_ORG => $accountResponse === null ? null : Http::response(...$accountResponse),
+    ]));
+    $company = phase627CheckCompany();
+
+    [, $report] = phase627PacCheck(['--company' => [$company->id]]);
+    $account = collect($report['companies'][0]['checks'])->firstWhere('code', 'account');
+
+    expect($account['status'])->toBe($status)
+        ->and($account['detail'])->toContain($detail)
+        ->and(json_encode($report))->not->toContain('PAC_CHECK_USER_KEY')
+        ->and(json_encode($report))->not->toContain('mensaje interno del PAC');
+
+    if ($accountResponse !== null) {
+        Http::assertSent(fn (Request $request): bool => str_ends_with($request->url(), '/organizations/'.PHASE_627_CHECK_ORG)
+            && $request->method() === 'GET'
+            && $request->hasHeader('Authorization', 'Bearer '.$userKey));
+    } else {
+        Http::assertSentCount(1);
+    }
+})->with([
+    'pertenece' => ['sk_user_PAC_CHECK_USER_KEY_1111', [phase627CheckOrganization()], 'ok', 'pertenece a la cuenta'],
+    'sin acceso' => ['sk_user_PAC_CHECK_USER_KEY_1111', [['code' => 'not_found', 'message' => 'mensaje interno del PAC'], 404], 'fail', 'HTTP 404, not_found'],
+    'otra organización' => ['sk_user_PAC_CHECK_USER_KEY_1111', [phase627CheckOrganization(['id' => 'org_other'])], 'fail', 'org_other'],
+    'prefijo inválido' => ['sk_test_PAC_CHECK_USER_KEY_1111', null, 'fail', 'pac_user_key_invalid'],
+    'sin User Key' => [null, null, 'info', 'Sin User Key'],
+]);
+
 test('cuenta las facturas sin organización, de otra organización y archivadas', function () {
     Http::fake(['example-pac.test/v2/organizations/me' => Http::response(phase627CheckOrganization())]);
     $company = phase627CheckCompany();

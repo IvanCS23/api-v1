@@ -174,7 +174,7 @@ test('un id de organización con caracteres de ruta se rechaza sin HTTP', functi
     expect(fn () => phase627bClient()->organization($id))->toThrow(InvalidArgumentException::class);
 
     Http::assertNothingSent();
-})->with(['../apikeys/test', 'org/legal', 'org?x=1', '']);
+})->with(['../apikeys/test', 'org/legal', 'org?x=1', 'org.json', 'org%2Flegal', '']);
 
 test('la auditoría guarda el usuario desde la API, consola sin usuario, y nunca llaves', function () {
     $company = Company::factory()->create();

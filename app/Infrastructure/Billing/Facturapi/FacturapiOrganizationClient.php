@@ -139,10 +139,10 @@ final class FacturapiOrganizationClient
             : $request;
     }
 
-    /** Un id de organización sólo puede tener letras y dígitos (nada de rutas). */
+    /** Un id de organización sólo tiene letras, dígitos, `_` o `-` (nada de rutas ni query). */
     private function id(string $organizationId): string
     {
-        if (preg_match('/^[A-Za-z0-9]{1,64}$/', $organizationId) !== 1) {
+        if (preg_match('/^[A-Za-z0-9_-]{1,64}$/', $organizationId) !== 1) {
             throw new InvalidArgumentException('El id de la organización de Facturapi no es válido.');
         }
 
