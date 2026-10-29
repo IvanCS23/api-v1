@@ -29,8 +29,8 @@ Route::get('/login', function () {
 });
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
-// Protected routes (require valid API token)
-Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
+// Protected routes (require valid API token and an active user)
+Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
