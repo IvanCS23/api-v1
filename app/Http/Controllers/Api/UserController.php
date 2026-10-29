@@ -11,6 +11,7 @@ use App\Http\Requests\UpdateUserRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditLogger;
+use App\Services\Users\CompanyAdminGuard;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -19,6 +20,8 @@ use Illuminate\Validation\Rules\Enum;
 
 class UserController extends Controller
 {
+    public function __construct(private readonly CompanyAdminGuard $admins) {}
+
     public function index(Request $request): JsonResponse
     {
         $request->validate([
@@ -67,10 +70,11 @@ class UserController extends Controller
 
     public function store(StoreUserRequest $request): JsonResponse
     {
+        $this->authorize('create', User::class);
         $validated = $request->validated();
         $authUser = $request->user('api');
 
-        $user = new User();
+        $user = new User;
         $user->fill([
             'company_id' => $authUser->company_id,
             'name' => $validated['name'],
@@ -104,19 +108,32 @@ class UserController extends Controller
     public function update(UpdateUserRequest $request, string $id): JsonResponse
     {
         $user = $this->findWithinCompany($request, $id);
+        $this->authorize('update', $user);
         $validated = $request->validated();
         $previousStatus = $user->status;
 
-        $user->fill(collect($validated)->except('avatar')->toArray());
+        $violation = $this->admins->change(
+            $request->user('api'),
+            $user,
+            isset($validated['role']) ? UserRole::from($validated['role']) : null,
+            isset($validated['status']) ? UserStatus::from($validated['status']) : null,
+            function () use ($request, $user, $validated): void {
+                $user->fill(collect($validated)->except('avatar')->toArray());
 
-        if ($request->hasFile('avatar')) {
-            if ($user->avatar) {
-                Storage::disk('public')->delete($user->avatar);
-            }
-            $user->avatar = $request->file('avatar')->store('avatars', 'public');
+                if ($request->hasFile('avatar')) {
+                    if ($user->avatar) {
+                        Storage::disk('public')->delete($user->avatar);
+                    }
+                    $user->avatar = $request->file('avatar')->store('avatars', 'public');
+                }
+
+                $user->save();
+            },
+        );
+
+        if ($violation !== null) {
+            return response()->json($violation, 422);
         }
-
-        $user->save();
 
         if (array_key_exists('status', $validated) && $user->status !== $previousStatus) {
             $action = $user->status === UserStatus::Active ? AuditAction::Activated : AuditAction::Deactivated;
@@ -129,6 +146,7 @@ class UserController extends Controller
     public function destroy(Request $request, string $id): JsonResponse
     {
         $user = $this->findWithinCompany($request, $id);
+        $this->authorize('delete', $user);
 
         if ($user->id === $request->user('api')->id) {
             return response()->json([
@@ -136,7 +154,17 @@ class UserController extends Controller
             ], 422);
         }
 
-        $user->update(['status' => UserStatus::Inactive]);
+        $violation = $this->admins->change(
+            $request->user('api'),
+            $user,
+            null,
+            UserStatus::Inactive,
+            fn () => $user->update(['status' => UserStatus::Inactive]),
+        );
+
+        if ($violation !== null) {
+            return response()->json($violation, 422);
+        }
 
         AuditLogger::record($user, AuditAction::Deactivated, $request);
 

@@ -101,7 +101,9 @@ return [
     |
     */
 
-    'middleware' => ['web'],
+    // Fase 6.27b (0b): `active` rechaza a un usuario desactivado con sesión
+    // abierta; sin sesión (login, registro) no hace nada.
+    'middleware' => ['web', 'active'],
 
     /*
     |--------------------------------------------------------------------------

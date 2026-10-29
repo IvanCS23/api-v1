@@ -41,6 +41,23 @@ final class FacturapiProviderResolver implements PacProviderResolver
         return $this->provider($this->organization($companyId));
     }
 
+    /**
+     * Fase 6.27b: provider con una llave suelta, sin organización exigida.
+     * Sólo para que los comandos del operador comprueben a qué organización
+     * pertenece una llave (GET /organizations/me) antes de guardarla.
+     */
+    public function forKey(string $testKey): FacturapiProvider
+    {
+        return new FacturapiProvider(
+            baseUrl: (string) config('services.facturapi.base_url'),
+            apiKey: $testKey,
+            timeout: (int) config('services.facturapi.timeout'),
+            connectTimeout: (int) config('services.facturapi.connect_timeout'),
+            mode: config('billing.pac_mode'),
+            stampTimezone: config('billing.facturapi.stamp_timezone'),
+        );
+    }
+
     private function organization(int $companyId): ?FacturapiOrganization
     {
         return FacturapiOrganization::query()->where('company_id', $companyId)->first();
@@ -48,7 +65,6 @@ final class FacturapiProviderResolver implements PacProviderResolver
 
     private function provider(?FacturapiOrganization $organization, ?PacOrganizationMismatchException $blockedBy = null): FacturapiProvider
     {
-
         return new FacturapiProvider(
             baseUrl: (string) config('services.facturapi.base_url'),
             apiKey: $organization?->test_secret_key,

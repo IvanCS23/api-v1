@@ -27,11 +27,15 @@ class CompanyFactory extends Factory
      */
     public function definition(): array
     {
+        // Fase 6.27b: datos de emisor válidos (InvoicePacReadinessService los
+        // exige antes de emitir): RFC de persona moral con fecha real, razón
+        // social sin régimen societario y C.P.
         return [
-            'legal_name' => fake()->company(),
+            'legal_name' => 'EMPRESA '.strtoupper(fake()->lexify('????????')),
             'trade_name' => fake()->company(),
-            'rfc' => strtoupper(fake()->unique()->bothify('???######???')),
+            'rfc' => strtoupper(fake()->unique()->lexify('???')).fake()->date('ymd').strtoupper(fake()->bothify('?#?')),
             'fiscal_regime' => '601',
+            'postal_code' => '06010',
         ];
     }
 

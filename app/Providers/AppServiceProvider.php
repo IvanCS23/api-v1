@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Client;
+use App\Models\Company;
 use App\Models\Employe;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
@@ -11,7 +12,9 @@ use App\Models\Quote;
 use App\Models\QuoteItem;
 use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Models\User;
 use App\Policies\ClientPolicy;
+use App\Policies\CompanyPolicy;
 use App\Policies\EmployePolicy;
 use App\Policies\InvoiceItemPolicy;
 use App\Policies\InvoicePolicy;
@@ -20,6 +23,7 @@ use App\Policies\QuoteItemPolicy;
 use App\Policies\QuotePolicy;
 use App\Policies\SaleItemPolicy;
 use App\Policies\SalePolicy;
+use App\Policies\UserPolicy;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -72,6 +76,8 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(QuoteItem::class, QuoteItemPolicy::class);
         Gate::policy(Invoice::class, InvoicePolicy::class);
         Gate::policy(InvoiceItem::class, InvoiceItemPolicy::class);
+        Gate::policy(User::class, UserPolicy::class);
+        Gate::policy(Company::class, CompanyPolicy::class);
     }
 
     /** Limita acciones PAC por usuario y factura, además del throttle API general. */
@@ -82,6 +88,22 @@ class AppServiceProvider extends ServiceProvider
             $invoice = (string) $request->route('invoice');
 
             return Limit::perMinute(10)->by($actor.'|'.$invoice);
+        });
+
+        // Fase 6.27b: cada guardado de datos fiscales llama a Facturapi.
+        RateLimiter::for('company-fiscal', function (Request $request): Limit {
+            return Limit::perMinute(10)->by('company-fiscal|'.($request->user()?->getAuthIdentifier() ?? $request->ip()));
+        });
+
+        // Fase 6.27b: frena intentos de adivinar la contraseña del CSD, por
+        // empresa (aunque cambie el usuario) y por usuario.
+        RateLimiter::for('company-csd', function (Request $request): array {
+            $user = $request->user();
+
+            return [
+                Limit::perMinutes(10, 5)->by('company-csd|company|'.($user?->company_id ?? $request->ip())),
+                Limit::perMinutes(10, 5)->by('company-csd|user|'.($user?->getAuthIdentifier() ?? $request->ip())),
+            ];
         });
     }
 

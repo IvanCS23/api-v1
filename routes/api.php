@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\CompanyCsdController;
+use App\Http\Controllers\Api\CompanyFiscalController;
 use App\Http\Controllers\Api\EmployeController;
 use App\Http\Controllers\Api\InvoiceArtifactController;
 use App\Http\Controllers\Api\InvoiceBillingController;
@@ -29,8 +31,8 @@ Route::get('/login', function () {
 });
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
-// Protected routes (require valid API token)
-Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
+// Protected routes (require valid API token and an active user)
+Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
 
@@ -125,6 +127,11 @@ Route::middleware(['auth:api', 'throttle:60,1'])->group(function () {
     Route::post('/quotes/{quote}/items', [QuoteItemController::class, 'store']);
     Route::put('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'update']);
     Route::delete('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'destroy']);
+
+    // Datos fiscales de la empresa (Fase 6.27b): siempre la del usuario autenticado
+    Route::get('/company/fiscal', [CompanyFiscalController::class, 'show']);
+    Route::put('/company/fiscal', [CompanyFiscalController::class, 'update'])->middleware('throttle:company-fiscal');
+    Route::post('/company/csd', [CompanyCsdController::class, 'store'])->middleware('throttle:company-csd');
 
     // Invoices (Fase 5 — dominio interno de facturas, sin Facturapi/CFDI)
     Route::get('/invoices', [InvoiceController::class, 'index']);

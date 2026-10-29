@@ -267,19 +267,30 @@ FASE 6.27a — Organización de Facturapi por empresa (sin User Key):
 - Aplicado en la BD local el 2026-10-28: migraciones, vínculo de la empresa 1 con `6ad00a7079761a6ddec6026a`, backfill de 11 facturas y archivado de #1–#3 (organización `69e1341a…`).
 - Commits api-v1: `95841df`, `4063952`, `1765639`, `ad7258e`, `1f4da67`, `e2821ec`, `d5a10e1` y el de documentación. app-front: `0c564c6`.
 
+FASE 6.27b — Administración de la organización (User Key):
+- Seguridad de usuarios (commits 0 y 0b, subidos por separado): crear, editar, desactivar y las acciones de seguridad son sólo para un Admin activo (`UserPolicy`); nadie cambia su propio rol ni estado ni el rol de otro Admin, un Admin no cambia ni restablece la contraseña de otro, y la empresa conserva al menos un Admin activo (`CompanyAdminGuard`, con los Admin bloqueados en la transacción). Desactivar o suspender revoca el `api_token`, y el middleware `active` rechaza con 403 `USER_INACTIVE` a un usuario no activo en las 107 rutas autenticadas (API, web y Fortify).
+- `FACTURAPI_USER_KEY` sólo en `.env` (vacía en `phpunit.xml`). `FacturapiOrganizationClient` con lista cerrada (consultar, buscar, crear, `PUT /legal`, `PUT /certificate`, `GET /apikeys/test`); nunca renueva llaves, usa Live ni borra.
+- `billing:facturapi-create-organization` (sólo operador, a prueba de un POST no idempotente, con `--resume`) y `billing:facturapi-link --replace-key` (User Key o `.env`).
+- Datos fiscales del emisor: `GET/PUT /api/company/fiscal`, `issuerIssues`, regla del RFC del CSD, Facturapi primero; readiness de emisión `COMPANY_FISCAL_DATA_INCOMPLETE`, `COMPANY_RFC_CSD_MISMATCH`, `COMPANY_CSD_MISSING` (fuera de test) y `CLIENT_GENERIC_POSTAL_CODE_MISMATCH` en venta y emisión.
+- CSD real: `POST /api/company/csd` con lectura local del `.cer` (RFC, FIEL, vigencia), sin guardar archivos ni contraseña, `#[SensitiveParameter]`, `dontFlash` y límite por empresa y usuario.
+- `facturapi_organization_audits` (append-only) con el usuario o `source=console`. `pac-check` verifica la cuenta con la User Key. `security:reencrypt` para retirar una `APP_KEY` anterior (incluye `invoice_pac_events.context`, excepción documentada).
+- Frontend: pantallas reales de Datos fiscales y Sellos (FIEL como "Próximamente"), Usuarios oculta las acciones de administración a quien no es Admin y los mensajes en inglés de Laravel se muestran en español.
+- Desviación: `CompanyBillingReadinessService::evaluate()` no tenía consumidores (sólo su prueba) y revisa la forma de pago de la empresa, obsoleta desde la 6.25; las reglas del emisor van en `issuerErrors()`, que sí aplica `InvoicePacReadinessService`.
+- Commits api-v1: `b300861`, `da2b7e8`, `6e4c29b`, `9cc1c99`, `4b69216`, `82df2fd`, `5053e75`, `99fc7a5`, `cd05607` y el de documentación. app-front: `b57d3d6`, `c7aee8b`, `dc3b1a7`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.27a (verificada el 2026-10-28 sobre
+Línea base al cierre de la FASE 6.27b (verificada el 2026-10-29 sobre
 `changes-ivan` e `integracion-ivan`):
-- Backend: 1409 pruebas aprobadas, 5869 assertions, 0 fallidas.
-- Frontend: 198 pruebas aprobadas en 22 archivos, 0 fallidas.
+- Backend: 1514 pruebas aprobadas, 6531 assertions, 0 fallidas.
+- Frontend: 225 pruebas aprobadas en 27 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
-- Build Next.js: aprobado, 31 páginas generadas.
-- ESLint global del frontend: 31 errores / 52 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
+- Build Next.js: aprobado, 32 páginas generadas.
+- ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
 - Pint de archivos relacionados: aprobado.
 - `git diff --check`: limpio.
 
@@ -291,10 +302,12 @@ Estado de la BD local de desarrollo:
 - Migraciones de la 6.21, 6.22 y 6.25 (`cfdi_artifacts_started_at`, `cancellation_receipt_started_at`, `add_payment_to_sales_table`, `scope_invoice_sale_uniqueness_to_active_invoices`) aplicadas.
 - Migraciones de la 6.26 aplicadas (`create_sat_product_keys_table`, `create_sat_unit_keys_table`, `drop_unique_clave_producto_on_products_table`, `add_tax_rate_id_to_products_table`) y catálogos importados (52 513 / 2 418). Cada ambiente nuevo debe correr `php artisan sat:import-catalogs`.
 - Migraciones de la 6.27 aplicadas. Empresa 1 vinculada con la organización `6ad00a7079761a6ddec6026a` (llave `sk_test_…hMMB`); #1–#3 archivadas; `billing:health`: 17 facturas `valid`. `billing:pac-check` falla por los datos de la empresa 1, que difieren de Facturapi y se corrigen a mano: RFC `XAXX010101000` frente a `XIA190128J61`, C.P. vacío frente a `06010` y razón social "Mi Empresa" frente a "TECNOLOGIAS S.A". La organización no tiene CSD (en TEST timbra igual).
+- Desde la 6.27b la empresa 1 no puede emitir hasta corregir sus datos fiscales (readiness del emisor: RFC genérico, sin C.P., RFC distinto del de Facturapi). Se corrigen en Datos fiscales, que hace un `PUT /legal` real en Facturapi TEST: requiere autorización explícita. La migración `create_facturapi_organization_audits_table` (6.27b) no está aplicada en la BD local; sin ella fallan los guardados de datos fiscales, CSD y los comandos que auditan.
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
-- Lint global frontend: 31 errores / 52 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
+- Lint global frontend: 31 errores / 51 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
+- `CompanyBillingReadinessService::evaluate()` (forma de pago de la empresa) no tiene consumidores desde la 6.25: decidir si se elimina.
 - Vulnerabilidades de dependencias reportadas, pendientes de nueva auditoría.
 - Búsqueda parcial `LIKE`.
 - Índices de consulta pendientes de evaluación con datos reales.
@@ -303,10 +316,12 @@ Deuda conocida:
 - Los endpoints legacy siguen disponibles por compatibilidad.
 
 Hallazgos de producto pendientes (verificados en el código):
-- 18 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
+- 17 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
+- El login web de Fortify (sesión) no revisa el estado del usuario: uno inactivo inicia sesión, pero su primera petición autenticada recibe 403 y la sesión se cierra. `POST /api/login` sí lo rechaza.
+- El C.P. del cliente con RFC genérico sólo se valida en el readiness de venta y de emisión; el formulario de Clientes no lo avisa (no conoce el C.P. de la empresa y Sales/Employee no pueden leer los datos fiscales).
+- La regla de razón social sin régimen societario es un patrón (S.A., S.A. de C.V., S. de R.L., S.C., A.C., S.A.S., S.A.P.I.): puede tener falsos positivos con nombres que terminen así.
 - Folios de cotizaciones: `QuoteNumberGenerator` ignora las cotizaciones borradas (suave); borrar la última y crear otra repite el folio y choca con el único `(company_id, folio)` (500). Facturas y ventas ya se corrigieron en la 6.25; cotizaciones quedaron fuera de alcance.
 - Aprobación de ventas: `submit`/`confirm` se conservan, pero `SalePolicy` no distingue roles (cualquiera de la empresa confirma su propia venta) y no se registra quién confirmó.
-- RFC genérico: el SAT exige además que el C.P. del receptor sea el del lugar de expedición; `companies.postal_code` no tiene endpoint para configurarse (`billing:pac-check` lo compara con Facturapi desde la 6.27a).
 - RFC genéricos en la unicidad de clientes: excluir `XAXX010101000` y `XEXX010101000` del único `(company_id, rfc)` para permitir varios clientes extranjeros (y más de un "público en general") en la misma empresa. Hoy el índice de BD y `Store/UpdateClientRequest` lo impiden; requiere migración (p. ej. columna generada que sea null para los genéricos) y ajustar la regla `unique`.
 - IVA 8 % del estímulo fiscal de la región fronteriza: agregarlo a `tax_rates` con sus condiciones de aplicación (contribuyentes inscritos en el padrón del estímulo, operaciones realizadas en la región, vigencia del decreto) y validarlas al capturar y facturar. Fase propia. Mientras tanto se retiró de Productos porque no existe en `tax_rates`.
 - Objeto de impuesto 05–08 no se valida contra el IVA.
@@ -323,7 +338,9 @@ Hallazgos de producto pendientes (verificados en el código):
 
 Riesgos pendientes:
 - Zona horaria de la conexión MySQL: la sesión usa `SYSTEM` (America/Mexico_City); `NOW()` en SQL da hora local y fijar `+00:00` desplazaría las fechas guardadas. Requiere fase propia con migración de datos (documentado en `BILLING_LIFECYCLE.md`).
-- Respaldos: una copia de la BD junto con el `.env` (`APP_KEY`) expone las llaves de Facturapi; ver `BILLING_LIFECYCLE.md` (rotación con `APP_PREVIOUS_KEYS`). No hay comando para volver a cifrar las columnas ni para reemplazar la llave de una organización ya vinculada.
+- Respaldos: una copia de la BD junto con el `.env` (`APP_KEY`) expone las llaves de Facturapi; ver `BILLING_LIFECYCLE.md` (rotación con `APP_PREVIOUS_KEYS`, `security:reencrypt` y `billing:facturapi-link --replace-key`).
+- User Key: abre todas las organizaciones de la cuenta y vive en el proceso web (datos fiscales y CSD). Mitigado con la lista cerrada del cliente, sólo Admin, límites de intentos, auditoría y redacción; si el `.env` se filtra, reemplazarla en Facturapi.
+- Sin verificar contra Facturapi real: la forma exacta de los errores del CSD, si `PUT /legal` borra los campos de dirección omitidos (se envían todos los que tiene la empresa), si una organización nueva sin `tax_id` timbra en TEST y qué responde `GET /organizations/{id}` con una organización de otra cuenta.
 - Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación.
 - Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 
@@ -363,20 +380,18 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada y verificada es la FASE 6.27a (ver sección 7). Los riesgos "una sola llave global" y "facturas 1-3 huérfanas" quedaron resueltos en ella.
+La última fase completada y verificada es la FASE 6.27b (ver sección 7). Pendiente de autorización: las llamadas reales a Facturapi (`pac-check` con la User Key, `PUT /legal` de la empresa 1 y, si aplica, un CSD de prueba del SAT) y aplicar en la BD local la migración de auditoría.
 
 Hoja de ruta:
-- FASE 6.27b — Operaciones con User Key: `FacturapiOrganizationClient`, datos fiscales y CSD de la organización, creación de organizaciones sólo por comando Artisan del operador (nunca endpoint de la API). En la API el `organization_id` sale siempre de la fila de la empresa autenticada, nunca de la petición (prueba: el Admin de la empresa A no puede afectar la organización de B). Contraseña del CSD en `dontFlash`, con prueba que provoque una excepción durante la subida y verifique que no aparece en logs, reportes ni respuestas. Los registros de CSD y datos fiscales guardan el usuario que hizo el cambio. Incluir un comando para reemplazar la llave de una organización vinculada.
 - FASE 6.28 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.27b antes de modificar archivos (requiere la User Key de Facturapi):
+Prepara la FASE 6.28 antes de modificar archivos:
 
 1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Revisa `facturapi_organizations`, `PacProviderResolver`, `PacCredentialGuard` y `PacCheckService` (6.27a).
-3. Confirma con la documentación de Facturapi los endpoints con User Key (datos fiscales, CSD, organizaciones, llaves Test) antes de diseñar.
-4. Propón alcance, archivos, migraciones, pruebas, riesgos y orden de commits, con los requisitos de la hoja de ruta.
+2. Inventaria los endpoints legacy (`/api/invoices/{id}/issue`, `/cancel`, `legacy-invoices`) y quién los consume en el frontend.
+3. Propón alcance, archivos, pruebas, riesgos y orden de commits.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.

@@ -564,8 +564,9 @@ Comandos del operador (todos en dry-run salvo `--apply`):
   la organización (`GET /organizations/me`), RFC, régimen y C.P. contra
   Facturapi, el CSD (ausente: aviso en `test`, porque Facturapi timbra sin él;
   fallo en cualquier otro modo; vencido: fallo; menos de 30 días: aviso) y las
-  facturas sin organización, de otra organización o archivadas. Sin User Key
-  (6.27b) no verifica que la organización pertenezca a la cuenta.
+  facturas sin organización, de otra organización o archivadas. Con User Key
+  (6.27b), `account` comprueba con `GET /organizations/{id}` que la
+  organización pertenezca a la cuenta; sin ella es informativo.
 
 Identidad por factura: una factura cuyo `pac_organization_id` no es el de su
 empresa (`PacOrganizationAccess`: `other` o `archived`) no ofrece acciones
@@ -575,13 +576,80 @@ empresa (`PacOrganizationAccess`: `other` o `archived`) no ofrece acciones
 respuesta del PAC que traiga otra `organization`. El panel fiscal muestra
 "Factura archivada" o "Factura de otra organización fiscal".
 
+### Administración con la User Key (Fase 6.27b)
+
+La User Key (`FACTURAPI_USER_KEY`, `sk_user_`) abre todas las organizaciones
+de la cuenta. Vive sólo en `.env` (las pruebas la vacían en `phpunit.xml`) y
+sólo la usa `FacturapiOrganizationClient`, con una lista cerrada de
+operaciones (una prueba por reflexión falla si aparece otra): consultar,
+buscar por nombre, crear, `PUT /legal`, `PUT /certificate` y obtener la llave
+Test con `GET /apikeys/test`. Nunca renueva llaves (`PUT /apikeys/test`
+invalidaría la actual), nunca usa llaves Live ni borra. Sin User Key:
+`pac_user_key_missing`; con otro prefijo: `pac_user_key_invalid`; en ambos
+casos no hay petición. Sólo en peticiones síncronas de un Admin y en
+comandos, nunca en jobs.
+
+Comandos del operador:
+
+- `billing:facturapi-create-organization --company= [--name=] [--apply]
+  [--resume] [--allow-duplicate-name]`: no hay endpoint. `POST /organizations`
+  no es idempotente: se niega si la cuenta ya tiene una organización con ese
+  nombre, toma un lock por empresa y guarda el id en cuanto Facturapi
+  responde; si falla después, la fila queda sin llave (`pac_key_missing`) y
+  `--resume --apply` obtiene y comprueba la llave Test sin volver a crear.
+- `billing:facturapi-link --company= --replace-key [--from=user-key|env]
+  [--apply]`: reemplaza sólo la llave Test de una empresa vinculada (nunca
+  la organización), comprobada con `GET /organizations/me`.
+
+Datos fiscales (`GET /api/company/fiscal`: Admin y Accountant;
+`PUT`: sólo Admin, `throttle:company-fiscal`):
+
+- `SatFiscalValidator::issuerIssues`: RFC obligatorio y no genérico,
+  régimen aplicable al tipo de persona, C.P. de 5 dígitos y razón social
+  sin régimen societario.
+- Si la organización ya tiene RFC (Facturapi lo toma del CSD), el de la
+  empresa debe ser ése (`COMPANY_RFC_CSD_MISMATCH`). Cambiar de RFC queda
+  fuera de alcance.
+- Facturapi primero: `PUT /legal` con todos los campos que tiene la empresa
+  (el RFC no se envía) y sólo con 200 se guardan empresa, copia de la
+  organización y auditoría. Un fallo no guarda nada y se registra sin
+  secretos (`billing.company.fiscal_update_failed`).
+
+CSD (`POST /api/company/csd`: sólo Admin, `throttle:company-csd`, 5 cada 10
+minutos por empresa y por usuario):
+
+- Antes de cualquier petición se lee el `.cer` en memoria
+  (`CsdCertificateReader`) y se rechaza un certificado ilegible, una FIEL
+  (sin sucursal en OU), uno vencido o uno de otro RFC: subirlo cambiaría el
+  RFC de la organización sin forma de deshacerlo.
+- Se reenvía con `PUT /certificate`; nunca se guardan los archivos ni la
+  contraseña. La contraseña y la llave van marcadas `#[SensitiveParameter]`
+  en todo el camino: con `zend.exception_ignore_args` apagado, las trazas de
+  `laravel.log` incluirían los argumentos. `dontFlash` cubre
+  `csd_password`, `cer` y `key`.
+
+La empresa y su organización salen siempre del usuario autenticado:
+`organization_id` o `company_id` en la petición (cuerpo o query) se rechazan.
+
+Auditoría: `facturapi_organization_audits` (append-only) registra creación,
+llave guardada o reemplazada, datos fiscales (campos cambiados) y CSD (serie,
+vigencia, RFC), con el usuario desde la API o `source=console` desde
+comandos; rechaza metadata con forma de llave.
+
+Readiness de emisión (`InvoicePacReadinessService`, vía
+`CompanyBillingReadinessService::issuerErrors`, con la copia local de la
+organización): `COMPANY_FISCAL_DATA_INCOMPLETE`, `COMPANY_RFC_CSD_MISMATCH` y
+`COMPANY_CSD_MISSING` (sólo fuera de `test`). Readiness de venta y de
+emisión: `CLIENT_GENERIC_POSTAL_CODE_MISMATCH` (con RFC genérico, el C.P. del
+cliente es el de la empresa, lugar de expedición).
+
 ### Llaves cifradas con APP_KEY
 
 Las columnas cifradas usan `APP_KEY`: `facturapi_organizations.test_secret_key`,
 `invoices.pac_response`, `invoices.pac_draft_response` e
-`invoice_pac_events.context`. Perder `APP_KEY` las vuelve ilegibles. Hoy no hay
-comando para reemplazar la llave de una organización ya vinculada
-(`billing:facturapi-link` no sobrescribe un vínculo); queda para la 6.27b.
+`invoice_pac_events.context`. Perder `APP_KEY` las vuelve ilegibles; las
+llaves Test se recuperan con `billing:facturapi-link --replace-key` (User
+Key), las respuestas del PAC no.
 
 Rotación de `APP_KEY` (Laravel descifra con `APP_KEY` y, si falla, con cada
 llave de `APP_PREVIOUS_KEYS`, separadas por comas; cifra siempre con
@@ -591,18 +659,24 @@ llave de `APP_PREVIOUS_KEYS`, separadas por comas; cifra siempre con
    (`php artisan key:generate --show` la genera sin escribir el `.env`).
 2. Limpia y vuelve a generar la caché de configuración y reinicia los
    workers de cola.
-3. Los valores existentes siguen cifrados con la llave anterior hasta que se
-   vuelven a guardar. No hay todavía un comando que los vuelva a cifrar.
-4. Retira la llave anterior de `APP_PREVIOUS_KEYS` sólo cuando todas las
-   columnas cifradas se hayan vuelto a guardar; si no, esas filas quedan
+3. Corre `php artisan security:reencrypt` (dry-run: cuenta por columna lo
+   cifrado con la llave actual, con una anterior y lo ilegible) y luego con
+   `--apply`. Vuelve a cifrar con la llave actual, comprueba la ida y vuelta
+   antes de escribir y no toca `updated_at`. Reescribe también
+   `invoice_pac_events.context`, excepción documentada a su inmutabilidad:
+   cambia el cifrado, no el contenido.
+4. Retira la llave anterior de `APP_PREVIOUS_KEYS` sólo cuando el dry-run
+   reporte 0 en "Llave anterior" e "Ilegibles"; si no, esas filas quedan
    ilegibles.
 
 Respaldos: un respaldo de la base de datos junto con el `.env` (o cualquier
 copia de `APP_KEY`) expone en claro todas las llaves de Facturapi y las
 respuestas del PAC. Guárdalos por separado y con acceso restringido. Si ambos
 se filtran, renueva la llave Test de cada organización en Facturapi (la
-anterior queda invalidada), reemplázala en `facturapi_organizations` (sin
-comando hasta la 6.27b) y rota `APP_KEY`.
+anterior queda invalidada), reemplázala con `billing:facturapi-link
+--replace-key --apply`, rota `APP_KEY` y corre `security:reencrypt --apply`.
+La User Key nunca está en la BD, pero sí en el `.env`: si éste se filtra,
+trátala como comprometida y reemplázala desde la cuenta de Facturapi.
 
 ## Riesgos pendientes
 

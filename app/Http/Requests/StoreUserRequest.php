@@ -4,15 +4,17 @@ namespace App\Http\Requests;
 
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Models\User;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\Rules\Enum;
 
 class StoreUserRequest extends FormRequest
 {
+    /** Antes de validar: un usuario que no es Admin no debe saber qué correos existen. */
     public function authorize(): bool
     {
-        return true;
+        return (bool) $this->user('api')?->can('create', User::class);
     }
 
     /**
