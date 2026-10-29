@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\CompanyFiscalController;
 use App\Http\Controllers\Api\EmployeController;
 use App\Http\Controllers\Api\InvoiceArtifactController;
 use App\Http\Controllers\Api\InvoiceBillingController;
@@ -125,6 +126,10 @@ Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::post('/quotes/{quote}/items', [QuoteItemController::class, 'store']);
     Route::put('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'update']);
     Route::delete('/quotes/{quote}/items/{item}', [QuoteItemController::class, 'destroy']);
+
+    // Datos fiscales de la empresa (Fase 6.27b): siempre la del usuario autenticado
+    Route::get('/company/fiscal', [CompanyFiscalController::class, 'show']);
+    Route::put('/company/fiscal', [CompanyFiscalController::class, 'update'])->middleware('throttle:company-fiscal');
 
     // Invoices (Fase 5 — dominio interno de facturas, sin Facturapi/CFDI)
     Route::get('/invoices', [InvoiceController::class, 'index']);

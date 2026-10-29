@@ -163,6 +163,14 @@ class SaleBillingReadinessService
         foreach ($this->satValidator->clientIssues($client->only(['rfc', 'codigo_postal', 'regimen_fiscal', 'uso_cfdi'])) as $issue) {
             $errors[] = $this->error($issue['code'], "client.{$issue['field']}", $issue['message']);
         }
+
+        // Fase 6.27b: con RFC genérico, el C.P. del cliente es el lugar de
+        // expedición (el C.P. de la empresa).
+        $issuerPostalCode = Company::query()->whereKey($sale->company_id)->value('postal_code');
+
+        if ($this->satValidator->genericClientPostalCodeMismatch($client->rfc, $client->codigo_postal, $issuerPostalCode)) {
+            $errors[] = $this->error('CLIENT_GENERIC_POSTAL_CODE_MISMATCH', 'client.codigo_postal', "Con un RFC genérico el código postal del cliente debe ser el lugar de expedición ({$issuerPostalCode}).");
+        }
     }
 
     /**

@@ -4,8 +4,11 @@ namespace App\Services\Billing;
 
 use App\Enums\TaxType;
 use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
+use App\Models\Company;
+use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Services\Sat\SatFiscalValidator;
 use Illuminate\Support\Collection;
 
 /**
@@ -34,6 +37,11 @@ class InvoicePacReadinessService
 
     private const VALID_PAYMENT_METHODS = ['PUE', 'PPD'];
 
+    public function __construct(
+        private readonly CompanyBillingReadinessService $companyReadiness = new CompanyBillingReadinessService,
+        private readonly SatFiscalValidator $satValidator = new SatFiscalValidator,
+    ) {}
+
     /**
      * @return array{ready: bool, errors: array<int, array{code: string, field: string, message: string}>}
      */
@@ -43,6 +51,7 @@ class InvoicePacReadinessService
 
         $invoice->loadMissing('items');
 
+        $this->checkEmisor($invoice, $errors);
         $this->checkReceptor($invoice, $errors);
         $this->checkEmision($invoice, $errors);
         $this->checkItems($invoice->items, $errors);
@@ -70,6 +79,29 @@ class InvoicePacReadinessService
             );
 
             throw new InvoiceFiscalSnapshotIncompleteException($invoice->id, $missing);
+        }
+    }
+
+    /**
+     * Fase 6.27b: el emisor es la empresa de la factura; Facturapi timbra
+     * con los datos de su organización, así que deben coincidir.
+     *
+     * @param  array<int, array{code: string, field: string, message: string}>  $errors
+     */
+    private function checkEmisor(Invoice $invoice, array &$errors): void
+    {
+        $company = Company::query()->find($invoice->company_id);
+
+        if ($company === null) {
+            return;
+        }
+
+        $organization = FacturapiOrganization::query()->where('company_id', $company->id)->first();
+
+        array_push($errors, ...$this->companyReadiness->issuerErrors($company, $organization));
+
+        if ($this->satValidator->genericClientPostalCodeMismatch($invoice->client_rfc, $invoice->client_codigo_postal, $company->postal_code)) {
+            $errors[] = $this->error('CLIENT_GENERIC_POSTAL_CODE_MISMATCH', 'client_codigo_postal', "Con un RFC genérico el código postal del cliente debe ser el lugar de expedición ({$company->postal_code}).");
         }
     }
 

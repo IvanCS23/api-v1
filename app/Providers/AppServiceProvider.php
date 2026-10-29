@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Models\Client;
+use App\Models\Company;
 use App\Models\Employe;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
@@ -13,6 +14,7 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\User;
 use App\Policies\ClientPolicy;
+use App\Policies\CompanyPolicy;
 use App\Policies\EmployePolicy;
 use App\Policies\InvoiceItemPolicy;
 use App\Policies\InvoicePolicy;
@@ -75,6 +77,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Invoice::class, InvoicePolicy::class);
         Gate::policy(InvoiceItem::class, InvoiceItemPolicy::class);
         Gate::policy(User::class, UserPolicy::class);
+        Gate::policy(Company::class, CompanyPolicy::class);
     }
 
     /** Limita acciones PAC por usuario y factura, además del throttle API general. */
@@ -85,6 +88,11 @@ class AppServiceProvider extends ServiceProvider
             $invoice = (string) $request->route('invoice');
 
             return Limit::perMinute(10)->by($actor.'|'.$invoice);
+        });
+
+        // Fase 6.27b: cada guardado de datos fiscales llama a Facturapi.
+        RateLimiter::for('company-fiscal', function (Request $request): Limit {
+            return Limit::perMinute(10)->by('company-fiscal|'.($request->user()?->getAuthIdentifier() ?? $request->ip()));
         });
     }
 

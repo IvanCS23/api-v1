@@ -41,6 +41,12 @@ final class SatFiscalValidator
 
     public const TAX_OBJECTS_WITHOUT_TAX = ['01', '03', '04'];
 
+    /**
+     * Régimen societario al final de la razón social: S.A., S.A. de C.V.,
+     * S.A.P.I. de C.V., S. de R.L. (de C.V.), S.C., A.C., S.A.S.
+     */
+    private const CORPORATE_REGIME_SUFFIX = '/(?:^|[\s,])(?:S\.?\s*A\.?\s*P\.?\s*I\.?|S\.?\s*A\.?\s*S\.?|S\.?\s*A\.?|S\.?\s*DE\s+R\.?\s*L\.?|S\.?\s*C\.?|A\.?\s*C\.?)(?:\s*DE\s+C\.?\s*V\.?)?\s*$/iu';
+
     /** Moral: 3 letras; física: 4. Luego AAMMDD y homoclave de 3. */
     private const RFC_PATTERN = '/^([A-ZÑ&]{3,4})(\d{2})(\d{2})(\d{2})([A-Z\d]{3})$/u';
 
@@ -133,6 +139,72 @@ final class SatFiscalValidator
         }
 
         return $issues;
+    }
+
+    /**
+     * Fase 6.27b — Datos fiscales del emisor (la empresa). A diferencia del
+     * cliente, todos son obligatorios, el RFC no puede ser genérico y la
+     * razón social va sin régimen societario (CFDI 4.0). La existencia del
+     * C.P. la valida Facturapi: no hay catálogo local de c_CodigoPostal.
+     *
+     * @param  array{rfc?: ?string, legal_name?: ?string, fiscal_regime?: ?string, postal_code?: ?string}  $issuer
+     * @return list<array{code: string, field: string, message: string}>
+     */
+    public function issuerIssues(array $issuer): array
+    {
+        $rfc = self::normalizeRfc($issuer['rfc'] ?? null) ?? '';
+        $legalName = trim((string) ($issuer['legal_name'] ?? ''));
+        $regime = trim((string) ($issuer['fiscal_regime'] ?? ''));
+        $postalCode = trim((string) ($issuer['postal_code'] ?? ''));
+        $issues = [];
+        $person = null;
+
+        if ($rfc === '') {
+            $issues[] = $this->issue('COMPANY_RFC_MISSING', 'rfc', 'Falta el RFC de la empresa.');
+        } elseif ($this->isGenericRfc($rfc)) {
+            $issues[] = $this->issue('COMPANY_RFC_GENERIC', 'rfc', 'Un RFC genérico (XAXX010101000 o XEXX010101000) no puede emitir facturas.');
+        } elseif (($person = $this->personType($rfc)) === null) {
+            $issues[] = $this->issue('COMPANY_RFC_INVALID', 'rfc', 'El RFC no tiene un formato válido: 12 caracteres para persona moral o 13 para persona física (letras, fecha AAMMDD y homoclave).');
+        }
+
+        if ($legalName === '') {
+            $issues[] = $this->issue('COMPANY_LEGAL_NAME_MISSING', 'legal_name', 'Falta la razón social de la empresa.');
+        } elseif (preg_match(self::CORPORATE_REGIME_SUFFIX, $legalName) === 1) {
+            $issues[] = $this->issue('COMPANY_LEGAL_NAME_INVALID', 'legal_name', 'Escribe la razón social sin el régimen societario (por ejemplo, sin "S.A. de C.V."), como aparece en la constancia de situación fiscal.');
+        }
+
+        $regimes = SatCatalog::taxRegimes();
+
+        if ($regime === '') {
+            $issues[] = $this->issue('COMPANY_FISCAL_REGIME_MISSING', 'fiscal_regime', 'Falta el régimen fiscal de la empresa.');
+        } elseif (! isset($regimes[$regime])) {
+            $issues[] = $this->issue('COMPANY_FISCAL_REGIME_INVALID', 'fiscal_regime', "El régimen fiscal {$regime} no existe en el catálogo del SAT.");
+        } elseif ($person !== null && ! $regimes[$regime][$person === self::PERSON_MORAL ? 'moral' : 'physical']) {
+            $issues[] = $this->issue('COMPANY_FISCAL_REGIME_INVALID', 'fiscal_regime', "El régimen fiscal {$regime} no aplica a una persona ".$this->personLabel($person).'.');
+        }
+
+        if ($postalCode === '') {
+            $issues[] = $this->issue('COMPANY_POSTAL_CODE_MISSING', 'postal_code', 'Falta el código postal del domicilio fiscal (lugar de expedición).');
+        } elseif (! preg_match('/^\d{5}$/', $postalCode)) {
+            $issues[] = $this->issue('COMPANY_POSTAL_CODE_INVALID', 'postal_code', 'El código postal debe tener 5 dígitos.');
+        }
+
+        return $issues;
+    }
+
+    /**
+     * Fase 6.27b — Con un RFC genérico (público en general o extranjero) el
+     * SAT exige que el C.P. del receptor sea el lugar de expedición, es
+     * decir, el C.P. de la empresa. Sin C.P. de la empresa no se compara:
+     * eso ya lo reporta issuerIssues.
+     */
+    public function genericClientPostalCodeMismatch(?string $clientRfc, ?string $clientPostalCode, ?string $issuerPostalCode): bool
+    {
+        $issuerPostalCode = trim((string) $issuerPostalCode);
+
+        return $this->isGenericRfc($clientRfc)
+            && $issuerPostalCode !== ''
+            && trim((string) $clientPostalCode) !== $issuerPostalCode;
     }
 
     /**

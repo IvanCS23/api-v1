@@ -3,6 +3,9 @@
 namespace App\Services\Billing;
 
 use App\Models\Company;
+use App\Models\FacturapiOrganization;
+use App\Services\Sat\SatFiscalValidator;
+use App\Support\Billing\PacCredentialGuard;
 
 /**
  * Evalúa si una Company tiene la configuración fiscal mínima para que
@@ -29,6 +32,10 @@ use App\Models\Company;
 class CompanyBillingReadinessService
 {
     private const VALID_PAYMENT_METHODS = ['PUE', 'PPD'];
+
+    public function __construct(
+        private readonly SatFiscalValidator $satValidator = new SatFiscalValidator,
+    ) {}
 
     /**
      * @return array{ready: bool, errors: array<int, array{code: string, field: string, message: string}>}
@@ -64,6 +71,55 @@ class CompanyBillingReadinessService
             'ready' => $errors === [],
             'errors' => $errors,
         ];
+    }
+
+    /**
+     * Fase 6.27b — Emisor listo para timbrar, sin consultar al PAC (usa la
+     * copia local de la organización). Lo aplica InvoicePacReadinessService
+     * antes de emitir:
+     *
+     * - COMPANY_FISCAL_DATA_INCOMPLETE: datos fiscales faltantes o inválidos
+     *   (SatFiscalValidator::issuerIssues).
+     * - COMPANY_RFC_CSD_MISMATCH: el RFC de la empresa no es el del CSD de su
+     *   organización (Facturapi timbra con el del CSD).
+     * - COMPANY_CSD_MISSING: sin CSD fuera del modo test (en test Facturapi
+     *   timbra sin él).
+     *
+     * La organización faltante no se reporta aquí: la rechaza
+     * PacCredentialGuard (pac_organization_missing).
+     *
+     * @return list<array{code: string, field: string, message: string}>
+     */
+    public function issuerErrors(Company $company, ?FacturapiOrganization $organization): array
+    {
+        $errors = [];
+        $issues = $this->satValidator->issuerIssues($company->only(['rfc', 'legal_name', 'fiscal_regime', 'postal_code']));
+
+        if ($issues !== []) {
+            $errors[] = $this->error(
+                'COMPANY_FISCAL_DATA_INCOMPLETE',
+                'company',
+                'Los datos fiscales de la empresa están incompletos o no son válidos: '
+                    .implode(' ', array_column($issues, 'message'))
+                    .' Corrígelos en Configuración > Datos fiscales.',
+            );
+        }
+
+        $csdRfc = $organization?->legal_tax_id;
+
+        if (filled($csdRfc) && SatFiscalValidator::normalizeRfc($company->rfc) !== SatFiscalValidator::normalizeRfc($csdRfc)) {
+            $errors[] = $this->error(
+                'COMPANY_RFC_CSD_MISMATCH',
+                'company.rfc',
+                "El RFC de la empresa ({$company->rfc}) no es el del CSD de su organización en Facturapi ({$csdRfc}).",
+            );
+        }
+
+        if (config('billing.pac_mode') !== PacCredentialGuard::MODE_TEST && ! ($organization?->has_certificate ?? false)) {
+            $errors[] = $this->error('COMPANY_CSD_MISSING', 'company.csd', 'La organización de la empresa no tiene CSD cargado.');
+        }
+
+        return $errors;
     }
 
     /**
