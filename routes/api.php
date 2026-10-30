@@ -144,6 +144,9 @@ Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
         ->whereNumber('invoice')->middleware('throttle:pac-actions');
     Route::post('/invoices/{invoice}/operations/cancel', [InvoiceBusinessActionController::class, 'cancel'])
         ->whereNumber('invoice')->middleware('throttle:pac-actions');
+    // Fase 6.29: una factura issued sin CFDI regresa a ready.
+    Route::post('/invoices/{invoice}/operations/revert-issue', [InvoiceBusinessActionController::class, 'revertIssue'])
+        ->whereNumber('invoice')->middleware('throttle:pac-actions');
     Route::get('/invoices/{invoice}/cfdi/xml', [InvoiceArtifactController::class, 'cfdiXml'])
         ->whereNumber('invoice');
     Route::get('/invoices/{invoice}/cfdi/pdf', [InvoiceArtifactController::class, 'cfdiPdf'])

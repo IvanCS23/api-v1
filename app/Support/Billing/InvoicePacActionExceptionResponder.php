@@ -29,6 +29,7 @@ use App\Exceptions\InvoiceAlreadyIssuedException;
 use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
+use App\Exceptions\InvoiceCannotBeRevertedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
@@ -102,6 +103,11 @@ class InvoicePacActionExceptionResponder
                 409,
                 'INVOICE_NOT_ELIGIBLE_FOR_PAC',
                 'La factura debe estar emitida internamente antes de solicitar el CFDI.',
+            ],
+            $error instanceof InvoiceCannotBeRevertedException => [
+                409,
+                'INVOICE_CANNOT_BE_REVERTED',
+                'La factura no puede regresar a "Lista para emitir": ya tiene CFDI, una operación fiscal en curso o su borrador remoto ya no es un borrador. Actualiza el estado y revisa el historial fiscal.',
             ],
             $error instanceof InvoiceAlreadyIssuedException => [
                 409,
