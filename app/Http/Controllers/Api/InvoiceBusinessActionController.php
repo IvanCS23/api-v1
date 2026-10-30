@@ -33,7 +33,7 @@ class InvoiceBusinessActionController extends Controller
         try {
             $updated = $this->issuance->issue($model);
         } catch (Throwable $error) {
-            return $this->expectedErrorOrRethrow($error);
+            return $this->expectedErrorOrRethrow($error, $model, 'issueBusiness');
         }
 
         return new InvoiceBillingResource($this->snapshots->load($updated));
@@ -52,7 +52,7 @@ class InvoiceBusinessActionController extends Controller
                 $request->validated('substitution_uuid'),
             );
         } catch (Throwable $error) {
-            return $this->expectedErrorOrRethrow($error);
+            return $this->expectedErrorOrRethrow($error, $model, 'cancelBusiness');
         }
 
         $resource = new InvoiceBillingResource($this->snapshots->load($updated));
@@ -62,9 +62,9 @@ class InvoiceBusinessActionController extends Controller
             : $resource->response()->setStatusCode(202);
     }
 
-    private function expectedErrorOrRethrow(Throwable $error): JsonResponse
+    private function expectedErrorOrRethrow(Throwable $error, Invoice $invoice, string $action): JsonResponse
     {
-        $response = $this->errors->respond($error);
+        $response = $this->errors->respond($error, $invoice, $action);
 
         if ($response !== null) {
             return $response;

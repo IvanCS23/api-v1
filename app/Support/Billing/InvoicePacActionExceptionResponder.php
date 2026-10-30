@@ -31,6 +31,7 @@ use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
+use App\Models\Invoice;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use RuntimeException;
@@ -39,8 +40,19 @@ use Throwable;
 /** Traduce únicamente errores esperados a un contrato público estable. */
 class InvoicePacActionExceptionResponder
 {
-    public function respond(Throwable $error): ?JsonResponse
+    /**
+     * @param  Invoice|null  $invoice  Fase 6.29: contexto del log de rechazos del guard.
+     * @param  string|null  $action  Fase 6.29: operación solicitada (p. ej. issueBusiness).
+     */
+    public function respond(Throwable $error, ?Invoice $invoice = null, ?string $action = null): ?JsonResponse
     {
+        PacGuardRejectionLog::record($error, [
+            'company_id' => $invoice?->company_id,
+            'invoice_id' => $invoice?->id,
+            'action' => $action,
+            'user_id' => auth('api')->id(),
+        ]);
+
         if ($error instanceof InvoiceNotReadyForPacException) {
             return response()->json([
                 'message' => 'La factura no está lista para emisión fiscal.',

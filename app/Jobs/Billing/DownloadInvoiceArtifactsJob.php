@@ -5,6 +5,7 @@ namespace App\Jobs\Billing;
 use App\Models\Invoice;
 use App\Services\Billing\DownloadInvoiceArtifactsService;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
+use App\Support\Billing\PacGuardRejectionLog;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -67,6 +68,12 @@ class DownloadInvoiceArtifactsJob implements ShouldBeUnique, ShouldQueue
             try {
                 $artifacts->download($invoice);
             } catch (Throwable $e) {
+                PacGuardRejectionLog::record($e, [
+                    'company_id' => $this->companyId,
+                    'invoice_id' => $this->invoiceId,
+                    'action' => 'artifacts_auto_download',
+                ]);
+
                 Log::warning('billing.invoice.artifacts_auto_download_failed', [
                     'invoice_id' => $this->invoiceId,
                     'company_id' => $this->companyId,

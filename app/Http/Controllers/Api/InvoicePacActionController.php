@@ -79,7 +79,7 @@ class InvoicePacActionController extends Controller
             PacOrganizationAccess::assertAccessible($model);
             $action($model);
         } catch (Throwable $error) {
-            $response = $this->errors->respond($error);
+            $response = $this->errors->respond($error, $model, $ability);
 
             if ($response !== null) {
                 return $response;
