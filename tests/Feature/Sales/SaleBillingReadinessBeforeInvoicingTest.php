@@ -69,9 +69,21 @@ test('la combinación efectiva incompatible se reporta con su código', function
     expect(phase625Codes($user, $created))->toContain($code);
 })->with([
     // La venta sólo trae el método; la forma sale de la empresa.
-    'PPD con forma 03 de la empresa' => [['default_payment_form' => '03'], ['payment_method' => 'PPD'], 'SALE_PPD_REQUIRES_FORM_99'],
     'PUE con forma 99 de la empresa' => [['default_payment_form' => '99'], ['payment_method' => 'PUE'], 'SALE_PUE_FORBIDS_FORM_99'],
+    // Fase 6.28: la venta sin método hereda el PPD de la empresa.
+    'PPD heredado de la empresa' => [['default_payment_form' => '99', 'default_payment_method' => 'PPD'], [], 'SALE_PPD_NOT_AVAILABLE'],
 ]);
+
+test('Fase 6.28: una venta PPD guardada antes del bloqueo reporta sólo SALE_PPD_NOT_AVAILABLE', function () {
+    [, $user, $sale] = phase625DraftSale(sale: ['payment_form' => '03', 'payment_method' => 'PUE']);
+    $sale->forceFill(['payment_form' => '03', 'payment_method' => 'PPD'])->save();
+
+    $errors = collect($this->actingAs($user, 'api')->getJson("/api/sales/{$sale->id}/billing-readiness")->assertOk()->json('errors'));
+
+    expect($errors->pluck('code')->all())->toContain('SALE_PPD_NOT_AVAILABLE')
+        ->not->toContain('SALE_PPD_REQUIRES_FORM_99')
+        ->and($errors->firstWhere('code', 'SALE_PPD_NOT_AVAILABLE')['message'])->toContain('complemento de pago');
+});
 
 test('una línea con retención no se puede facturar todavía', function () {
     $retention = TaxRate::create([

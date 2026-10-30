@@ -9,6 +9,7 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\Sat\SatFiscalValidator;
+use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Collection;
 
 /**
@@ -140,6 +141,9 @@ class InvoicePacReadinessService
 
         if ($invoice->payment_method !== null && ! in_array($invoice->payment_method, self::VALID_PAYMENT_METHODS, true)) {
             $errors[] = $this->error('INVOICE_PAYMENT_METHOD_INVALID', 'payment_method', "payment_method tiene un valor inválido ('{$invoice->payment_method}'); debe ser 'PUE' o 'PPD' cuando se envía.");
+        } elseif (! SalePaymentRules::isMethodAvailable($invoice->payment_method)) {
+            // Fase 6.28: sin complemento de pago no se timbra un CFDI PPD.
+            $errors[] = $this->error('INVOICE_PPD_NOT_AVAILABLE', 'payment_method', SalePaymentRules::PPD_NOT_AVAILABLE_MESSAGE);
         }
 
         if (blank($invoice->currency) || ! preg_match('/^[A-Z]{3}$/', (string) $invoice->currency)) {
