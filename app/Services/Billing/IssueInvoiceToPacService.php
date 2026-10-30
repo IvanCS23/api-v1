@@ -29,9 +29,15 @@ class IssueInvoiceToPacService
         private readonly UpdatePacDraftInvoiceService $updateDraft,
         private readonly StampPacDraftInvoiceService $stampDraft,
         private readonly ReconcileInvoiceWithPacService $reconcile,
+        private readonly CfdiFolioAvailability $folioAvailability,
     ) {}
 
-    public function issue(Invoice $invoice): Invoice
+    /**
+     * @param  bool  $folioChecked  Fase 6.28: true cuando el llamador (el
+     *                              orquestador) ya consultó el folio antes de
+     *                              la transición ERP; evita repetir la consulta.
+     */
+    public function issue(Invoice $invoice, bool $folioChecked = false): Invoice
     {
         $current = $this->requireCurrentTenantInvoice($invoice);
 
@@ -42,6 +48,10 @@ class IssueInvoiceToPacService
         $this->assertEligible($current);
         $this->assertNoActiveOrAmbiguousIssuance($current);
         $this->assertReady($current);
+
+        if (! $folioChecked) {
+            $this->folioAvailability->assertAvailable($current);
+        }
 
         try {
             $draft = $current->pac_draft_external_id === null
