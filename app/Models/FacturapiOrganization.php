@@ -25,6 +25,7 @@ class FacturapiOrganization extends Model
     protected $fillable = [
         'organization_id',
         'legal_name',
+        'legal_trade_name',
         'legal_tax_id',
         'legal_tax_system',
         'legal_zip',
@@ -32,6 +33,7 @@ class FacturapiOrganization extends Model
         'certificate_serial_number',
         'certificate_expires_at',
         'certificate_updated_at',
+        'has_logo',
         'is_production_ready',
         'pending_steps',
         'snapshot_at',
@@ -47,6 +49,7 @@ class FacturapiOrganization extends Model
         'has_certificate' => 'boolean',
         'certificate_expires_at' => 'immutable_datetime',
         'certificate_updated_at' => 'immutable_datetime',
+        'has_logo' => 'boolean',
         'is_production_ready' => 'boolean',
         'pending_steps' => 'array',
         'snapshot_at' => 'immutable_datetime',

@@ -21,7 +21,8 @@ function phase628SearchUser(): array
 
 function phase628InvoiceWithCfdi(Company $company, string $folio, ?string $series, ?int $number): Invoice
 {
-    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'folio' => $folio]);
+    // Nombre y RFC fijos: los aleatorios de la factory pueden contener los dígitos buscados.
+    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'folio' => $folio, 'client_name' => 'Cliente sin dígitos', 'client_rfc' => 'AAA010101AAA']);
     DB::table('invoices')->where('id', $invoice->id)->update(['cfdi_series' => $series, 'cfdi_folio_number' => $number]);
 
     return $invoice;

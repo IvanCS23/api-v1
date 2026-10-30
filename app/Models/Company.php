@@ -82,6 +82,7 @@ class Company extends Model
             'fiscal_provider' => CompanyFiscalProvider::class,
             'integration_status' => CompanyIntegrationStatus::class,
             'sandbox' => 'bool',
+            'logo_updated_at' => 'immutable_datetime',
             'decimal_precision' => 'int',
         ];
     }

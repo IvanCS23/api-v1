@@ -21,8 +21,8 @@ use SensitiveParameter;
  *
  * Lista cerrada de operaciones (una prueba por reflexión falla si aparece
  * otro método público): consultar, buscar por nombre, crear (sólo la usa
- * el comando del operador), editar datos fiscales, subir el CSD y obtener
- * la llave Test. Nunca renueva llaves (`PUT /apikeys/test` invalidaría la
+ * el comando del operador), editar datos fiscales, subir el CSD, subir el
+ * logotipo (Fase 6.29) y obtener la llave Test. Nunca renueva llaves (`PUT /apikeys/test` invalidaría la
  * actual), nunca usa llaves Live, nunca borra organizaciones ni el CSD.
  *
  * Sólo se usa en peticiones síncronas de un Admin y en comandos, nunca en
@@ -101,6 +101,20 @@ final class FacturapiOrganizationClient
             ->put('/organizations/'.$this->id($organizationId).'/certificate', ['password' => $password]);
 
         return FacturapiOrganizationSnapshot::fromResponse($this->json($response, [$password]));
+    }
+
+    /**
+     * Fase 6.29: PUT /organizations/{id}/logo (multipart, campo `file`). JPG o
+     * PNG de hasta 500 KB; reemplaza el logotipo anterior, que Facturapi
+     * imprime en el PDF y los correos. No se reintenta.
+     */
+    public function uploadLogo(string $organizationId, string $contents, string $filename): FacturapiOrganizationSnapshot
+    {
+        $response = $this->client(retry: false, json: false)
+            ->attach('file', $contents, $filename)
+            ->put('/organizations/'.$this->id($organizationId).'/logo');
+
+        return FacturapiOrganizationSnapshot::fromResponse($this->json($response));
     }
 
     /**

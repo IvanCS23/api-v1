@@ -59,6 +59,7 @@ test('la lista de operaciones públicas es cerrada', function () {
         'testApiKey',
         'updateLegal',
         'uploadCertificate',
+        'uploadLogo',
     ]);
 });
 

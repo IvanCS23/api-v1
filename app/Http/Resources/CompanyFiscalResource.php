@@ -49,8 +49,16 @@ class CompanyFiscalResource extends JsonResource
             ],
             'issues' => $validator->issuerIssues($this->resource->only(['rfc', 'legal_name', 'fiscal_regime', 'postal_code'])),
             'can_edit' => (bool) $request->user('api')?->can('updateFiscal', $this->resource),
+            // Fase 6.29: copia privada local del logotipo subido (vista previa en GET /api/company/logo).
+            'logo' => [
+                'available' => filled($this->logo),
+                'updated_at' => $this->logo_updated_at?->toIso8601String(),
+            ],
             'organization' => $organization === null ? null : [
                 'legal_name' => $organization->legal_name,
+                // Fase 6.29: lo que imprime el PDF: nombre comercial y si hay logotipo.
+                'trade_name' => $organization->legal_trade_name,
+                'has_logo' => $organization->has_logo,
                 'legal_tax_id' => $organization->legal_tax_id,
                 'legal_tax_system' => $organization->legal_tax_system,
                 'legal_zip' => $organization->legal_zip,

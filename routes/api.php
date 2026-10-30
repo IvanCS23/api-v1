@@ -4,6 +4,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\CompanyCsdController;
 use App\Http\Controllers\Api\CompanyFiscalController;
+use App\Http\Controllers\Api\CompanyLogoController;
 use App\Http\Controllers\Api\EmployeController;
 use App\Http\Controllers\Api\InvoiceArtifactController;
 use App\Http\Controllers\Api\InvoiceBillingController;
@@ -132,6 +133,9 @@ Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::get('/company/fiscal', [CompanyFiscalController::class, 'show']);
     Route::put('/company/fiscal', [CompanyFiscalController::class, 'update'])->middleware('throttle:company-fiscal');
     Route::post('/company/csd', [CompanyCsdController::class, 'store'])->middleware('throttle:company-csd');
+    // Fase 6.29: logotipo del PDF (Facturapi) y su copia privada.
+    Route::get('/company/logo', [CompanyLogoController::class, 'show']);
+    Route::post('/company/logo', [CompanyLogoController::class, 'store'])->middleware('throttle:company-fiscal');
 
     // Invoices (Fase 5 — dominio interno de facturas, sin Facturapi/CFDI)
     Route::get('/invoices', [InvoiceController::class, 'index']);
