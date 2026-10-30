@@ -4,11 +4,16 @@ namespace App\Providers;
 
 use App\Actions\Fortify\CreateNewUser;
 use App\Actions\Fortify\ResetUserPassword;
+use App\Enums\UserStatus;
+use App\Http\Middleware\EnsureUserIsActive;
+use App\Models\User;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
@@ -40,6 +45,24 @@ class FortifyServiceProvider extends ServiceProvider
     {
         Fortify::resetUserPasswordsUsing(ResetUserPassword::class);
         Fortify::createUsersUsing(CreateNewUser::class);
+
+        // Fase 6.29: el login web rechaza a un usuario que no está activo,
+        // como POST /api/login. El estado sólo se revela con la contraseña
+        // correcta; si no, Fortify responde su error genérico. Con 2FA el
+        // flujo también pasa por aquí, antes de pedir el código.
+        Fortify::authenticateUsing(function (Request $request): ?User {
+            $user = User::query()->where(Fortify::username(), (string) $request->input(Fortify::username()))->first();
+
+            if ($user === null || ! Hash::check((string) $request->input('password'), $user->password)) {
+                return null;
+            }
+
+            if ($user->status !== UserStatus::Active) {
+                throw ValidationException::withMessages([Fortify::username() => [EnsureUserIsActive::MESSAGE]]);
+            }
+
+            return $user;
+        });
     }
 
     /**
