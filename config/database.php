@@ -59,6 +59,10 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // Fase 6.29: la sesión en UTC, igual que app.timezone; sin esto usa la
+            // zona del servidor y las columnas TIMESTAMP se guardan corridas
+            // (ver DEPLOYMENT.md y la migración normalize_timestamps_to_utc).
+            'timezone' => env('DB_TIMEZONE', '+00:00'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
@@ -79,6 +83,10 @@ return [
             'prefix_indexes' => true,
             'strict' => true,
             'engine' => null,
+            // Fase 6.29: la sesión en UTC, igual que app.timezone; sin esto usa la
+            // zona del servidor y las columnas TIMESTAMP se guardan corridas
+            // (ver DEPLOYMENT.md y la migración normalize_timestamps_to_utc).
+            'timezone' => env('DB_TIMEZONE', '+00:00'),
             'options' => extension_loaded('pdo_mysql') ? array_filter([
                 (PHP_VERSION_ID >= 80500 ? Mysql::ATTR_SSL_CA : PDO::MYSQL_ATTR_SSL_CA) => env('MYSQL_ATTR_SSL_CA'),
             ]) : [],
