@@ -302,7 +302,7 @@ Estado de la BD local de desarrollo:
 - Migraciones de la 6.21, 6.22 y 6.25 (`cfdi_artifacts_started_at`, `cancellation_receipt_started_at`, `add_payment_to_sales_table`, `scope_invoice_sale_uniqueness_to_active_invoices`) aplicadas.
 - Migraciones de la 6.26 aplicadas (`create_sat_product_keys_table`, `create_sat_unit_keys_table`, `drop_unique_clave_producto_on_products_table`, `add_tax_rate_id_to_products_table`) y catálogos importados (52 513 / 2 418). Cada ambiente nuevo debe correr `php artisan sat:import-catalogs`.
 - Migraciones de la 6.27 aplicadas. Empresa 1 vinculada con la organización `6ad00a7079761a6ddec6026a` (llave `sk_test_…hMMB`); #1–#3 archivadas; `billing:health`: 17 facturas `valid`. `billing:pac-check` falla por los datos de la empresa 1, que difieren de Facturapi y se corrigen a mano: RFC `XAXX010101000` frente a `XIA190128J61`, C.P. vacío frente a `06010` y razón social "Mi Empresa" frente a "TECNOLOGIAS S.A". La organización no tiene CSD (en TEST timbra igual).
-- Desde la 6.27b la empresa 1 no puede emitir hasta corregir sus datos fiscales (readiness del emisor: RFC genérico, sin C.P., RFC distinto del de Facturapi). Se corrigen en Datos fiscales, que hace un `PUT /legal` real en Facturapi TEST: requiere autorización explícita. La migración `create_facturapi_organization_audits_table` (6.27b) no está aplicada en la BD local; sin ella fallan los guardados de datos fiscales, CSD y los comandos que auditan.
+- 6.27b, aplicado con autorización el 2026-10-29: migración `create_facturapi_organization_audits_table` (lote 36) y `PUT /legal` real de la empresa 1 como el usuario 2 (razón social XENON INDUSTRIAL ARTICLES, RFC XIA190128J61, régimen 601, C.P. 06010; nombre comercial "Mi Empresa"; auditoría #1). `billing:pac-check --company=1`: WARN, sólo por el CSD ausente (en TEST no bloquea); la cuenta de la User Key es dueña de la organización. La empresa 1 vuelve a emitir: venta #29 (VTA-00000021) → factura #20 (FAC-00000019), `issued`/`valid` en TEST. CSD sin cargar por decisión del usuario.
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
@@ -317,6 +317,7 @@ Deuda conocida:
 
 Hallazgos de producto pendientes (verificados en el código):
 - 17 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
+- Folio del CFDI: el sistema identifica la factura con su folio interno (`FAC-00000019`), pero el CFDI lleva la serie y el folio que asigna Facturapi (`F` 10 en la factura #20; la #19, ya cancelada, consumió el 9). `FacturapiProvider` no envía `series` ni `folio_number` (decisión de la 6.2.1/6.2.4), el sistema no los guarda en columnas (sólo quedan dentro de `pac_response` cifrado) y ni la API ni el frontend los muestran, así que el folio de la pantalla no coincide con el del XML/PDF que recibe el cliente. `companies.default_cfdi_series` existe y nada la lee. Decidir entre (a) guardar y mostrar la serie y el folio de Facturapi junto al folio interno, o (b) enviar la serie y un consecutivo propios a Facturapi, que exige un contador por serie sin huecos ni colisiones, aun con borradores y cancelaciones.
 - El login web de Fortify (sesión) no revisa el estado del usuario: uno inactivo inicia sesión, pero su primera petición autenticada recibe 403 y la sesión se cierra. `POST /api/login` sí lo rechaza.
 - El C.P. del cliente con RFC genérico sólo se valida en el readiness de venta y de emisión; el formulario de Clientes no lo avisa (no conoce el C.P. de la empresa y Sales/Employee no pueden leer los datos fiscales).
 - La regla de razón social sin régimen societario es un patrón (S.A., S.A. de C.V., S. de R.L., S.C., A.C., S.A.S., S.A.P.I.): puede tener falsos positivos con nombres que terminen así.
@@ -380,7 +381,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada y verificada es la FASE 6.27b (ver sección 7). Pendiente de autorización: las llamadas reales a Facturapi (`pac-check` con la User Key, `PUT /legal` de la empresa 1 y, si aplica, un CSD de prueba del SAT) y aplicar en la BD local la migración de auditoría.
+La última fase completada y verificada es la FASE 6.27b (ver sección 7), incluidas las llamadas reales autorizadas (`pac-check` con la User Key y `PUT /legal` de la empresa 1) y la emisión de prueba en TEST. La subida de un CSD de prueba del SAT quedó para después, por decisión del usuario.
 
 Hoja de ruta:
 - FASE 6.28 — Deprecación de endpoints legacy: rehacer lo reportado en la 6.17 (headers `Deprecation`, successor links y pruebas).
