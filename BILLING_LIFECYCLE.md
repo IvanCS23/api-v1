@@ -244,12 +244,18 @@ es `FAC-19`. `companies.default_cfdi_series` sigue sin uso.
 - **Duplicados.** Facturapi no documenta que rechace folios repetidos. El ERP
   los evita entre sus facturas (único `(company_id, folio)` y una
   organización por empresa); frente a lo emitido por fuera,
-  `CfdiFolioAvailability` consulta `GET /invoices?series=…&folio_number=…`
-  antes de crear o actualizar el borrador. Un comprobante de la organización
-  con ese folio que no sea de esta factura (por `external_id`) detiene todo
-  con `409 PAC_FOLIO_ALREADY_USED`, sin escribir nada en el PAC ni en la
-  factura. `billing.cfdi_folio_check` (`BILLING_CFDI_FOLIO_CHECK`, encendido
-  por defecto) lo controla; `phpunit.xml` lo apaga.
+  `CfdiFolioAvailability` consulta `GET /invoices?series=…&folio_number=…`.
+  La emisión empresarial (`OrchestrateInvoiceIssuanceService`) lo hace antes
+  de la transición ERP a `issued`, junto a los guards de configuración y de
+  organización; `/pac/issue` (`IssueInvoiceToPacService` usado directo, con
+  la factura ya `issued`), antes de crear o actualizar el borrador. Los
+  servicios de borrador no consultan. Un comprobante de la organización con
+  ese folio que no sea de esta factura (por `external_id`) responde
+  `409 PAC_FOLIO_ALREADY_USED` y la factura queda como estaba (en `ready`,
+  si venía de ahí), sin escribir nada en el PAC ni en la BD; una falla de la
+  consulta tampoco escribe nada. `billing.cfdi_folio_check`
+  (`BILLING_CFDI_FOLIO_CHECK`, encendido por defecto) lo controla;
+  `phpunit.xml` lo apaga.
 - **Lo timbrado.** `invoices.cfdi_series`/`cfdi_folio_number` los llena el
   modelo desde `pac_response` cada vez que se guarda una respuesta del PAC
   (una respuesta sin folio no borra lo guardado). Las facturas timbradas

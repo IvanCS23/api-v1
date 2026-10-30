@@ -63,7 +63,6 @@ class UpdatePacDraftInvoiceService
         private readonly SyncPacDraftInvoiceService $syncDraft,
         private readonly ReconcileInvoiceWithPacService $reconcile,
         private readonly InvoicePacAuditService $audit,
-        private readonly CfdiFolioAvailability $folioAvailability,
     ) {}
 
     public function update(Invoice $invoice): Invoice
@@ -91,10 +90,6 @@ class UpdatePacDraftInvoiceService
         $idempotencyKey = $synced->pac_draft_idempotency_key
             ?? PacIdentifiers::draftIdempotencyKey($synced->company_id, $synced->id);
         $ourExternalReference = PacIdentifiers::draftExternalId($synced->company_id, $synced->id);
-
-        // Fase 6.28: el PUT también manda la serie y el folio (un borrador
-        // anterior a la 6.28 los recibe aquí por primera vez).
-        $this->folioAvailability->assertAvailable($this->pacProvider($synced), $synced);
 
         $pacRequest = new PacInvoiceRequest(
             invoice: $synced,

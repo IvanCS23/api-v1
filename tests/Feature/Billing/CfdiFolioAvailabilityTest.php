@@ -1,24 +1,30 @@
 <?php
 
 use App\Enums\InvoiceStatus;
+use App\Enums\UserRole;
 use App\Exceptions\Billing\PacFolioAlreadyUsedException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\User;
+use App\Services\Billing\CfdiFolioAvailability;
 use App\Services\Billing\CreatePacDraftInvoiceService;
-use App\Services\Billing\UpdatePacDraftInvoiceService;
+use App\Services\Billing\IssueInvoiceToPacService;
 use App\Support\Billing\InvoicePacActionExceptionResponder;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Http\Client\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Http;
 
 /**
- * Fase 6.28: antes de mandar la serie y el folio en un borrador se consulta
- * GET /invoices?series=…&folio_number=…; un comprobante ajeno a la factura
- * con el mismo folio detiene todo sin escribir nada.
+ * Fase 6.28: antes de emitir se consulta GET /invoices?series=…&folio_number=…;
+ * un comprobante ajeno a la factura con el mismo folio detiene todo sin
+ * escribir nada. La emisión empresarial la hace antes de la transición ERP
+ * a `issued` (la factura queda en `ready`, sin cambios); `/pac/issue`, antes
+ * de crear o actualizar el borrador.
  */
 beforeEach(function () {
     facturapiOrganizationsFromConfigKey();
@@ -30,34 +36,53 @@ beforeEach(function () {
     Http::preventStrayRequests();
 });
 
-function phase628IssuedInvoice(string $folio = 'FAC-00000019', array $overrides = []): Invoice
+/** @return array{User, Invoice} */
+function phase628FolioInvoice(InvoiceStatus $status = InvoiceStatus::Ready, string $folio = 'FAC-00000019'): array
 {
     $company = Company::factory()->create();
-    $invoice = Invoice::factory()->create(array_merge(['company_id' => $company->id, 'folio' => $folio, 'status' => InvoiceStatus::Issued], $overrides));
-    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
+    $user = User::factory()->create(['company_id' => $company->id, 'role' => UserRole::Admin]);
+    $invoice = Invoice::factory()->create([
+        'company_id' => $company->id,
+        'folio' => $folio,
+        'status' => $status,
+        'subtotal' => 100,
+        'tax_total' => 0,
+        'total' => 100,
+    ]);
+    InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id, 'subtotal' => 100, 'total' => 100]);
     app(CurrentTenant::class)->set($company->id);
 
-    return $invoice->fresh(['items']);
+    return [$user, $invoice->fresh()];
 }
 
 /**
- * PAC simulado: la búsqueda por folio responde $matches; el resto, un
- * borrador listo.
+ * PAC simulado: la búsqueda por folio responde $matches (o el HTTP status
+ * dado); el resto es una emisión exitosa por borrador.
  *
- * @param  list<array<string, mixed>>|int  $matches  coincidencias, o un HTTP status de error
+ * @param  list<array<string, mixed>>|int  $matches
  */
 function phase628FakePac(Invoice $invoice, array|int $matches): void
 {
     $draftId = 'inv_dup_'.$invoice->id;
 
     Http::fake(function (Request $request) use ($matches, $draftId) {
+        $path = (string) parse_url($request->url(), PHP_URL_PATH);
+
         if ($request->method() === 'GET' && str_contains($request->url(), 'folio_number=')) {
             return is_int($matches)
                 ? Http::response(['message' => 'falla'], $matches)
                 : Http::response(['page' => 1, 'total_pages' => 1, 'total_results' => count($matches), 'data' => $matches]);
         }
 
-        return Http::response(['id' => $draftId, 'status' => 'draft', 'livemode' => false, 'is_ready_to_stamp' => true]);
+        if ($request->method() === 'POST' && $path === "/v2/invoices/{$draftId}/stamp") {
+            return Http::response([
+                'id' => $draftId, 'status' => 'valid', 'livemode' => false,
+                'uuid' => 'CCCCCCCC-3333-4444-8555-666666666666', 'stamp' => ['date' => '2026-10-30T10:00:00'],
+                'series' => 'FAC', 'folio_number' => 19,
+            ]);
+        }
+
+        return Http::response(['id' => $draftId, 'status' => 'draft', 'livemode' => false, 'is_ready_to_stamp' => true, 'total' => 100]);
     });
 }
 
@@ -68,11 +93,21 @@ function phase628FolioQueries(): int
 
 function phase628Writes(): int
 {
-    return collect(Http::recorded())->filter(fn (array $pair) => in_array($pair[0]->method(), ['POST', 'PUT'], true))->count();
+    return collect(Http::recorded())->filter(fn (array $pair) => in_array($pair[0]->method(), ['POST', 'PUT', 'DELETE'], true))->count();
 }
 
+/** @return array<string, mixed> */
+function phase628Row(Invoice $invoice): array
+{
+    return (array) DB::table('invoices')->where('id', $invoice->id)->first();
+}
+
+const PHASE628_FOREIGN = ['id' => 'inv_x', 'external_id' => null, 'status' => 'valid'];
+
+// ==================== Provider ====================
+
 test('el provider consulta por serie y folio exactos y normaliza las coincidencias', function () {
-    $invoice = phase628IssuedInvoice();
+    [, $invoice] = phase628FolioInvoice();
     phase628FakePac($invoice, [
         ['id' => 'inv_a', 'external_id' => 'otro-sistema-1', 'status' => 'valid'],
         ['id' => 'inv_b', 'status' => 'draft'],
@@ -96,83 +131,130 @@ test('una respuesta de búsqueda sin data es inesperada', function () {
         ->toThrow(PacUnexpectedResponseException::class);
 });
 
-test('sin coincidencias, el borrador se crea normalmente', function () {
-    $invoice = phase628IssuedInvoice();
-    phase628FakePac($invoice, []);
+// ==================== CfdiFolioAvailability ====================
 
-    $updated = app(CreatePacDraftInvoiceService::class)->createOrSync($invoice);
-
-    expect($updated->pac_draft_external_id)->toBe('inv_dup_'.$invoice->id)
-        ->and(phase628FolioQueries())->toBe(1)
-        ->and(phase628Writes())->toBe(1);
-});
-
-test('las coincidencias de esta misma factura (borrador o emisión directa) no cuentan', function () {
-    $invoice = phase628IssuedInvoice();
-    phase628FakePac($invoice, [
+test('sin coincidencias, o sólo con las de esta misma factura, el folio está disponible', function (string $case) {
+    [, $invoice] = phase628FolioInvoice();
+    phase628FakePac($invoice, $case === 'ninguna' ? [] : [
         ['id' => 'inv_own_draft', 'external_id' => PacIdentifiers::draftExternalId($invoice->company_id, $invoice->id), 'status' => 'draft'],
         ['id' => 'inv_own', 'external_id' => PacIdentifiers::externalId($invoice->company_id, $invoice->id), 'status' => 'canceled'],
     ]);
 
-    $updated = app(CreatePacDraftInvoiceService::class)->createOrSync($invoice);
+    app(CfdiFolioAvailability::class)->assertAvailable($invoice);
 
-    expect($updated->pac_draft_external_id)->not->toBeNull();
-});
+    expect(phase628FolioQueries())->toBe(1);
+})->with(['ninguna', 'propias']);
 
-test('un comprobante ajeno con el mismo folio detiene la creación sin escribir nada', function (array $match) {
-    $invoice = phase628IssuedInvoice();
+test('un comprobante ajeno con el mismo folio lo hace no disponible', function (array $match) {
+    [, $invoice] = phase628FolioInvoice();
     phase628FakePac($invoice, [$match]);
 
-    expect(fn () => app(CreatePacDraftInvoiceService::class)->createOrSync($invoice))
+    expect(fn () => app(CfdiFolioAvailability::class)->assertAvailable($invoice))
         ->toThrow(PacFolioAlreadyUsedException::class, 'FAC-19');
-
-    $fresh = $invoice->fresh();
-    expect(phase628Writes())->toBe(0)
-        ->and($fresh->pac_draft_idempotency_key)->toBeNull()
-        ->and($fresh->pac_draft_external_id)->toBeNull()
-        ->and($fresh->pac_provider)->toBeNull();
 })->with([
-    'timbrado por fuera' => [['id' => 'inv_x', 'external_id' => null, 'status' => 'valid']],
+    'timbrado por fuera' => [PHASE628_FOREIGN],
     'cancelado de otro sistema' => [['id' => 'inv_y', 'external_id' => 'otro-sistema', 'status' => 'canceled']],
     'borrador de otra factura' => [['id' => 'inv_z', 'external_id' => 'company-1-invoice-999-draft', 'status' => 'draft']],
 ]);
 
-test('si la consulta falla, no se crea el borrador ni se reserva la llave', function () {
-    $invoice = phase628IssuedInvoice();
-    phase628FakePac($invoice, 503);
-
-    expect(fn () => app(CreatePacDraftInvoiceService::class)->createOrSync($invoice))
-        ->toThrow(PacUnavailableException::class);
-
-    expect(phase628Writes())->toBe(0)
-        ->and($invoice->fresh()->pac_draft_idempotency_key)->toBeNull();
-});
-
-test('la actualización del borrador también consulta y no hace el PUT ante un duplicado', function () {
-    $invoice = phase628IssuedInvoice();
-    $invoice->forceFill([
-        'pac_provider' => 'facturapi',
-        'pac_draft_external_id' => 'inv_dup_'.$invoice->id,
-        'pac_draft_idempotency_key' => PacIdentifiers::draftIdempotencyKey($invoice->company_id, $invoice->id),
-        'pac_draft_status' => 'draft',
-    ])->save();
-    phase628FakePac($invoice, [['id' => 'inv_x', 'external_id' => null, 'status' => 'valid']]);
-
-    expect(fn () => app(UpdatePacDraftInvoiceService::class)->update($invoice->fresh()))
-        ->toThrow(PacFolioAlreadyUsedException::class);
-
-    expect(collect(Http::recorded())->filter(fn (array $pair) => $pair[0]->method() === 'PUT'))->toHaveCount(0);
-});
-
 test('con billing.cfdi_folio_check apagado no se consulta', function () {
     config(['billing.cfdi_folio_check' => false]);
-    $invoice = phase628IssuedInvoice();
-    phase628FakePac($invoice, [['id' => 'inv_x', 'external_id' => null, 'status' => 'valid']]);
+    [, $invoice] = phase628FolioInvoice();
+    phase628FakePac($invoice, [PHASE628_FOREIGN]);
+
+    app(CfdiFolioAvailability::class)->assertAvailable($invoice);
+
+    expect(phase628FolioQueries())->toBe(0);
+});
+
+test('los servicios de borrador ya no consultan el folio: lo hacen los orquestadores', function () {
+    [, $invoice] = phase628FolioInvoice(InvoiceStatus::Issued);
+    phase628FakePac($invoice, [PHASE628_FOREIGN]);
 
     app(CreatePacDraftInvoiceService::class)->createOrSync($invoice);
 
     expect(phase628FolioQueries())->toBe(0);
 });
+
+// ==================== Emisión empresarial (operations/issue) ====================
+
+test('un folio ya usado deja la factura en ready, sin ningún cambio y sin escribir en el PAC', function () {
+    [$user, $invoice] = phase628FolioInvoice(InvoiceStatus::Ready);
+    phase628FakePac($invoice, [PHASE628_FOREIGN]);
+    $before = phase628Row($invoice);
+    $eventsBefore = DB::table('invoice_pac_events')->where('invoice_id', $invoice->id)->count();
+
+    $this->actingAs($user, 'api')
+        ->postJson("/api/invoices/{$invoice->id}/operations/issue", ['confirm' => true])
+        ->assertStatus(409)
+        ->assertJsonPath('code', 'PAC_FOLIO_ALREADY_USED')
+        ->assertJsonPath('message', fn (string $message): bool => str_contains($message, 'FAC-19'));
+
+    $after = phase628Row($invoice);
+
+    expect($after)->toBe($before)
+        ->and($after['status'])->toBe(InvoiceStatus::Ready->value)
+        ->and($after['issued_at'])->toBeNull()
+        ->and($after['pac_draft_idempotency_key'])->toBeNull()
+        ->and(DB::table('invoice_pac_events')->where('invoice_id', $invoice->id)->count())->toBe($eventsBefore)
+        ->and(phase628FolioQueries())->toBe(1)
+        ->and(phase628Writes())->toBe(0);
+});
+
+test('si la consulta del folio falla, la factura también queda en ready sin cambios', function () {
+    [$user, $invoice] = phase628FolioInvoice(InvoiceStatus::Ready);
+    phase628FakePac($invoice, 503);
+    $before = phase628Row($invoice);
+
+    $this->actingAs($user, 'api')
+        ->postJson("/api/invoices/{$invoice->id}/operations/issue", ['confirm' => true])
+        ->assertStatus(503)
+        ->assertJsonPath('code', 'PAC_UNAVAILABLE');
+
+    expect(phase628Row($invoice))->toBe($before)
+        ->and(phase628Writes())->toBe(0);
+});
+
+test('con el folio libre la emisión empresarial timbra y consulta el folio una sola vez', function () {
+    [$user, $invoice] = phase628FolioInvoice(InvoiceStatus::Ready);
+    phase628FakePac($invoice, []);
+
+    $this->actingAs($user, 'api')
+        ->postJson("/api/invoices/{$invoice->id}/operations/issue", ['confirm' => true])
+        ->assertOk();
+
+    $fresh = $invoice->fresh();
+    expect($fresh->status)->toBe(InvoiceStatus::Issued)
+        ->and($fresh->pac_status)->toBe('valid')
+        ->and($fresh->cfdi_series)->toBe('FAC')
+        ->and($fresh->cfdi_folio_number)->toBe(19)
+        ->and(phase628FolioQueries())->toBe(1);
+});
+
+// ==================== /pac/issue (IssueInvoiceToPacService directo) ====================
+
+test('usado directo, IssueInvoiceToPacService consulta antes de crear el borrador y no escribe nada', function () {
+    [, $invoice] = phase628FolioInvoice(InvoiceStatus::Issued);
+    phase628FakePac($invoice, [PHASE628_FOREIGN]);
+
+    expect(fn () => app(IssueInvoiceToPacService::class)->issue($invoice))
+        ->toThrow(PacFolioAlreadyUsedException::class);
+
+    expect(phase628Writes())->toBe(0)
+        ->and($invoice->fresh()->pac_draft_idempotency_key)->toBeNull();
+});
+
+test('usado directo con una falla de la consulta, no se crea el borrador', function () {
+    [, $invoice] = phase628FolioInvoice(InvoiceStatus::Issued);
+    phase628FakePac($invoice, 503);
+
+    expect(fn () => app(IssueInvoiceToPacService::class)->issue($invoice))
+        ->toThrow(PacUnavailableException::class);
+
+    expect(phase628Writes())->toBe(0);
+});
+
+// ==================== Respuesta HTTP ====================
 
 test('la API responde 409 PAC_FOLIO_ALREADY_USED con el folio y sin detalles internos', function () {
     $response = app(InvoicePacActionExceptionResponder::class)->respond(new PacFolioAlreadyUsedException(7, 'FAC-19', 1));

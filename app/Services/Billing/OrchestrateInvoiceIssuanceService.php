@@ -26,6 +26,7 @@ class OrchestrateInvoiceIssuanceService
         private readonly InvoicePacReadinessService $readiness,
         private readonly IssueInvoiceToPacService $pacIssuance,
         private readonly InvoiceBusinessCapabilitiesService $capabilities,
+        private readonly CfdiFolioAvailability $folioAvailability,
     ) {}
 
     public function issue(Invoice $invoice): Invoice
@@ -57,9 +58,12 @@ class OrchestrateInvoiceIssuanceService
         PacCredentialGuard::forCompany((int) $current->company_id)->assertConfigured();
         // Fase 6.27: una factura de otra organización se rechaza antes de transicionar.
         PacOrganizationAccess::assertAccessible($current);
+        // Fase 6.28: un folio ya usado en la organización se rechaza antes de
+        // transicionar: la factura sigue en `ready`, sin cambios.
+        $this->folioAvailability->assertAvailable($current);
 
         $issued = $this->workflow->prepareForOrchestratedIssue($current);
-        $result = $this->pacIssuance->issue($issued);
+        $result = $this->pacIssuance->issue($issued, folioChecked: true);
 
         if ($this->capabilities->isSuccessfulIssue($result)) {
             return $result;

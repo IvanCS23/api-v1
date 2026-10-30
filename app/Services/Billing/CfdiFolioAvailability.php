@@ -2,7 +2,7 @@
 
 namespace App\Services\Billing;
 
-use App\Contracts\Billing\PacProvider;
+use App\Contracts\Billing\PacProviderResolver;
 use App\Exceptions\Billing\PacFolioAlreadyUsedException;
 use App\Models\Invoice;
 use App\Support\Billing\InvoiceFolio;
@@ -10,12 +10,17 @@ use App\Support\Billing\PacIdentifiers;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Fase 6.28: antes de mandar la serie y el folio de una factura en un
- * borrador (crear o actualizar), consulta en Facturapi si la organización
- * ya los usa en otro comprobante. Facturapi no documenta que valide
- * folios duplicados; el ERP garantiza la unicidad entre sus propias
- * facturas, pero no frente a lo emitido por fuera (panel de Facturapi,
- * otro sistema con la misma organización).
+ * Fase 6.28: antes de emitir, consulta en Facturapi si la organización ya
+ * usa la serie y el folio de la factura en otro comprobante. Facturapi no
+ * documenta que valide folios duplicados; el ERP garantiza la unicidad
+ * entre sus propias facturas, pero no frente a lo emitido por fuera (panel
+ * de Facturapi, otro sistema con la misma organización).
+ *
+ * La llaman los orquestadores, nunca los servicios de borrador:
+ * OrchestrateInvoiceIssuanceService antes de la transición ERP a `issued`
+ * (un duplicado deja la factura en `ready`, sin cambios) e
+ * IssueInvoiceToPacService cuando se usa directo (`/pac/issue`), antes de
+ * crear o actualizar el borrador.
  *
  * Los comprobantes de esta misma factura (su borrador o su emisión
  * directa, identificados por external_id) no cuentan. Es una lectura: si
@@ -23,7 +28,9 @@ use Illuminate\Support\Facades\Log;
  */
 class CfdiFolioAvailability
 {
-    public function assertAvailable(PacProvider $provider, Invoice $invoice): void
+    public function __construct(private readonly PacProviderResolver $pacProviders) {}
+
+    public function assertAvailable(Invoice $invoice): void
     {
         if (! config('billing.cfdi_folio_check')) {
             return;
@@ -42,7 +49,7 @@ class CfdiFolioAvailability
         ];
 
         $foreign = array_filter(
-            $provider->findInvoicesBySeriesFolio($folio->series, $folio->number),
+            $this->pacProviders->forInvoice($invoice)->findInvoicesBySeriesFolio($folio->series, $folio->number),
             fn (array $match): bool => ! in_array($match['external_id'], $own, true),
         );
 
