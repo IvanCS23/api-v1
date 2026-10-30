@@ -13,6 +13,7 @@ use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Billing\PacOrganizationAccess;
+use App\Support\Billing\StoredCfdiFolio;
 use Carbon\CarbonImmutable;
 use Carbon\CarbonInterface;
 
@@ -222,6 +223,12 @@ class InvoiceHealthEvaluator
 
         if ($this->hasForeignIdempotencyKey($invoice)) {
             $findings[] = new Finding('idempotency_key_mismatch', Health::Invalid, Action::ManualReview);
+        }
+
+        // Fase 6.28: timbrado con la serie del ERP pero otro folio. Las
+        // facturas anteriores a la 6.28 (serie "F") no se reportan.
+        if (StoredCfdiFolio::mismatchesErp($invoice)) {
+            $findings[] = new Finding('cfdi_folio_mismatch', Health::Invalid, Action::ManualReview);
         }
 
         return $findings;

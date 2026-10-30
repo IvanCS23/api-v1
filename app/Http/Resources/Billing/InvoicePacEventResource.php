@@ -86,6 +86,7 @@ class InvoicePacEventResource extends JsonResource
                 'cancellation_receipt_status',
             ],
             InvoicePacEventType::OrganizationArchived => ['reason'],
+            InvoicePacEventType::CfdiFolioMismatch => ['expected_folio', 'received_folio'],
             default => [],
         };
 
