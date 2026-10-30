@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\InvoiceStatus;
 use App\Models\Concerns\BelongsToCompany;
+use App\Support\Billing\StoredCfdiFolio;
 use App\Support\Billing\StoredPacOrganization;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -161,6 +162,7 @@ class Invoice extends Model
         'cancellation_receipt_downloaded_at' => 'immutable_datetime',
         'cancellation_receipt_started_at' => 'immutable_datetime',
         'pac_organization_archived_at' => 'immutable_datetime',
+        'cfdi_folio_number' => 'integer',
     ];
 
     /**
@@ -181,6 +183,15 @@ class Invoice extends Model
 
             if ($organization !== null) {
                 $invoice->pac_organization_id = $organization;
+            }
+
+            // Fase 6.28: igual con la serie y el folio del CFDI timbrado. Una
+            // respuesta sin ellos nunca borra los ya guardados.
+            $folio = $invoice->isDirty('pac_response') ? StoredCfdiFolio::of($invoice) : null;
+
+            if ($folio !== null) {
+                $invoice->cfdi_series = $folio['series'];
+                $invoice->cfdi_folio_number = $folio['folio_number'];
             }
         });
     }

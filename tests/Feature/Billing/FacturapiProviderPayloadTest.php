@@ -18,8 +18,9 @@ use Illuminate\Support\Facades\Http;
  * el reporte de entrega para el detalle completo de diferencias frente
  * a la forma original de Fase 6.1 (customer.use -> use a nivel raíz,
  * customer.address.locality -> customer.address.city, items[] plano ->
- * items[].product.{...}, sin `totals`, sin `folio`/`folio_number`, con
- * `external_id`/`idempotency_key`). `payment_form` no se envía ni se
+ * items[].product.{...}, sin `totals`, con
+ * `external_id`/`idempotency_key`). Fase 6.28: con `series` y
+ * `folio_number` derivados del folio interno (nunca `folio`). `payment_form` no se envía ni se
  * valida localmente (columna inexistente en Invoice — ver auditoría);
  * eso no afecta estas pruebas de estructura.
  */
@@ -78,12 +79,15 @@ test('el payload de creación se construye únicamente desde el snapshot de Invo
     app(CurrentTenant::class)->set($company->id);
     facturapiProviderFromConfig()->createInvoice(requestForPayloadTest($invoice->fresh(['items']), 'company-'.$company->id.'-invoice-'.$invoice->id));
 
-    Http::assertSent(function ($request) use ($company, $invoice) {
+    $expectedNumber = (int) substr($invoice->folio, 4);
+
+    Http::assertSent(function ($request) use ($company, $invoice, $expectedNumber) {
         $body = $request->data();
 
         expect($body)->not->toHaveKey('totals')
             ->and($body)->not->toHaveKey('folio')
-            ->and($body)->not->toHaveKey('folio_number')
+            ->and($body['series'])->toBe('FAC')
+            ->and($body['folio_number'])->toBe($expectedNumber)
             ->and($body['currency'])->toBe('MXN')
             ->and($body['use'])->toBe('G03')
             ->and($body['external_id'])->toBe("company-{$company->id}-invoice-{$invoice->id}")

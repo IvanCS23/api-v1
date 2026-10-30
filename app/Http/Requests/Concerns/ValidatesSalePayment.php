@@ -22,7 +22,9 @@ trait ValidatesSalePayment
             // dígitos). El regex va primero porque `in` no compara estricto
             // ("003" == "03" en PHP).
             'payment_form' => ['nullable', 'string', 'regex:/^\d{2}$/', Rule::in(array_keys(SatCatalog::paymentForms()))],
-            'payment_method' => ['nullable', 'string', Rule::in(SalePaymentRules::PAYMENT_METHODS)],
+            // Fase 6.28: PPD sigue en el catálogo, pero se rechaza hasta que
+            // exista el complemento de pago (SalePaymentRules).
+            'payment_method' => ['nullable', 'string', Rule::in(SalePaymentRules::PAYMENT_METHODS), Rule::notIn(SalePaymentRules::UNAVAILABLE_METHODS)],
         ];
     }
 
@@ -33,6 +35,7 @@ trait ValidatesSalePayment
             'payment_form.regex' => 'La forma de pago debe ser una clave de 2 dígitos del catálogo c_FormaPago del SAT.',
             'payment_form.in' => 'La forma de pago no existe en el catálogo c_FormaPago del SAT (por ejemplo 01, 03 o 99).',
             'payment_method.in' => 'El método de pago debe ser PUE o PPD.',
+            'payment_method.not_in' => SalePaymentRules::PPD_NOT_AVAILABLE_MESSAGE,
         ];
     }
 

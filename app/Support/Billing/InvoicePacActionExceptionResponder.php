@@ -14,6 +14,7 @@ use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacFolioAlreadyUsedException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
 use App\Exceptions\Billing\PacOrganizationMismatchException;
@@ -109,6 +110,11 @@ class InvoicePacActionExceptionResponder
                 409,
                 'PAC_DRAFT_NOT_READY',
                 'El borrador fiscal todavía no está listo para timbrarse.',
+            ],
+            $error instanceof PacFolioAlreadyUsedException => [
+                409,
+                'PAC_FOLIO_ALREADY_USED',
+                "El folio {$error->cfdiFolio} ya está en otro comprobante de la organización de Facturapi. No se envió nada; revisa los comprobantes emitidos fuera del sistema antes de reintentar.",
             ],
             $error instanceof PacResourceCanceledException => [
                 409,

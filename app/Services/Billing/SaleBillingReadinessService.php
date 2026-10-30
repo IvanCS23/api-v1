@@ -380,6 +380,12 @@ class SaleBillingReadinessService
 
         if ($method === null) {
             $errors[] = $this->error('SALE_PAYMENT_METHOD_MISSING', 'payment_method', 'La venta no tiene método de pago (ni la empresa uno predeterminado).');
+        } elseif (! SalePaymentRules::isMethodAvailable($method)) {
+            // Fase 6.28: también cubre un PPD heredado de la empresa o
+            // guardado antes del bloqueo. La regla PPD ↔ 99 ya no aplica.
+            $errors[] = $this->error(SalePaymentRules::PPD_NOT_AVAILABLE, 'payment_method', SalePaymentRules::PPD_NOT_AVAILABLE_MESSAGE);
+
+            return;
         }
 
         $violation = SalePaymentRules::violation($form, $method);

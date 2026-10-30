@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\FacturapiOrganization;
 use App\Services\Sat\SatFiscalValidator;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\SalePaymentRules;
 
 /**
  * Evalúa si una Company tiene la configuración fiscal mínima para que
@@ -64,6 +65,13 @@ class CompanyBillingReadinessService
                 'COMPANY_PAYMENT_METHOD_INVALID',
                 'default_payment_method',
                 'default_payment_method, cuando tiene valor, debe ser exactamente "PUE" o "PPD" (SAT c_MetodoPago).',
+            );
+        } elseif (! SalePaymentRules::isMethodAvailable($company->default_payment_method)) {
+            // Fase 6.28: las ventas sin método propio heredarían PPD.
+            $errors[] = $this->error(
+                'COMPANY_PPD_NOT_AVAILABLE',
+                'default_payment_method',
+                SalePaymentRules::PPD_NOT_AVAILABLE_MESSAGE,
             );
         }
 

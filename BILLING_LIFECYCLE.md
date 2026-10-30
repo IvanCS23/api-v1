@@ -133,7 +133,7 @@ disponibles.
 `SaleBillingReadinessService::evaluate($sale, beforeInvoicing: true)`):
 borrador y pendiente pueden facturarse; además del cliente y los productos,
 exige el pago efectivo (`SALE_PAYMENT_FORM_MISSING`,
-`SALE_PAYMENT_METHOD_MISSING`, `SALE_PPD_REQUIRES_FORM_99`,
+`SALE_PAYMENT_METHOD_MISSING`, `SALE_PPD_NOT_AVAILABLE`,
 `SALE_PUE_FORBIDS_FORM_99`), rechaza retenciones
 (`ITEM_TAX_WITHHOLDING_UNSUPPORTED`) y bloquea la clave de unidad faltante.
 El modo base (sin `beforeInvoicing`) no cambia: lo usa `POST /api/invoices`.
@@ -141,8 +141,21 @@ El modo base (sin `beforeInvoicing`) no cambia: lo usa `POST /api/invoices`.
 **Forma y método de pago por venta** (`sales.payment_form`,
 `sales.payment_method`): la venta guarda los suyos y la empresa
 (`default_payment_*`) sólo es respaldo, campo por campo
-(`SalePaymentRules::effective()`). PPD exige la forma 99 y PUE no la admite,
-tanto al guardar (Store/UpdateSaleRequest) como al revisar el readiness.
+(`SalePaymentRules::effective()`). PUE no admite la forma 99, tanto al
+guardar (Store/UpdateSaleRequest) como al revisar el readiness.
+
+**PPD bloqueado (Fase 6.28).** Un CFDI PPD obliga a emitir un complemento de
+pago (REP) por cada cobro, y el sistema aún no lo genera. PPD sigue en el
+catálogo, pero `SalePaymentRules::UNAVAILABLE_METHODS` lo rechaza: 422 al
+guardar la venta y, en los readiness, `SALE_PPD_NOT_AVAILABLE` (método
+efectivo, incluido el heredado de la empresa), `INVOICE_PPD_NOT_AVAILABLE`
+(emisión) y `COMPANY_PPD_NOT_AVAILABLE`. El selector del frontend lo muestra
+deshabilitado con la explicación. Es una constante, no configuración: se
+reactiva junto con el complemento de pago, y entonces vuelve a aplicar la
+regla PPD ↔ 99 (sigue en `SalePaymentRules::violation()`). `POST
+/api/invoices` (conversión directa, modo base del readiness) no revisa el
+pago; una venta PPD guardada antes del bloqueo se convierte, pero la emisión
+la detiene `INVOICE_PPD_NOT_AVAILABLE`.
 
 **Venta cuya factura se borró.** `invoices` usa borrado suave. La unicidad de
 la venta vive en la columna generada virtual `active_sale_id` (`sale_id`
@@ -212,6 +225,55 @@ productos, y las pantallas avisan al editar. Nada se corrige solo.
 (lugar de expedición), y `companies.postal_code` aún no se configura; se
 valida en la 6.27. La unicidad de `(company_id, rfc)` impide registrar dos
 clientes con `XEXX010101000` en la misma empresa.
+
+## Folio del CFDI (Fase 6.28)
+
+El CFDI lleva la serie y el folio del ERP: `FAC-00000019` se timbra como
+Serie `FAC` y Folio `19` (`InvoiceFolio`). `FacturapiProvider` los envía como
+`series`/`folio_number` al crear el borrador y en cada `PUT` que lo
+actualiza, así que un borrador anterior a la 6.28 también los recibe antes de
+timbrarse. `folio_number` es entero: los ceros se pierden y la forma visible
+es `FAC-19`. `companies.default_cfdi_series` sigue sin uso.
+
+- **Folio inválido.** Un folio que no sea `FAC-` + 8 a 10 dígitos (y mayor
+  que 0) da `INVOICE_FOLIO_INVALID` en el readiness, y el provider lo rechaza
+  antes de cualquier HTTP. Nunca se omiten los campos: Facturapi asignaría su
+  propio consecutivo y el CFDI dejaría de corresponder a la factura.
+- **Reintentos e idempotencia.** El folio no cambia tras crear la factura,
+  así que cada intento manda el mismo payload con la misma llave.
+- **Duplicados.** Facturapi no documenta que rechace folios repetidos. El ERP
+  los evita entre sus facturas (único `(company_id, folio)` y una
+  organización por empresa); frente a lo emitido por fuera,
+  `CfdiFolioAvailability` consulta `GET /invoices?series=…&folio_number=…`
+  antes de crear o actualizar el borrador. Un comprobante de la organización
+  con ese folio que no sea de esta factura (por `external_id`) detiene todo
+  con `409 PAC_FOLIO_ALREADY_USED`, sin escribir nada en el PAC ni en la
+  factura. `billing.cfdi_folio_check` (`BILLING_CFDI_FOLIO_CHECK`, encendido
+  por defecto) lo controla; `phpunit.xml` lo apaga.
+- **Lo timbrado.** `invoices.cfdi_series`/`cfdi_folio_number` los llena el
+  modelo desde `pac_response` cada vez que se guarda una respuesta del PAC
+  (una respuesta sin folio no borra lo guardado). Las facturas timbradas
+  antes de las columnas se llenan con `billing:backfill-cfdi-folio` (dry-run
+  por defecto, `--apply`, `--company=`; sin HTTP; sólo columnas vacías).
+- **Verificación.** Al emitirse el CFDI (`InvoiceIssued`),
+  `VerifyIssuedCfdiFolio` compara lo timbrado con el folio del ERP; si
+  difiere, registra el evento `cfdi_folio_mismatch` (folio esperado y
+  recibido) y un warning. No revierte nada: el CFDI ya existe. Una respuesta
+  sin folio no se puede verificar y no registra nada.
+- **Facturas anteriores a la 6.28.** Conservan el folio que asignó Facturapi
+  (serie `F`, consecutivo de la organización). La API las marca con
+  `cfdi_folio_matches_erp=false` y el panel muestra la nota "Asignado por
+  Facturapi antes de la 6.28".
+- **API.** `InvoiceResource` (`cfdi_series`, `cfdi_folio_number`,
+  `cfdi_folio`, `cfdi_folio_matches_erp`) e `InvoiceBillingResource`
+  (`cfdi.series`, `cfdi.folio_number`, `cfdi.folio`, `cfdi.folio_matches_erp`).
+  La búsqueda de `GET /api/invoices` acepta el folio CFDI como `19`, `FAC-19`,
+  `FAC 19` o `FAC19`: el timbrado (respeta la serie si se escribe) y, para la
+  serie `FAC`, el folio interno del que sale, aunque aún no esté timbrado.
+
+**Sin verificar todavía contra Facturapi:** que el `PUT` del borrador
+respete `series`/`folio_number` (lo detectaría la verificación posterior) y
+cómo los imprime el PDF de Facturapi.
 
 ## Endpoints compatibles
 
@@ -482,6 +544,7 @@ estado de la factura ni dispara `--fail-on`.
 | `pac_organization_mismatch` (factura de otra organización sin archivar; sustituye a todos sus demás hallazgos) | invalid | manual_review |
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
 | `identity_uuid_without_external_id`, `erp_behind_cfdi`, `issue_succeeded_without_valid_cfdi`, `pac_status_without_identity`, `idempotency_key_mismatch` | invalid | manual_review |
+| `cfdi_folio_mismatch` (CFDI timbrado con la serie `FAC` pero un folio distinto al del ERP; la serie `F` anterior a la 6.28 no se reporta) | invalid | manual_review |
 
 El acuse nunca escala por sí mismo:
 

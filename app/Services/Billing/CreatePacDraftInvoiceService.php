@@ -42,6 +42,7 @@ class CreatePacDraftInvoiceService
         private readonly InvoicePacReadinessService $readiness,
         private readonly SyncPacDraftInvoiceService $sync,
         private readonly InvoicePacAuditService $audit,
+        private readonly CfdiFolioAvailability $folioAvailability,
     ) {}
 
     public function createOrSync(Invoice $invoice): Invoice
@@ -55,6 +56,10 @@ class CreatePacDraftInvoiceService
         }
 
         $this->readiness->assertReady($current);
+
+        // Fase 6.28: antes de reservar la llave — si el folio ya está en
+        // otro comprobante de la organización no se escribe nada.
+        $this->folioAvailability->assertAvailable($this->pacProvider($current), $current);
 
         $providerSlug = $this->pacProvider($current)->name();
         $idempotencyKey = $current->pac_draft_idempotency_key

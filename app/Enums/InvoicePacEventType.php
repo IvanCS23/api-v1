@@ -35,4 +35,7 @@ enum InvoicePacEventType: string
 
     // Fase 6.27: cierre de una factura de una organización Facturapi inaccesible.
     case OrganizationArchived = 'organization_archived';
+
+    // Fase 6.28: el CFDI se timbró con una serie/folio distinto al del ERP.
+    case CfdiFolioMismatch = 'cfdi_folio_mismatch';
 }

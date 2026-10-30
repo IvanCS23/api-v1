@@ -14,6 +14,7 @@ use App\Models\Invoice;
 use App\Models\Sale;
 use App\Services\Billing\InvoiceWorkflow;
 use App\Services\Billing\SaleToInvoiceConverter;
+use App\Support\Billing\InvoiceFolio;
 
 class InvoiceController extends Controller
 {
@@ -33,14 +34,33 @@ class InvoiceController extends Controller
             'subtotal', 'discount_total', 'tax_total', 'total', 'currency',
             'notes', 'payment_form', 'payment_method', 'issued_at',
             'cancelled_at', 'created_at', 'updated_at',
+            'cfdi_series', 'cfdi_folio_number',
         ]);
 
         if (isset($filters['search'])) {
             $search = '%'.$filters['search'].'%';
-            $query->where(function ($query) use ($search): void {
+            // Fase 6.28: también por folio CFDI ("19", "FAC-19", "FAC 19",
+            // "FAC19"): el timbrado y, para la serie del ERP, el folio
+            // interno del que sale (aún sin timbrar).
+            $cfdi = InvoiceFolio::parseSearch($filters['search']);
+
+            $query->where(function ($query) use ($search, $cfdi): void {
                 $query->where('folio', 'like', $search)
                     ->orWhere('client_name', 'like', $search)
                     ->orWhere('client_rfc', 'like', $search);
+
+                if ($cfdi === null) {
+                    return;
+                }
+
+                $query->orWhere(function ($query) use ($cfdi): void {
+                    $query->where('cfdi_folio_number', $cfdi['number'])
+                        ->when($cfdi['series'] !== null, fn ($query) => $query->where('cfdi_series', $cfdi['series']));
+                });
+
+                if ($cfdi['series'] === null || $cfdi['series'] === InvoiceFolio::SERIES) {
+                    $query->orWhere('folio', InvoiceFolio::erpFolio($cfdi['number']));
+                }
             });
         }
 
