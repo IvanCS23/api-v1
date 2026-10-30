@@ -44,6 +44,38 @@ final class InvoiceFolio
         return new self(self::SERIES, $number);
     }
 
+    /**
+     * Fase 6.28: interpreta lo que se escribe para buscar un folio CFDI:
+     * "19", "FAC-19", "FAC 19", "FAC19" o "fac-0019". Devuelve la serie (en
+     * mayúsculas, o null si sólo se escribió el número) y el número, o null
+     * si el texto no tiene esa forma.
+     *
+     * @return array{series: ?string, number: int}|null
+     */
+    public static function parseSearch(string $search): ?array
+    {
+        if (preg_match('/^\s*([A-Za-z]{1,25})?[\s-]*(\d{1,10})\s*$/', $search, $matches) !== 1) {
+            return null;
+        }
+
+        $number = (int) $matches[2];
+
+        if ($number < 1 || $number > 4294967295) {
+            return null;
+        }
+
+        return [
+            'series' => $matches[1] !== '' ? strtoupper($matches[1]) : null,
+            'number' => $number,
+        ];
+    }
+
+    /** Folio interno del que sale un folio CFDI de la serie del ERP ("FAC-00000019"). */
+    public static function erpFolio(int $number): string
+    {
+        return self::PREFIX.str_pad((string) $number, 8, '0', STR_PAD_LEFT);
+    }
+
     /** Forma visible de una serie y folio del CFDI ("FAC-19"), o null sin folio. */
     public static function label(?string $series, int|string|null $number): ?string
     {
@@ -52,6 +84,18 @@ final class InvoiceFolio
         }
 
         return filled($series) ? "{$series}-{$number}" : (string) $number;
+    }
+
+    /**
+     * Si el folio CFDI timbrado es el que sale del folio interno; null si
+     * todavía no hay folio CFDI. false en las facturas anteriores a la 6.28
+     * (Facturapi les asignó la serie "F").
+     */
+    public static function matchesErp(?string $erpFolio, ?string $series, int|string|null $number): ?bool
+    {
+        $label = self::label($series, $number);
+
+        return $label === null ? null : self::parse($erpFolio)?->cfdiLabel() === $label;
     }
 
     public function cfdiLabel(): string

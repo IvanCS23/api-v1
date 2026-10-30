@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Billing;
 
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
+use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacOrganizationAccess;
 use Illuminate\Http\Request;
@@ -42,6 +43,11 @@ class InvoiceBillingResource extends JsonResource
             ],
             'cfdi' => [
                 'uuid' => $this->cfdi_uuid,
+                // Fase 6.28: el folio que muestran el XML y el PDF.
+                'series' => $this->cfdi_series,
+                'folio_number' => $this->cfdi_folio_number,
+                'folio' => InvoiceFolio::label($this->cfdi_series, $this->cfdi_folio_number),
+                'folio_matches_erp' => InvoiceFolio::matchesErp($this->folio, $this->cfdi_series, $this->cfdi_folio_number),
                 'stamped_at' => $this->stamped_at?->toIso8601String(),
                 'artifacts' => [
                     'status' => $this->cfdi_artifacts_status,

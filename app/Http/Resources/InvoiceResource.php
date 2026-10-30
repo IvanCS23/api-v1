@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Support\Billing\InvoiceFolio;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -22,6 +23,11 @@ class InvoiceResource extends JsonResource
             'client_id' => $this->whenHas('client_id'),
             'created_by' => $this->whenHas('created_by'),
             'folio' => $this->folio,
+            // Fase 6.28: serie y folio con que quedó timbrado el CFDI.
+            'cfdi_series' => $this->cfdi_series,
+            'cfdi_folio_number' => $this->cfdi_folio_number,
+            'cfdi_folio' => InvoiceFolio::label($this->cfdi_series, $this->cfdi_folio_number),
+            'cfdi_folio_matches_erp' => InvoiceFolio::matchesErp($this->folio, $this->cfdi_series, $this->cfdi_folio_number),
             'status' => $this->status,
             'client_name' => $this->client_name,
             'client_rfc' => $this->client_rfc,
