@@ -8,8 +8,9 @@ namespace App\Support\Billing;
  * XML, el PDF de Facturapi y el panel muestran el mismo número.
  *
  * Facturapi documenta `series` como texto (máx. 25) y `folio_number` como
- * entero, así que los ceros a la izquierda se pierden: la forma visible del
- * folio CFDI es "FAC-19" (ver label()). El folio interno no cambia.
+ * entero, así que los ceros a la izquierda se pierden. Fase 6.29: la forma
+ * visible del folio CFDI es "FAC19", igual que la imprime el PDF de
+ * Facturapi (ver label()). El folio interno no cambia.
  *
  * Un folio que no tenga este formato no se puede timbrar: si se omitieran
  * los campos, Facturapi asignaría su propio consecutivo y el CFDI dejaría
@@ -76,14 +77,18 @@ final class InvoiceFolio
         return self::PREFIX.str_pad((string) $number, 8, '0', STR_PAD_LEFT);
     }
 
-    /** Forma visible de una serie y folio del CFDI ("FAC-19"), o null sin folio. */
+    /**
+     * Forma visible de una serie y folio del CFDI, o null sin folio. Fase
+     * 6.29: sin separador ("FAC19", "F10"), como el PDF de Facturapi. Es
+     * inequívoca porque las series del ERP y de Facturapi son sólo letras.
+     */
     public static function label(?string $series, int|string|null $number): ?string
     {
         if ($number === null || $number === '') {
             return null;
         }
 
-        return filled($series) ? "{$series}-{$number}" : (string) $number;
+        return filled($series) ? "{$series}{$number}" : (string) $number;
     }
 
     /**

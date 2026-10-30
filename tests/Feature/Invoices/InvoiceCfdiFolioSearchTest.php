@@ -112,14 +112,14 @@ test('la API expone el folio CFDI y si coincide con el del ERP', function () {
 
     $this->actingAs($user, 'api')->getJson("/api/invoices/{$legacy->id}")
         ->assertOk()
-        ->assertJsonPath('cfdi_folio', 'F-10')
+        ->assertJsonPath('cfdi_folio', 'F10')
         ->assertJsonPath('cfdi_folio_matches_erp', false);
 
     $this->actingAs($user, 'api')->getJson("/api/invoices/{$current->id}/billing")
         ->assertOk()
         ->assertJsonPath('cfdi.series', 'FAC')
         ->assertJsonPath('cfdi.folio_number', 20)
-        ->assertJsonPath('cfdi.folio', 'FAC-20')
+        ->assertJsonPath('cfdi.folio', 'FAC20')
         ->assertJsonPath('cfdi.folio_matches_erp', true);
 
     $this->actingAs($user, 'api')->getJson("/api/invoices/{$pending->id}/billing")
