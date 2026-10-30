@@ -61,9 +61,16 @@ class OrchestrateInvoiceIssuanceService
         // Fase 6.28: un folio ya usado en la organización se rechaza antes de
         // transicionar: la factura sigue en `ready`, sin cambios.
         $this->folioAvailability->assertAvailable($current);
+        // Fase 6.29: el borrador remoto debe estar listo para timbrar antes de
+        // transicionar; si no, la factura sigue en `ready` (PAC_DRAFT_NOT_READY).
+        $draftPrepared = $current->status === InvoiceStatus::Ready;
+
+        if ($draftPrepared) {
+            $this->pacIssuance->prepareDraftBeforeIssue($current);
+        }
 
         $issued = $this->workflow->prepareForOrchestratedIssue($current);
-        $result = $this->pacIssuance->issue($issued, folioChecked: true);
+        $result = $this->pacIssuance->issue($issued, folioChecked: true, draftPrepared: $draftPrepared);
 
         if ($this->capabilities->isSuccessfulIssue($result)) {
             return $result;
