@@ -144,6 +144,51 @@ class FacturapiProvider implements PacProvider
     }
 
     /**
+     * Fase 6.28: `GET /invoices?series=…&folio_number=…` (ambos filtros
+     * documentados como coincidencia exacta). Se usa antes de mandar un
+     * folio porque Facturapi no documenta que rechace duplicados. Cada
+     * elemento pasa por la misma verificación de organización que el resto.
+     *
+     * @return list<array{id: string, external_id: ?string, status: ?string}>
+     */
+    public function findInvoicesBySeriesFolio(string $series, int $folioNumber): array
+    {
+        $response = $this->client()->get('/invoices', ['series' => $series, 'folio_number' => $folioNumber]);
+
+        $this->assertSuccessful($response);
+
+        $body = $response->json();
+
+        if (! is_array($body) || ! isset($body['data']) || ! is_array($body['data'])) {
+            throw new PacUnexpectedResponseException(
+                'La respuesta de búsqueda por folio del PAC no contiene el campo de listado esperado (data).',
+                $response->status(),
+            );
+        }
+
+        $found = [];
+
+        foreach ($body['data'] as $invoice) {
+            if (! is_array($invoice) || ! isset($invoice['id'])) {
+                throw new PacUnexpectedResponseException(
+                    'La respuesta de búsqueda por folio del PAC contiene un elemento sin id.',
+                    $response->status(),
+                );
+            }
+
+            $this->assertSameOrganization($invoice, $response->status());
+
+            $found[] = [
+                'id' => (string) $invoice['id'],
+                'external_id' => isset($invoice['external_id']) && is_string($invoice['external_id']) ? $invoice['external_id'] : null,
+                'status' => isset($invoice['status']) && is_string($invoice['status']) ? $invoice['status'] : null,
+            ];
+        }
+
+        return $found;
+    }
+
+    /**
      * `POST /invoices` con `status: "draft"` (Fase 6.2.4) — Facturapi no
      * documenta `dry_run`; este es su mecanismo real de prevalidación:
      * crea un recurso REAL y persistente (nunca timbrado). Operación

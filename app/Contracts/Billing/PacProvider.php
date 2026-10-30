@@ -97,6 +97,14 @@ interface PacProvider
     public function findInvoiceByExternalId(string $externalId): ?PacInvoiceResult;
 
     /**
+     * Fase 6.28: comprobantes de la organización (de cualquier estado,
+     * borradores incluidos) con esa serie y folio. Sólo lectura.
+     *
+     * @return list<array{id: string, external_id: ?string, status: ?string}>
+     */
+    public function findInvoicesBySeriesFolio(string $series, int $folioNumber): array;
+
+    /**
      * Crea un borrador (`status: "draft"`) — un recurso REAL y
      * persistente del lado del PAC, nunca timbrado.
      *

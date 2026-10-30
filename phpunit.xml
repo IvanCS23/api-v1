@@ -29,6 +29,8 @@
         <env name="MAIL_MAILER" value="array"/>
         <env name="QUEUE_CONNECTION" value="sync"/>
         <env name="BILLING_ARTIFACTS_AUTO_DOWNLOAD" value="false"/>
+        <!-- Fase 6.28: la consulta de folio duplicado se prueba aparte (CfdiFolioAvailabilityTest). -->
+        <env name="BILLING_CFDI_FOLIO_CHECK" value="false"/>
         <!-- Fase 6.27b: las pruebas nunca ven la User Key real; cada prueba la fija en config. -->
         <env name="FACTURAPI_USER_KEY" value=""/>
         <env name="SESSION_DRIVER" value="array"/>

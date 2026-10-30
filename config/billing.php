@@ -53,6 +53,21 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Folio del CFDI (Fase 6.28)
+    |--------------------------------------------------------------------------
+    |
+    | - cfdi_folio_check: antes de crear o actualizar un borrador se consulta
+    |   en Facturapi si la organización ya usa la serie y el folio en otro
+    |   comprobante (Facturapi no documenta que rechace duplicados). Una
+    |   lectura extra por emisión. Debe quedar encendido; las pruebas lo
+    |   apagan (phpunit.xml) y lo activan explícitamente.
+    |
+    */
+
+    'cfdi_folio_check' => (bool) env('BILLING_CFDI_FOLIO_CHECK', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Expediente fiscal: XML/PDF (Fase 6.21)
     |--------------------------------------------------------------------------
     |
