@@ -4,17 +4,18 @@ namespace App\Services\Billing;
 
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\InvoiceFolio;
 use Illuminate\Support\Facades\DB;
 
 /**
  * Genera el folio interno consecutivo de una Invoice, independiente por
  * empresa (formato FAC-00000001) — mismo mecanismo de bloqueo que
- * SaleNumberGenerator/QuoteNumberGenerator. No es un folio fiscal SAT
- * (eso requeriría Facturapi, fuera de alcance).
+ * SaleNumberGenerator/QuoteNumberGenerator. Fase 6.28: el CFDI toma de
+ * aquí su serie y folio (InvoiceFolio), así que el prefijo es el mismo.
  */
 class InvoiceNumberGenerator
 {
-    private const PREFIX = 'FAC-';
+    private const PREFIX = InvoiceFolio::PREFIX;
 
     private const PAD_LENGTH = 8;
 

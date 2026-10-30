@@ -9,6 +9,7 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\Sat\SatFiscalValidator;
+use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Collection;
 
@@ -144,6 +145,12 @@ class InvoicePacReadinessService
         } elseif (! SalePaymentRules::isMethodAvailable($invoice->payment_method)) {
             // Fase 6.28: sin complemento de pago no se timbra un CFDI PPD.
             $errors[] = $this->error('INVOICE_PPD_NOT_AVAILABLE', 'payment_method', SalePaymentRules::PPD_NOT_AVAILABLE_MESSAGE);
+        }
+
+        // Fase 6.28: el CFDI lleva la serie y el folio del ERP; sin ellos
+        // Facturapi asignaría otro folio y el CFDI no correspondería.
+        if (InvoiceFolio::parse($invoice->folio) === null) {
+            $errors[] = $this->error('INVOICE_FOLIO_INVALID', 'folio', "El folio '{$invoice->folio}' no tiene el formato ".InvoiceFolio::PREFIX.'######## del que se toman la serie y el folio del CFDI.');
         }
 
         if (blank($invoice->currency) || ! preg_match('/^[A-Z]{3}$/', (string) $invoice->currency)) {

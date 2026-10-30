@@ -8,6 +8,7 @@ use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\TaxFactorType;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
+use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
@@ -21,6 +22,7 @@ use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
+use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacCredentialGuard;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
@@ -351,10 +353,10 @@ class FacturapiProvider implements PacProvider
      * `customer`), `items[]` es `{quantity, discount, product: {...}}`
      * (no un objeto plano), y no existe ningún campo `totals` en el
      * contrato oficial — Facturapi calcula los totales a partir de
-     * `items`, así que nunca se envían. `folio`/`series` tampoco se
-     * envían deliberadamente: `folio_number` oficial es un entero
-     * autogenerado si se omite, y `Invoice::folio` es un identificador
-     * interno con formato distinto ("FAC-00000001"), no ese entero.
+     * `items`, así que nunca se envían. Fase 6.28: `series` y
+     * `folio_number` SÍ se envían, derivados de `Invoice::folio`
+     * ("FAC-00000019" → "FAC" y 19, ver InvoiceFolio); antes se omitían
+     * y Facturapi asignaba su propio consecutivo (serie "F").
      *
      * `payment_form` (SAT c_FormaPago, string de 2 caracteres,
      * OBLIGATORIO en el contrato oficial) va al nivel raíz — Fase 6.2.2
@@ -410,10 +412,9 @@ class FacturapiProvider implements PacProvider
      * de "emitir de verdad" en el contrato oficial de Facturapi.
      * Deliberadamente NO se envía `address` (la documentación oficial
      * confirma que es opcional y, si se omite, Facturapi usa el
-     * domicilio de la organización) ni `series` (Invoice todavía no
-     * tiene ese snapshot — ver auditoría Fase 6.2.4; Facturapi asigna
-     * `folio_number` automáticamente si se omite) ni ningún total
-     * calculado localmente.
+     * domicilio de la organización) ni ningún total calculado
+     * localmente. `series`/`folio_number` van en la base (Fase 6.28), así
+     * que el PUT de un borrador existente también los corrige.
      *
      * @return array<string, mixed>
      */
@@ -429,6 +430,12 @@ class FacturapiProvider implements PacProvider
     {
         $invoice = $request->invoice;
         $invoice->loadMissing('items');
+
+        // Fase 6.28: nunca se omite (Facturapi asignaría otro folio). El
+        // readiness ya lo rechazó; esto sólo protege a un llamador que no
+        // pasó por él, antes de cualquier HTTP.
+        $folio = InvoiceFolio::parse($invoice->folio)
+            ?? throw new InvoiceFiscalSnapshotIncompleteException((int) $invoice->id, ['folio (INVOICE_FOLIO_INVALID)']);
 
         $payload = [
             'customer' => [
@@ -483,6 +490,8 @@ class FacturapiProvider implements PacProvider
             'use' => $invoice->client_uso_cfdi,
             'payment_form' => $invoice->payment_form,
             'currency' => $invoice->currency,
+            'series' => $folio->series,
+            'folio_number' => $folio->number,
             'external_id' => $request->externalId,
             'idempotency_key' => $request->idempotencyKey,
         ];
