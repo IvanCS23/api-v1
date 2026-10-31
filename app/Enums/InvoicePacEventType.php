@@ -38,4 +38,7 @@ enum InvoicePacEventType: string
 
     // Fase 6.28: el CFDI se timbró con una serie/folio distinto al del ERP.
     case CfdiFolioMismatch = 'cfdi_folio_mismatch';
+
+    // Fase 6.29: una factura issued sin CFDI regresó a ready.
+    case IssueReverted = 'issue_reverted';
 }

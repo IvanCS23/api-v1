@@ -36,8 +36,12 @@ class IssueInvoiceToPacService
      * @param  bool  $folioChecked  Fase 6.28: true cuando el llamador (el
      *                              orquestador) ya consultó el folio antes de
      *                              la transición ERP; evita repetir la consulta.
+     * @param  bool  $draftPrepared  Fase 6.29: true cuando el orquestador ya
+     *                               preparó el borrador (prepareDraftBeforeIssue);
+     *                               no se vuelve a sincronizar aquí, porque el
+     *                               timbrado siempre sincroniza antes de /stamp.
      */
-    public function issue(Invoice $invoice, bool $folioChecked = false): Invoice
+    public function issue(Invoice $invoice, bool $folioChecked = false, bool $draftPrepared = false): Invoice
     {
         $current = $this->requireCurrentTenantInvoice($invoice);
 
@@ -54,24 +58,79 @@ class IssueInvoiceToPacService
         }
 
         try {
+            $draft = match (true) {
+                $current->pac_draft_external_id === null => $this->createDraft->createOrSync($current),
+                $draftPrepared => $current,
+                default => $this->syncDraft->sync($current),
+            };
+
+            return $this->advance($draft);
+        } catch (Throwable $error) {
+            $this->rethrowClassified($current, $error);
+        }
+    }
+
+    /**
+     * Fase 6.29: prepara el borrador remoto ANTES de la transición ERP de
+     * `ready` a `issued` (lo llama OrchestrateInvoiceIssuanceService). Lo
+     * crea o sincroniza y, si Facturapi no lo da por listo para timbrar, lo
+     * actualiza con el snapshot vigente; si sigue sin estar listo lanza
+     * InvoiceDraftNotReadyToStampException y la factura queda en `ready`.
+     *
+     * Un borrador remoto pendiente o cancelado también se rechaza aquí, sin
+     * transicionar. Uno ya timbrado (`valid`) se deja pasar: tras la
+     * transición, issue() lo reconcilia. Las validaciones del SAT que sólo
+     * ocurren al timbrar no se anticipan; para esas está "Regresar a lista".
+     */
+    public function prepareDraftBeforeIssue(Invoice $invoice): Invoice
+    {
+        $current = $this->requireCurrentTenantInvoice($invoice);
+
+        if ($current->status !== InvoiceStatus::Ready || $this->isIssued($current)) {
+            return $current;
+        }
+
+        $this->assertNoActiveOrAmbiguousIssuance($current);
+
+        try {
             $draft = $current->pac_draft_external_id === null
                 ? $this->createDraft->createOrSync($current)
                 : $this->syncDraft->sync($current);
 
-            return $this->advance($draft);
+            if ($draft->pac_draft_status === 'draft' && $draft->pac_draft_ready_to_stamp !== true) {
+                $draft = $this->updateDraft->update($draft);
+            }
+
+            return match ($draft->pac_draft_status) {
+                'draft' => $draft->pac_draft_ready_to_stamp === true
+                    ? $draft
+                    : throw new InvoiceDraftNotReadyToStampException($draft),
+                'pending' => throw new InvoiceIssuanceInProgressException($draft),
+                'canceled' => throw new PacResourceCanceledException,
+                default => $draft,
+            };
         } catch (Throwable $error) {
-            if ($error instanceof PacReconciliationRequiredException) {
-                throw $error;
-            }
+            $this->rethrowClassified($current, $error);
+        }
+    }
 
-            $fresh = $this->requireCurrentTenantInvoice($current);
-
-            if ($this->requiresReconciliation($fresh)) {
-                throw new PacReconciliationRequiredException($error);
-            }
-
+    /**
+     * Un fallo que dejó la factura en revisión se reporta como
+     * PacReconciliationRequiredException; cualquier otro se propaga igual.
+     */
+    private function rethrowClassified(Invoice $current, Throwable $error): never
+    {
+        if ($error instanceof PacReconciliationRequiredException) {
             throw $error;
         }
+
+        $fresh = $this->requireCurrentTenantInvoice($current);
+
+        if ($this->requiresReconciliation($fresh)) {
+            throw new PacReconciliationRequiredException($error);
+        }
+
+        throw $error;
     }
 
     private function advance(Invoice $invoice): Invoice

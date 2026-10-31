@@ -150,7 +150,7 @@ test('un comprobante ajeno con el mismo folio lo hace no disponible', function (
     phase628FakePac($invoice, [$match]);
 
     expect(fn () => app(CfdiFolioAvailability::class)->assertAvailable($invoice))
-        ->toThrow(PacFolioAlreadyUsedException::class, 'FAC-19');
+        ->toThrow(PacFolioAlreadyUsedException::class, 'FAC19');
 })->with([
     'timbrado por fuera' => [PHASE628_FOREIGN],
     'cancelado de otro sistema' => [['id' => 'inv_y', 'external_id' => 'otro-sistema', 'status' => 'canceled']],
@@ -188,7 +188,7 @@ test('un folio ya usado deja la factura en ready, sin ningún cambio y sin escri
         ->postJson("/api/invoices/{$invoice->id}/operations/issue", ['confirm' => true])
         ->assertStatus(409)
         ->assertJsonPath('code', 'PAC_FOLIO_ALREADY_USED')
-        ->assertJsonPath('message', fn (string $message): bool => str_contains($message, 'FAC-19'));
+        ->assertJsonPath('message', fn (string $message): bool => str_contains($message, 'FAC19'));
 
     $after = phase628Row($invoice);
 
@@ -257,10 +257,10 @@ test('usado directo con una falla de la consulta, no se crea el borrador', funct
 // ==================== Respuesta HTTP ====================
 
 test('la API responde 409 PAC_FOLIO_ALREADY_USED con el folio y sin detalles internos', function () {
-    $response = app(InvoicePacActionExceptionResponder::class)->respond(new PacFolioAlreadyUsedException(7, 'FAC-19', 1));
+    $response = app(InvoicePacActionExceptionResponder::class)->respond(new PacFolioAlreadyUsedException(7, 'FAC19', 1));
 
     expect($response->status())->toBe(409)
         ->and($response->getData(true)['code'])->toBe('PAC_FOLIO_ALREADY_USED')
-        ->and($response->getData(true)['message'])->toContain('FAC-19')
+        ->and($response->getData(true)['message'])->toContain('FAC19')
         ->and($response->getData(true)['message'])->not->toContain('[7]');
 });

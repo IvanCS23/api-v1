@@ -21,7 +21,8 @@ function phase628SearchUser(): array
 
 function phase628InvoiceWithCfdi(Company $company, string $folio, ?string $series, ?int $number): Invoice
 {
-    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'folio' => $folio]);
+    // Nombre y RFC fijos: los aleatorios de la factory pueden contener los dígitos buscados.
+    $invoice = Invoice::factory()->create(['company_id' => $company->id, 'folio' => $folio, 'client_name' => 'Cliente sin dígitos', 'client_rfc' => 'AAA010101AAA']);
     DB::table('invoices')->where('id', $invoice->id)->update(['cfdi_series' => $series, 'cfdi_folio_number' => $number]);
 
     return $invoice;
@@ -112,14 +113,14 @@ test('la API expone el folio CFDI y si coincide con el del ERP', function () {
 
     $this->actingAs($user, 'api')->getJson("/api/invoices/{$legacy->id}")
         ->assertOk()
-        ->assertJsonPath('cfdi_folio', 'F-10')
+        ->assertJsonPath('cfdi_folio', 'F10')
         ->assertJsonPath('cfdi_folio_matches_erp', false);
 
     $this->actingAs($user, 'api')->getJson("/api/invoices/{$current->id}/billing")
         ->assertOk()
         ->assertJsonPath('cfdi.series', 'FAC')
         ->assertJsonPath('cfdi.folio_number', 20)
-        ->assertJsonPath('cfdi.folio', 'FAC-20')
+        ->assertJsonPath('cfdi.folio', 'FAC20')
         ->assertJsonPath('cfdi.folio_matches_erp', true);
 
     $this->actingAs($user, 'api')->getJson("/api/invoices/{$pending->id}/billing")

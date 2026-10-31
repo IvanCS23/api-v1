@@ -31,9 +31,9 @@ test('dry-run reporta sin escribir; --apply llena sólo las dos columnas y es id
     $dry = Artisan::output();
 
     expect($dry)->toContain('dry-run')
-        ->and($dry)->toContain('F-10')
+        ->and($dry)->toContain('F10')
         ->and($dry)->toContain('no (anterior a la 6.28)')
-        ->and($dry)->toContain('FAC-20')
+        ->and($dry)->toContain('FAC20')
         ->and($dry)->toContain('(sin folio guardado)')
         ->and($dry)->toContain('Por llenar: 2')
         ->and($dry)->toContain('Sin folio en la respuesta guardada: 1')

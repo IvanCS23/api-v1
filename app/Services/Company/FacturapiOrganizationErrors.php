@@ -7,6 +7,7 @@ use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Exceptions\Company\CompanyFiscalException;
+use App\Support\Billing\PacGuardRejectionLog;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -28,6 +29,12 @@ final class FacturapiOrganizationErrors
             $error instanceof PacValidationException => new CompanyFiscalException($rejectedCode, $rejectedPrefix.' '.$error->getMessage(), 422),
             default => new CompanyFiscalException('PAC_UNAVAILABLE', 'No se pudo completar la operación con Facturapi. No se guardó nada; intenta de nuevo.', 503),
         };
+
+        PacGuardRejectionLog::record($error, [
+            'company_id' => $companyId,
+            'action' => $operation,
+            'user_id' => auth('api')->id(),
+        ]);
 
         Log::warning("billing.company.{$operation}_failed", [
             'company_id' => $companyId,

@@ -30,9 +30,10 @@ test('matriz ERP PAC deriva capacidades empresariales sin consultar PAC', functi
     $actions = app(InvoiceBusinessCapabilitiesService::class)->for($invoice->fresh(), $user);
 
     // can_fetch_artifacts y can_fetch_cancellation_receipt tienen su propia
-    // matriz (CfdiArtifactsFetchabilityTest, CancellationReceiptCapabilityTest).
-    expect(array_keys($actions))->toBe(['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'can_fetch_cancellation_receipt', 'cancellation_mode'])
-        ->and(Arr::except($actions, ['can_fetch_artifacts', 'can_fetch_cancellation_receipt']))->toBe([
+    // matriz (CfdiArtifactsFetchabilityTest, CancellationReceiptCapabilityTest);
+    // can_revert_issue, la suya en RevertInvoiceIssueTest (Fase 6.29).
+    expect(array_keys($actions))->toBe(['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'can_fetch_cancellation_receipt', 'cancellation_mode', 'can_revert_issue'])
+        ->and(Arr::except($actions, ['can_fetch_artifacts', 'can_fetch_cancellation_receipt', 'can_revert_issue']))->toBe([
             'can_issue' => $canIssue,
             'can_cancel' => $cancelMode !== null,
             'can_reconcile' => $canReconcile,
@@ -107,6 +108,7 @@ test('identidad fiscal parcial queda inválida y sin acciones automáticas', fun
         'can_fetch_artifacts' => false,
         'can_fetch_cancellation_receipt' => false,
         'cancellation_mode' => null,
+        'can_revert_issue' => false,
     ]);
     Http::assertNothingSent();
 });

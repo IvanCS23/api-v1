@@ -29,8 +29,10 @@ use App\Exceptions\InvoiceAlreadyIssuedException;
 use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
+use App\Exceptions\InvoiceCannotBeRevertedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
+use App\Models\Invoice;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
 use RuntimeException;
@@ -39,8 +41,19 @@ use Throwable;
 /** Traduce únicamente errores esperados a un contrato público estable. */
 class InvoicePacActionExceptionResponder
 {
-    public function respond(Throwable $error): ?JsonResponse
+    /**
+     * @param  Invoice|null  $invoice  Fase 6.29: contexto del log de rechazos del guard.
+     * @param  string|null  $action  Fase 6.29: operación solicitada (p. ej. issueBusiness).
+     */
+    public function respond(Throwable $error, ?Invoice $invoice = null, ?string $action = null): ?JsonResponse
     {
+        PacGuardRejectionLog::record($error, [
+            'company_id' => $invoice?->company_id,
+            'invoice_id' => $invoice?->id,
+            'action' => $action,
+            'user_id' => auth('api')->id(),
+        ]);
+
         if ($error instanceof InvoiceNotReadyForPacException) {
             return response()->json([
                 'message' => 'La factura no está lista para emisión fiscal.',
@@ -90,6 +103,11 @@ class InvoicePacActionExceptionResponder
                 409,
                 'INVOICE_NOT_ELIGIBLE_FOR_PAC',
                 'La factura debe estar emitida internamente antes de solicitar el CFDI.',
+            ],
+            $error instanceof InvoiceCannotBeRevertedException => [
+                409,
+                'INVOICE_CANNOT_BE_REVERTED',
+                'La factura no puede regresar a "Lista para emitir": ya tiene CFDI, una operación fiscal en curso o su borrador remoto ya no es un borrador. Actualiza el estado y revisa el historial fiscal.',
             ],
             $error instanceof InvoiceAlreadyIssuedException => [
                 409,

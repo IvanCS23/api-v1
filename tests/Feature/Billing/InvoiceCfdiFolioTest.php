@@ -56,9 +56,9 @@ test('InvoiceFolio separa la serie y el número del folio interno', function (st
         ->and($parsed->number)->toBe($number)
         ->and($parsed->cfdiLabel())->toBe($label);
 })->with([
-    'folio normal' => ['FAC-00000019', 'FAC', 19, 'FAC-19'],
-    'primer folio' => ['FAC-00000001', 'FAC', 1, 'FAC-1'],
-    'más de 8 dígitos' => ['FAC-123456789', 'FAC', 123456789, 'FAC-123456789'],
+    'folio normal' => ['FAC-00000019', 'FAC', 19, 'FAC19'],
+    'primer folio' => ['FAC-00000001', 'FAC', 1, 'FAC1'],
+    'más de 8 dígitos' => ['FAC-123456789', 'FAC', 123456789, 'FAC123456789'],
 ]);
 
 test('InvoiceFolio rechaza folios de los que no sale un CFDI', function (?string $folio) {
@@ -76,7 +76,7 @@ test('InvoiceFolio rechaza folios de los que no sale un CFDI', function (?string
 ]);
 
 test('InvoiceFolio::label arma la forma visible y tolera datos parciales', function () {
-    expect(InvoiceFolio::label('F', 10))->toBe('F-10')
+    expect(InvoiceFolio::label('F', 10))->toBe('F10')
         ->and(InvoiceFolio::label(null, 10))->toBe('10')
         ->and(InvoiceFolio::label('FAC', null))->toBeNull();
 });

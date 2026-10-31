@@ -108,7 +108,7 @@ test('si Facturapi timbra con otro folio de la serie del ERP, queda en el histor
     expect($stamped->pac_issue_status)->toBe('succeeded')
         ->and($stamped->cfdi_uuid)->toBe(PHASE628_UUID)
         ->and($events)->toHaveCount(1)
-        ->and($events[0]->context)->toBe(['expected_folio' => 'FAC-19', 'received_folio' => 'FAC-99'])
+        ->and($events[0]->context)->toBe(['expected_folio' => 'FAC19', 'received_folio' => 'FAC99'])
         ->and($finding->status)->toBe(InvoiceHealthStatus::Invalid)
         ->and($finding->action)->toBe(InvoiceHealthAction::ManualReview);
 });
@@ -119,7 +119,7 @@ test('si Facturapi ignora la serie (timbra con "F"), el historial lo registra', 
 
     app(StampPacDraftInvoiceService::class)->stamp($invoice);
 
-    expect(phase628MismatchEvents($invoice)->first()->context)->toBe(['expected_folio' => 'FAC-19', 'received_folio' => 'F-10']);
+    expect(phase628MismatchEvents($invoice)->first()->context)->toBe(['expected_folio' => 'FAC19', 'received_folio' => 'F10']);
 });
 
 test('una respuesta sin folio no se puede verificar: no registra diferencia', function () {
@@ -170,5 +170,5 @@ test('el historial expone sólo el folio esperado y el recibido', function () {
     $public = (new InvoicePacEventResource(phase628MismatchEvents($invoice)->first()))->toArray(Request::create('/'));
 
     expect($public['type'])->toBe('cfdi_folio_mismatch')
-        ->and($public['context'])->toBe(['expected_folio' => 'FAC-19', 'received_folio' => 'FAC-99']);
+        ->and($public['context'])->toBe(['expected_folio' => 'FAC19', 'received_folio' => 'FAC99']);
 });

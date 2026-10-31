@@ -22,7 +22,7 @@ class InvoiceBusinessCapabilitiesService
      */
     public const ARTIFACT_PAC_STATUSES = ['valid', 'canceled'];
 
-    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string} */
+    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, can_revert_issue: bool} */
     public function for(Invoice $invoice, ?User $user): array
     {
         // Fase 6.27: una factura de otra organización (o archivada) no ofrece
@@ -35,6 +35,7 @@ class InvoiceBusinessCapabilitiesService
                 'can_fetch_artifacts' => false,
                 'can_fetch_cancellation_receipt' => false,
                 'cancellation_mode' => null,
+                'can_revert_issue' => false,
             ];
         }
 
@@ -58,6 +59,9 @@ class InvoiceBusinessCapabilitiesService
             'can_fetch_artifacts' => $canFetchArtifacts,
             'can_fetch_cancellation_receipt' => $canFetchReceipt,
             'cancellation_mode' => $canCancel ? $mode : null,
+            // Fase 6.29: mismo permiso que emitir.
+            'can_revert_issue' => $this->canRevertIssueByState($invoice)
+                && $user?->can('issueBusiness', $invoice) === true,
         ];
     }
 
@@ -267,6 +271,26 @@ class InvoiceBusinessCapabilitiesService
     public function hasNoFiscalIdentity(Invoice $invoice): bool
     {
         return blank($invoice->pac_external_id) && blank($invoice->cfdi_uuid);
+    }
+
+    /**
+     * Fase 6.29: "Regresar a lista". Una factura `issued` cuyo timbrado no
+     * ocurrió (rechazado o nunca intentado) y que no tiene nada en curso ni
+     * en revisión puede volver a `ready`, para corregirla (eliminarla y
+     * volver a facturar la venta) o reintentar. El borrador remoto, si
+     * existe, se vuelve a consultar al ejecutar la acción: aquí sólo se
+     * evalúa el estado local.
+     */
+    public function canRevertIssueByState(Invoice $invoice): bool
+    {
+        return $invoice->status === InvoiceStatus::Issued
+            && $this->hasNoFiscalIdentity($invoice)
+            && $invoice->pac_status === null
+            && in_array($invoice->pac_issue_status, [null, 'failed'], true)
+            && in_array($invoice->pac_draft_status, [null, 'draft'], true)
+            && ! $this->requiresReview($invoice)
+            && ! $this->hasOpenCancelRequest($invoice)
+            && ! $this->hasUnlinkedDraftReservation($invoice);
     }
 
     private function hasReconciliationContext(Invoice $invoice): bool

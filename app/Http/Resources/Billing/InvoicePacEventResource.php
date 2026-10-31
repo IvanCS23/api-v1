@@ -87,6 +87,7 @@ class InvoicePacEventResource extends JsonResource
             ],
             InvoicePacEventType::OrganizationArchived => ['reason'],
             InvoicePacEventType::CfdiFolioMismatch => ['expected_folio', 'received_folio'],
+            InvoicePacEventType::IssueReverted => ['previous_issue_status', 'pac_draft_status'],
             default => [],
         };
 

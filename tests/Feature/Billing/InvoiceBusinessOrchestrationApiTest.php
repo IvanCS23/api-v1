@@ -201,7 +201,7 @@ test('readiness inválida conserva ERP ready y hace cero HTTP', function () {
     Http::assertNothingSent();
 });
 
-test('rechazo definitivo al crear draft deja ERP issued pero reintento empresarial seguro habilitado', function () {
+test('Fase 6.29: rechazo definitivo al crear draft deja la factura en ready y el reintento habilitado', function () {
     [, $user, $invoice] = phase616Invoice();
     Http::fake(['*' => Http::response(['message' => 'dato fiscal rechazado'], 422)]);
     app(CurrentTenant::class)->clear();
@@ -213,7 +213,8 @@ test('rechazo definitivo al crear draft deja ERP issued pero reintento empresari
 
     app(CurrentTenant::class)->set($invoice->company_id);
     $fresh = $invoice->fresh();
-    expect($fresh->status)->toBe(InvoiceStatus::Issued)
+    expect($fresh->status)->toBe(InvoiceStatus::Ready)
+        ->and($fresh->issued_at)->toBeNull()
         ->and($fresh->cfdi_uuid)->toBeNull()
         ->and($fresh->pac_reconciliation_required)->toBeFalse()
         ->and(app(InvoiceBusinessCapabilitiesService::class)->canIssueByState($fresh))->toBeTrue();

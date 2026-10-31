@@ -287,16 +287,28 @@ FASE 6.28 — Folio del CFDI y método de pago:
 - Desviaciones del plan: una respuesta del PAC sin folio no cuenta como diferencia (no se puede verificar; las respuestas simuladas de las pruebas existentes no lo traen). La consulta de duplicados va detrás de `billing.cfdi_folio_check` para no reescribir 30 pruebas con HTTP simulado, igual que `auto_download`.
 - Commits api-v1: `c4b9689`, `4f602a4`, `ab6feec`, `a03e698`, `5e73bc6`, `9452e17`, `71e31c5` (documentación) y `080833d` (consulta de folio antes de la transición ERP). app-front: `6d62634`, `ca9ef2a`.
 
+FASE 6.29 — Infraestructura pre-producción:
+- Rechazos del guard PAC en `laravel.log` (`billing.pac.guard_rejected`: código interno, empresa, factura, acción y usuario; nunca mensaje ni llaves), desde las acciones de factura, la descarga automática y Datos fiscales/CSD/logotipo.
+- Login web de Fortify: `authenticateUsing` rechaza inactivos y suspendidos sólo con la contraseña correcta (con la incorrecta, el error genérico); con 2FA no llegan al reto.
+- Folio CFDI visible sin separador (`FAC20`, `F10`), como el PDF de Facturapi.
+- Zona horaria: `DB_TIMEZONE` (`+00:00`) en `mysql`/`mariadb`, migración `normalize_timestamps_to_utc` (`TimestampUtcNormalizer`: lee con la sesión en `SYSTEM` y escribe en `+00:00`; no hace nada si el servidor ya es UTC) y `db:timezone-check`.
+- Emisión: el borrador remoto se prepara y valida antes de `ready -> issued` (`409 PAC_DRAFT_NOT_READY` deja la factura en `ready`); una emisión normal sigue haciendo tres llamadas.
+- "Regresar a lista" (`POST /operations/revert-issue`, `actions.can_revert_issue`, evento `issue_reverted`) para facturas `issued` sin CFDI con el timbrado rechazado; consulta antes el borrador remoto.
+- Logotipo del PDF: `POST/GET /api/company/logo` (Facturapi primero, copia privada para la vista previa, auditoría `logo_uploaded`) y tarjeta en Datos fiscales. El "Tecnologias S.A" del PDF era el logotipo de la organización, no un campo: `legal.name` ya era "Mi Empresa".
+- `DEPLOYMENT.md`: requisitos (MySQL 8 o MariaDB 10.6+), variables, primer despliegue, zona horaria, supervisor, `APP_KEY`, User Key, respaldos y verificación.
+- Desviaciones del plan: `billing:health` sigue sugiriendo `operations_issue` para `issue_failed`/`erp_issued_without_cfdi` (un reintento resuelve los transitorios; "Regresar a lista" es la alternativa). No se usa `PUT /customization`: no incluye el nombre y los folios los controla el ERP. Se corrigió una prueba intermitente de la 6.28 (`InvoiceCfdiFolioSearchTest`).
+- Commits api-v1: `b59978e`, `462ae15`, `324e9a8`, `376ee39`, `f3cb807`, `4028401`, `d571ad4` y el de documentación. app-front: `208855d`, `8f873d8`, `b4b237d`.
+
 Documentación principal:
 
-`api-v1/BILLING_LIFECYCLE.md`
+`api-v1/BILLING_LIFECYCLE.md` y `api-v1/DEPLOYMENT.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.28 (verificada el 2026-10-30 sobre
+Línea base al cierre de la FASE 6.29 (verificada el 2026-10-30 sobre
 `changes-ivan` e `integracion-ivan`):
-- Backend: 1587 pruebas aprobadas, 6727 assertions, 0 fallidas.
-- Frontend: 239 pruebas aprobadas en 27 archivos, 0 fallidas.
+- Backend: 1625 pruebas aprobadas, 6881 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
+- Frontend: 251 pruebas aprobadas en 27 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 32 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -312,7 +324,8 @@ Estado de la BD local de desarrollo:
 - Migraciones de la 6.26 aplicadas (`create_sat_product_keys_table`, `create_sat_unit_keys_table`, `drop_unique_clave_producto_on_products_table`, `add_tax_rate_id_to_products_table`) y catálogos importados (52 513 / 2 418). Cada ambiente nuevo debe correr `php artisan sat:import-catalogs`.
 - Migraciones de la 6.27 aplicadas. Empresa 1 vinculada con la organización `6ad00a7079761a6ddec6026a` (llave `sk_test_…hMMB`); #1–#3 archivadas; `billing:health`: 17 facturas `valid`. `billing:pac-check` falla por los datos de la empresa 1, que difieren de Facturapi y se corrigen a mano: RFC `XAXX010101000` frente a `XIA190128J61`, C.P. vacío frente a `06010` y razón social "Mi Empresa" frente a "TECNOLOGIAS S.A". La organización no tiene CSD (en TEST timbra igual).
 - 6.27b, aplicado con autorización el 2026-10-29: migración `create_facturapi_organization_audits_table` (lote 36) y `PUT /legal` real de la empresa 1 como el usuario 2 (razón social XENON INDUSTRIAL ARTICLES, RFC XIA190128J61, régimen 601, C.P. 06010; nombre comercial "Mi Empresa"; auditoría #1). `billing:pac-check --company=1`: WARN, sólo por el CSD ausente (en TEST no bloquea); la cuenta de la User Key es dueña de la organización. La empresa 1 vuelve a emitir: venta #29 (VTA-00000021) → factura #20 (FAC-00000019), `issued`/`valid` en TEST. CSD sin cargar por decisión del usuario.
-- 6.28, aplicado con autorización el 2026-10-30: migración `add_cfdi_folio_to_invoices_table` y `billing:backfill-cfdi-folio --apply` (13 facturas con la serie `F`: #1–#3 de la organización anterior y #8–#13, #16, #17, #19 y #20 de la actual, F-1 a F-10). No había ventas ni facturas PPD. Venta de prueba #30 (VTA-00000022, cliente 7, producto 14, 03/PUE, IVA 16 %, total 116.00) creada en borrador para emitirse desde la interfaz; su factura será `FAC-00000020` y su CFDI `FAC-20`.
+- 6.28, aplicado con autorización el 2026-10-30: migración `add_cfdi_folio_to_invoices_table` y `billing:backfill-cfdi-folio --apply` (13 facturas con la serie `F`: #1–#3 de la organización anterior y #8–#13, #16, #17, #19 y #20 de la actual, F-1 a F-10). No había ventas ni facturas PPD. Venta de prueba #30 (VTA-00000022, cliente 7, producto 14, 03/PUE, IVA 16 %, total 116.00) creada en borrador para emitirse desde la interfaz; el usuario la emitió: factura #21 (`FAC-00000020`), XML con `Serie="FAC" Folio="20"`, sin `cfdi_folio_mismatch`.
+- 6.29, aplicado con autorización el 2026-10-30: respaldo `backups/facturapro-2026-10-30-pre-6.29-timezone.sql` (fuera de los repos) y migración `normalize_timestamps_to_utc` (236 filas en 20 tablas; huella y 23 fechas de muestra idénticas antes y después; `db:timezone-check` OK). `GET /organizations/{id}` de la empresa 1: `legal.name` "Mi Empresa", `has_logo` true (imagen "Tecnologias S.A"). Pendiente de autorizar: migración `add_logo_to_facturapi_organizations_and_companies` y la subida real del logotipo.
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
@@ -329,8 +342,9 @@ Hallazgos de producto pendientes (verificados en el código):
 - 17 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Complemento de pago (REP): requisito para reactivar PPD (bloqueado en la 6.28). Al construirlo, quitar PPD de `SalePaymentRules::UNAVAILABLE_METHODS`; la regla PPD ↔ 99 ya está lista.
 - `companies.default_cfdi_series` no tiene uso: la serie del CFDI sale del folio interno (`FAC`). Decidir si se elimina o si se permite configurar el prefijo del folio interno.
-- Un rechazo definitivo del PAC al timbrar (p. ej. `PAC_VALIDATION_FAILED`) deja la factura ERP en `issued` sin CFDI, porque la transición ERP ocurre antes de contactar al PAC. `PAC_FOLIO_ALREADY_USED` ya no: se consulta antes de la transición y la factura queda en `ready`. La ruta para validar con el borrador remoto antes de la transición y recuperar esas facturas es parte de la 6.29 (ver la hoja de ruta).
-- El login web de Fortify (sesión) no revisa el estado del usuario: uno inactivo inicia sesión, pero su primera petición autenticada recibe 403 y la sesión se cierra. `POST /api/login` sí lo rechaza.
+- Un `/stamp` rechazado por una validación del SAT que sólo ocurre al timbrar deja la factura `issued` sin CFDI; se recupera con "Regresar a lista" (6.29) y, para corregir datos, eliminándola y volviendo a facturar la venta. La cancelación sólo ERP no se ofrece a facturas con borrador remoto.
+- Columnas `TIMESTAMP`: límite 2038-01-19 (convertir a `DATETIME` en una fase futura).
+- Facturapi no documenta cómo quitar un logotipo: sólo se reemplaza.
 - El C.P. del cliente con RFC genérico sólo se valida en el readiness de venta y de emisión; el formulario de Clientes no lo avisa (no conoce el C.P. de la empresa y Sales/Employee no pueden leer los datos fiscales).
 - La regla de razón social sin régimen societario es un patrón (S.A., S.A. de C.V., S. de R.L., S.C., A.C., S.A.S., S.A.P.I.): puede tener falsos positivos con nombres que terminen así.
 - Folios de cotizaciones: `QuoteNumberGenerator` ignora las cotizaciones borradas (suave); borrar la última y crear otra repite el folio y choca con el único `(company_id, folio)` (500). Facturas y ventas ya se corrigieron en la 6.25; cotizaciones quedaron fuera de alcance.
@@ -347,10 +361,9 @@ Hallazgos de producto pendientes (verificados en el código):
   - Esa fase debe rediseñar el modelo de impuestos por línea (varios impuestos por concepto, traslado/retención, tasa/cuota, precisión del SAT), no reutilizar estas columnas.
 - `default_payment_form` de la empresa no tiene endpoint y `CompanyBillingReadinessService` sólo exige 2 dígitos; uno fuera de catálogo aparece como `SALE_PAYMENT_FORM_INVALID` en el readiness de la venta.
 - Los datos existentes inválidos (ver estado de la BD local) deben corregirse a mano desde las pantallas; `sat:audit-catalog-data` los lista.
-- Los rechazos del guard PAC no quedan en `laravel.log`: `InvoicePacActionExceptionResponder` convierte `PacConfigurationException` en `PAC_CONFIGURATION_INVALID` sin registrar nada, así que el código interno (`pac_mode_unsupported`, `pac_organization_missing`, `pac_key_missing`, `pac_key_mode_mismatch`) solo se conoce reproduciendo el error. Registrar el código interno, la empresa y la factura, sin llaves ni respuestas del PAC, para que un operador diagnostique desde el log (encontrado el 2026-10-28, cuando la empresa 1 aún no tenía vínculo).
 
 Riesgos pendientes:
-- Zona horaria de la conexión MySQL: la sesión usa `SYSTEM` (America/Mexico_City); `NOW()` en SQL da hora local y fijar `+00:00` desplazaría las fechas guardadas. Requiere fase propia con migración de datos (documentado en `BILLING_LIFECYCLE.md`).
+- Zona horaria (resuelto en la 6.29): un servidor con datos anteriores debe migrar en mantenimiento y en el mismo servidor donde se escribieron (ver `DEPLOYMENT.md`).
 - Respaldos: una copia de la BD junto con el `.env` (`APP_KEY`) expone las llaves de Facturapi; ver `BILLING_LIFECYCLE.md` (rotación con `APP_PREVIOUS_KEYS`, `security:reencrypt` y `billing:facturapi-link --replace-key`).
 - User Key: abre todas las organizaciones de la cuenta y vive en el proceso web (datos fiscales y CSD). Mitigado con la lista cerrada del cliente, sólo Admin, límites de intentos, auditoría y redacción; si el `.env` se filtra, reemplazarla en Facturapi.
 - Sin verificar contra Facturapi real: la forma exacta de los errores del CSD, si `PUT /legal` borra los campos de dirección omitidos (se envían todos los que tiene la empresa), si una organización nueva sin `tax_id` timbra en TEST y qué responde `GET /organizations/{id}` con una organización de otra cuenta.
@@ -394,18 +407,13 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.28 — Folio del CFDI y método de pago (ver sección 7). En la BD local ya se aplicaron la migración `add_cfdi_folio_to_invoices_table` y `billing:backfill-cfdi-folio --apply` (13 facturas, todas con la serie `F` anterior a la 6.28). Falta la emisión real en TEST de la venta #30 (VTA-00000022), que hará el usuario desde la interfaz, para confirmar `Serie="FAC" Folio="20"` en el XML y cómo lo imprime el PDF.
+La última fase completada es la FASE 6.29 — Infraestructura pre-producción (ver sección 7). La emisión de la venta #30 confirmó el folio de la 6.28 (`FAC-00000020` → `Serie="FAC" Folio="20"`). Falta, con autorización del usuario: aplicar en la BD local la migración del logotipo y subir el logotipo real de la empresa 1 desde Datos fiscales.
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
 Hito 1 — Piloto (ventas de contado):
 - FASE 6.28 — Folio del CFDI y bloqueo de PPD. Completa.
-- FASE 6.29 — Infraestructura pre-producción:
-  - Zona horaria de la conexión MySQL (sesión `SYSTEM`; requiere migración de datos, ver `BILLING_LIFECYCLE.md`).
-  - Registrar en `laravel.log` los rechazos del guard PAC (código interno, empresa y factura; sin llaves ni respuestas del PAC).
-  - Login de usuarios inactivos: que el login web de Fortify los rechace como `POST /api/login`.
-  - Checklist de despliegue (variables, migraciones, `sat:import-catalogs`, worker de colas, respaldos con `APP_KEY`).
-  - Ruta para facturas `issued` cuyo timbrado fue rechazado: validar con el borrador remoto (`is_ready_to_stamp`) antes de la transición ERP y permitir recuperar las que ya quedaron `issued` sin CFDI.
+- FASE 6.29 — Infraestructura pre-producción (zona horaria de MySQL, logs del guard, login de inactivos, checklist de despliegue en `DEPLOYMENT.md`, borrador validado antes de la transición y "Regresar a lista", logotipo del PDF). Completa.
 - FASE 6.30 — Envío del CFDI por correo.
 - FASE 6.31 — Modo Live con una empresa piloto (incluye la verificación obligatoria del acuse de cancelación con la primera cancelación real).
 
@@ -431,10 +439,10 @@ Después del lanzamiento:
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.29 — Infraestructura pre-producción antes de modificar archivos:
+Prepara la FASE 6.30 — Envío del CFDI por correo antes de modificar archivos:
 
 1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Para cada punto de la 6.29 (sección 10), revisa el código y los hallazgos ya documentados (sección 8 y `BILLING_LIFECYCLE.md`).
+2. Revisa qué ofrece Facturapi para enviar el CFDI por correo, qué datos del cliente existen (correo, `CLIENT_EMAIL_MISSING`) y qué requiere el worker de colas.
 3. Propón alcance, archivos, pruebas, riesgos y orden de commits.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.

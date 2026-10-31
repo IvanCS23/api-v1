@@ -29,6 +29,9 @@ final class FacturapiOrganizationSnapshot
         public readonly ?CarbonImmutable $certificateUpdatedAt,
         public readonly bool $isProductionReady,
         public readonly array $pendingSteps,
+        // Fase 6.29: nombre comercial (legal.name) y logotipo, lo que imprime el PDF.
+        public readonly ?string $tradeName = null,
+        public readonly ?bool $hasLogo = null,
     ) {}
 
     /**
@@ -44,6 +47,7 @@ final class FacturapiOrganizationSnapshot
         $address = is_array($legal['address'] ?? null) ? $legal['address'] : [];
         $certificate = is_array($data['certificate'] ?? null) ? $data['certificate'] : [];
         $steps = is_array($data['pending_steps'] ?? null) ? $data['pending_steps'] : [];
+        $customization = is_array($data['customization'] ?? null) ? $data['customization'] : [];
 
         return new self(
             id: $data['id'],
@@ -60,6 +64,8 @@ final class FacturapiOrganizationSnapshot
                 'type' => (string) ($step['type'] ?? ''),
                 'description' => (string) ($step['description'] ?? ''),
             ], array_filter($steps, 'is_array'))),
+            tradeName: self::string($legal['name'] ?? null),
+            hasLogo: is_bool($customization['has_logo'] ?? null) ? $customization['has_logo'] : null,
         );
     }
 
@@ -73,6 +79,7 @@ final class FacturapiOrganizationSnapshot
         return [
             'organization_id' => $this->id,
             'legal_name' => $this->legalName,
+            'legal_trade_name' => $this->tradeName,
             'legal_tax_id' => $this->taxId,
             'legal_tax_system' => $this->taxSystem,
             'legal_zip' => $this->zip,
@@ -80,6 +87,7 @@ final class FacturapiOrganizationSnapshot
             'certificate_serial_number' => $this->certificateSerialNumber,
             'certificate_expires_at' => $this->certificateExpiresAt,
             'certificate_updated_at' => $this->certificateUpdatedAt,
+            'has_logo' => $this->hasLogo,
             'is_production_ready' => $this->isProductionReady,
             'pending_steps' => $this->pendingSteps,
             'snapshot_at' => CarbonImmutable::now(),

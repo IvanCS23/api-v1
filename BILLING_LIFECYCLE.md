@@ -36,14 +36,52 @@ Payload: `{ "confirm": true }`.
 
 1. valida tenant, Policy, estado e integridad fiscal;
 2. prevalida readiness mientras la factura sigue `ready`;
-3. confirma `ready -> issued` en una transacción corta;
-4. delega draft/sync/update/stamp al orquestador PAC existente;
-5. sólo responde 200 final cuando ERP=`issued`, PAC=`valid`, existe identidad,
+3. con la factura todavía en `ready`: guards de configuración y de
+   organización, consulta de folio duplicado (6.28) y, desde la 6.29, el
+   borrador remoto (`prepareDraftBeforeIssue`): se crea o sincroniza y, si
+   Facturapi no lo da por listo para timbrar, se actualiza con el snapshot
+   vigente. Si sigue sin estar listo responde `409 PAC_DRAFT_NOT_READY`; si
+   el remoto está pendiente o cancelado, 409; un rechazo al crearlo, 422. En
+   todos esos casos la factura queda en `ready`;
+4. confirma `ready -> issued` en una transacción corta;
+5. timbra el borrador ya preparado (el timbrado lo vuelve a sincronizar
+   antes de `/stamp`; una emisión normal hace las mismas tres llamadas que
+   antes: crear, sincronizar y timbrar);
+6. sólo responde 200 final cuando ERP=`issued`, PAC=`valid`, existe identidad,
    `pac_issue_status=succeeded` y no se requiere reconciliación.
 
 Un timeout o resultado ambiguo conserva ERP=`issued`, marca reconciliación y
 nunca repite el stamp a ciegas. La misma operación es idempotente cuando el
 CFDI ya quedó confirmado.
+
+Las validaciones del SAT que sólo ocurren al timbrar (p. ej. que el nombre
+del receptor coincida con su RFC) no se anticipan: un `/stamp` rechazado
+deja la factura `issued` sin CFDI (`pac_issue_status=failed`). Para eso está
+"Regresar a lista".
+
+### Regresar a lista (Fase 6.29)
+
+`POST /api/invoices/{invoice}/operations/revert-issue` con
+`{ "confirm": true }`, mismo permiso que emitir (Admin y Contador).
+
+Una factura `issued` sin identidad fiscal, con `pac_issue_status` vacío o
+`failed`, borrador local vacío o `draft`, sin revisión ni cancelación en
+curso y sin llave de borrador reservada sin id remoto
+(`canRevertIssueByState`, expuesto como `actions.can_revert_issue`) vuelve a
+`ready`: `issued_at` y `pac_issue_status` en null; se conservan el
+borrador, los intentos y el último error. Si hay borrador remoto se
+consulta primero: si ya no es un borrador (p. ej. se timbró por fuera) la
+sincronización lo registra y responde `409 INVOICE_CANNOT_BE_REVERTED`; la
+factura se resuelve reconciliando. Registra el evento `issue_reverted`.
+
+Desde `ready` la factura se puede eliminar y volver a facturar la venta con
+los datos corregidos (el snapshot de la factura no se edita), o reintentar
+si el problema era de la empresa. El borrador remoto no se borra: se
+reutiliza en el siguiente intento o queda sin timbrar. La cancelación sólo
+ERP sigue sin ofrecerse a una factura con borrador remoto. `billing:health`
+sigue sugiriendo `operations_issue` para `issue_failed` y
+`erp_issued_without_cfdi` (un reintento resuelve los fallos transitorios);
+"Regresar a lista" es la alternativa cuando el dato está mal.
 
 ### Cancelar factura
 
@@ -232,8 +270,10 @@ El CFDI lleva la serie y el folio del ERP: `FAC-00000019` se timbra como
 Serie `FAC` y Folio `19` (`InvoiceFolio`). `FacturapiProvider` los envía como
 `series`/`folio_number` al crear el borrador y en cada `PUT` que lo
 actualiza, así que un borrador anterior a la 6.28 también los recibe antes de
-timbrarse. `folio_number` es entero: los ceros se pierden y la forma visible
-es `FAC-19`. `companies.default_cfdi_series` sigue sin uso.
+timbrarse. `folio_number` es entero: los ceros se pierden. Desde la 6.29 la
+forma visible es `FAC19` (sin separador), igual que la imprime el PDF de
+Facturapi; las facturas anteriores a la 6.28 se ven como `F10`.
+`companies.default_cfdi_series` sigue sin uso.
 
 - **Folio inválido.** Un folio que no sea `FAC-` + 8 a 10 dígitos (y mayor
   que 0) da `INVOICE_FOLIO_INVALID` en el readiness, y el provider lo rechaza
@@ -271,7 +311,7 @@ es `FAC-19`. `companies.default_cfdi_series` sigue sin uso.
   `cfdi_folio_matches_erp=false` y el panel muestra la nota "Asignado por
   Facturapi antes de la 6.28".
 - **API.** `InvoiceResource` (`cfdi_series`, `cfdi_folio_number`,
-  `cfdi_folio`, `cfdi_folio_matches_erp`) e `InvoiceBillingResource`
+  `cfdi_folio` (`FAC19`), `cfdi_folio_matches_erp`) e `InvoiceBillingResource`
   (`cfdi.series`, `cfdi.folio_number`, `cfdi.folio`, `cfdi.folio_matches_erp`).
   La búsqueda de `GET /api/invoices` acepta el folio CFDI como `19`, `FAC-19`,
   `FAC 19` o `FAC19`: el timbrado (respeta la serie si se escribe) y, para la
@@ -390,6 +430,15 @@ Los logs estructurados `billing.invoice.*` nunca contienen `pac_external_id`
 completo: `pac_issue_attempt`, `pac_stamp_attempt` y `pac_cancellation` lo
 enmascaran (`8 caracteres...4 caracteres`). Tampoco contienen UUID, payloads,
 llaves ni errores crudos del PAC.
+
+Fase 6.29: cada rechazo del guard PAC queda como `billing.pac.guard_rejected`
+(`PacGuardRejectionLog`) con el código interno (`pac_mode_unsupported`,
+`pac_organization_missing`, `pac_key_missing`, `pac_key_mode_mismatch`,
+`pac_organization_mismatch`, `stamp_timezone_invalid`, …), `company_id`,
+`invoice_id`, la acción y el `user_id`; nunca el mensaje de la excepción ni
+llaves. Lo registran las acciones de factura, la descarga automática de
+XML/PDF y Datos fiscales/CSD/logotipo. La API sigue respondiendo sólo
+`PAC_CONFIGURATION_INVALID` / `PAC_ORGANIZATION_MISMATCH`.
 
 ### Política de reintentos
 
@@ -712,6 +761,32 @@ organización): `COMPANY_FISCAL_DATA_INCOMPLETE`, `COMPANY_RFC_CSD_MISMATCH` y
 emisión: `CLIENT_GENERIC_POSTAL_CODE_MISMATCH` (con RFC genérico, el C.P. del
 cliente es el de la empresa, lugar de expedición).
 
+### Logotipo y nombre comercial del PDF (Fase 6.29)
+
+El PDF de Facturapi imprime el logotipo de la organización y su nombre
+comercial (`legal.name`). En desarrollo, el "Tecnologias S.A" del PDF era el
+logotipo cargado en la organización (una imagen JPG con ese texto,
+`customization.has_logo=true`), no un campo de texto: `legal.name` ya era
+"Mi Empresa", que `PUT /legal` sincroniza desde Datos fiscales
+(verificado con `GET /organizations/{id}` el 2026-10-30).
+
+- `POST /api/company/logo` (Admin, `throttle:company-fiscal`): JPG o PNG de
+  hasta 500 KB (Facturapi recomienda 800 × 500 px). Facturapi primero:
+  `PUT /organizations/{id}/logo` (campo `file`) reemplaza el anterior; la
+  copia privada local se escribe antes y se borra si Facturapi rechaza el
+  archivo (`COMPANY_LOGO_REJECTED`). Al aceptarlo guarda `companies.logo` y
+  `logo_updated_at`, borra la copia anterior y audita `logo_uploaded`
+  (sha256, bytes y tipo).
+- `GET /api/company/logo`: la copia privada de la propia empresa, con
+  `Cache-Control: private, no-store`, para la vista previa.
+- El snapshot de la organización guarda `legal_trade_name` y `has_logo`;
+  Datos fiscales avisa cuando Facturapi tiene un logotipo que no se subió
+  desde aquí.
+- Facturapi no documenta cómo quitar un logotipo: sólo se reemplaza.
+- `PUT /organizations/{id}/customization` (color, opciones del PDF y
+  siguientes folios) no se usa: no incluye el nombre, y los folios los
+  controla el ERP (6.28).
+
 ### Llaves cifradas con APP_KEY
 
 Las columnas cifradas usan `APP_KEY`: `facturapi_organizations.test_secret_key`,
@@ -761,21 +836,22 @@ sólo depende del estado remoto (`valid` y `canceled` la liberan); la falta
 de archivos la cubren `cfdi_artifacts_missing`, `can_fetch_artifacts` y la
 descarga automática.
 
-### Zona horaria de la conexión MySQL (no corregido)
+### Resuelto en la Fase 6.29: zona horaria de la conexión MySQL
 
-`config/database.php` no fija `timezone` en la conexión `mysql`, así que
-cada sesión usa la del servidor (`time_zone=SYSTEM`; en desarrollo,
-`America/Mexico_City`). Laravel escribe y lee las columnas `TIMESTAMP` como
-texto en UTC (`app.timezone=UTC`) y MySQL las convierte con la zona de la
-sesión, de modo que el ida y vuelta desde Laravel es coherente, pero:
+Antes la conexión no fijaba `timezone` y cada sesión usaba la del servidor
+(`SYSTEM`; en desarrollo, `America/Mexico_City`): las 74 columnas
+`TIMESTAMP` se guardaban corridas 6 h y `NOW()` daba hora local. Ahora las
+conexiones `mysql` y `mariadb` fijan `DB_TIMEZONE` (`+00:00` por defecto) y
+la migración `normalize_timestamps_to_utc` (`TimestampUtcNormalizer`)
+reescribe lo guardado: lee cada valor con la sesión en `SYSTEM` y lo escribe
+con la sesión en `+00:00`, fila por fila y en una transacción, sin
+`CONVERT_TZ` (MariaDB local no tiene las tablas de zonas). En un servidor ya
+en UTC no hace nada. `db:timezone-check` (sólo lectura) verifica la sesión y
+que ninguna fecha reciente aparezca en el futuro. El orden de despliegue está
+en `DEPLOYMENT.md`.
 
-- un cliente SQL o una sesión con otra zona ve los valores desplazados;
-- `NOW()`/`CURRENT_TIMESTAMP` en SQL devuelve hora de México, no UTC:
-  cualquier comparación o default de base de datos queda 6 h corrido
-  (`useCurrent()` existe en `invoice_pac_events.occurred_at/created_at` y
-  `failed_jobs.failed_at`; `InvoicePacAuditService` fija ambas fechas
-  desde PHP, por lo que hoy no se usa el default);
-- fijar ahora `'timezone' => '+00:00'` desplazaría 6 h la lectura de todas
-  las fechas ya guardadas.
+Aplicado en la BD local el 2026-10-30 con respaldo previo: 236 filas en 20
+tablas; la huella de todas las columnas y 23 fechas de muestra, tal como las
+lee Laravel, quedaron idénticas antes y después.
 
-Corregirlo exige una fase propia con migración de datos coordinada.
+Pendiente: las columnas `TIMESTAMP` llegan hasta 2038-01-19.
