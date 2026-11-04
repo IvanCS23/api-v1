@@ -7,6 +7,7 @@ use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacEmailNotSentException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 
@@ -147,6 +148,17 @@ interface PacProvider
         string $motive,
         ?string $substitutionUuid = null,
     ): PacInvoiceResult;
+
+    /**
+     * Fase 6.30: envía el CFDI (XML y PDF) por correo a $recipients.
+     * Siempre con la lista explícita: sin ella Facturapi usaría el correo
+     * que tenga guardado del cliente. No es idempotente: nunca se reintenta.
+     *
+     * @param  list<string>  $recipients
+     *
+     * @throws PacEmailNotSentException si el PAC responde ok:false
+     */
+    public function sendInvoiceEmail(string $externalId, array $recipients): void;
 
     public function downloadPdf(string $externalId): string;
 

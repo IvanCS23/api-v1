@@ -13,6 +13,7 @@ use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacEmailNotSentException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
 use App\Exceptions\Billing\PacOrganizationMismatchException;
@@ -28,6 +29,7 @@ use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
+use InvalidArgumentException;
 
 /**
  * Adaptador HTTP hacia Facturapi. Fase 6.1: infraestructura de
@@ -47,6 +49,9 @@ use Illuminate\Support\Facades\Http;
  */
 class FacturapiProvider implements PacProvider
 {
+    /** Fase 6.30: tope documentado de POST /invoices/{id}/email. */
+    public const MAX_EMAIL_RECIPIENTS = 10;
+
     /**
      * Mapea el catálogo SAT c_Impuesto (`InvoiceItem::tax_code`) al
      * nombre de impuesto que espera `product.taxes[].type` en el
@@ -346,6 +351,33 @@ class FacturapiProvider implements PacProvider
         $data = $this->safeJsonObject($response);
 
         return FacturapiOrganizationSnapshot::fromResponse($data);
+    }
+
+    /**
+     * Fase 6.30: POST /invoices/{id}/email con `{"email": [...]}`. Nunca
+     * con el cuerpo vacío (Facturapi usaría el correo que tenga guardado del
+     * cliente) ni con más de 10 direcciones (límite documentado). Sin
+     * reintentos: el envío no tiene llave de idempotencia y repetirlo tras un
+     * timeout podría duplicar el correo. `ok: false` es un rechazo.
+     *
+     * @param  list<string>  $recipients
+     */
+    public function sendInvoiceEmail(string $externalId, array $recipients): void
+    {
+        $recipients = array_values($recipients);
+
+        if ($recipients === [] || count($recipients) > self::MAX_EMAIL_RECIPIENTS) {
+            throw new InvalidArgumentException('El envío por correo necesita entre 1 y '.self::MAX_EMAIL_RECIPIENTS.' destinatarios.');
+        }
+
+        $response = $this->client(retryOnConnectionFailure: false)->post("/invoices/{$externalId}/email", ['email' => $recipients]);
+        $this->assertSuccessful($response);
+
+        if ($this->safeJsonObject($response)['ok'] ?? null) {
+            return;
+        }
+
+        throw new PacEmailNotSentException;
     }
 
     public function downloadPdf(string $externalId): string
