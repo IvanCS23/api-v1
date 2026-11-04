@@ -282,6 +282,19 @@ class InvoiceBusinessCapabilitiesService
     }
 
     /**
+     * Fase 6.30: sólo un CFDI vigente se puede enviar por correo; Facturapi
+     * adjunta su XML y su PDF. Uno cancelado no: verificado en TEST el
+     * 2026-11-04, Facturapi lo envía sin ninguna marca de cancelación (ni en
+     * el correo ni en el PDF) y el correo dice que se emitió un comprobante.
+     * El bloqueo por organización ajena ya lo aplica for().
+     */
+    public function canSendEmailByState(Invoice $invoice): bool
+    {
+        return $this->hasCompleteFiscalIdentity($invoice)
+            && $invoice->pac_status === 'valid';
+    }
+
+    /**
      * Fase 6.29: "Regresar a lista". Una factura `issued` cuyo timbrado no
      * ocurrió (rechazado o nunca intentado) y que no tiene nada en curso ni
      * en revisión puede volver a `ready`, para corregirla (eliminarla y
@@ -289,17 +302,6 @@ class InvoiceBusinessCapabilitiesService
      * existe, se vuelve a consultar al ejecutar la acción: aquí sólo se
      * evalúa el estado local.
      */
-    /**
-     * Fase 6.30: sólo un CFDI timbrado (vigente o cancelado) se puede enviar
-     * por correo; Facturapi adjunta su XML y su PDF. El bloqueo por
-     * organización ajena ya lo aplica for().
-     */
-    public function canSendEmailByState(Invoice $invoice): bool
-    {
-        return $this->hasCompleteFiscalIdentity($invoice)
-            && in_array($invoice->pac_status, ['valid', 'canceled'], true);
-    }
-
     public function canRevertIssueByState(Invoice $invoice): bool
     {
         return $invoice->status === InvoiceStatus::Issued

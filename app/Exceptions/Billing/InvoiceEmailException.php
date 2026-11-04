@@ -23,7 +23,13 @@ final class InvoiceEmailException extends RuntimeException
 
     public static function notAllowed(): self
     {
-        return new self('INVOICE_EMAIL_NOT_ALLOWED', 409, 'Sólo se puede enviar por correo una factura con CFDI vigente o cancelado.');
+        return new self('INVOICE_EMAIL_NOT_ALLOWED', 409, 'Sólo se puede enviar por correo una factura con CFDI vigente.');
+    }
+
+    /** El CFDI está cancelado: Facturapi lo enviaría sin ninguna marca de cancelación. */
+    public static function canceled(): self
+    {
+        return new self('INVOICE_EMAIL_CFDI_CANCELED', 409, 'El CFDI está cancelado y no se envía por correo: Facturapi lo mandaría sin ninguna marca de cancelación y el correo diría que se emitió un comprobante. Avisa al cliente de la cancelación por otro medio.');
     }
 
     public static function noRecipients(): self

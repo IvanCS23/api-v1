@@ -157,20 +157,31 @@ test('las capacidades distinguen enviar de editar la lista por rol', function (U
     'Empleado' => [UserRole::Employee, false, false],
 ]);
 
-test('sólo se envía un CFDI vigente o cancelado', function (array $fiscal, bool $allowed) {
+test('sólo se envía un CFDI vigente; uno cancelado explica por qué no', function (array $fiscal, ?string $code) {
     [$company, $invoice] = phase630Invoice($fiscal);
     phase630FakeEmail();
 
     $response = phase630Send(phase630User($company), $invoice);
 
-    $allowed ? $response->assertOk() : $response->assertStatus(409)->assertJsonPath('code', 'INVOICE_EMAIL_NOT_ALLOWED');
-    $allowed ? Http::assertSentCount(1) : Http::assertNothingSent();
+    $code === null ? $response->assertOk() : $response->assertStatus(409)->assertJsonPath('code', $code);
+    $code === null ? Http::assertSentCount(1) : Http::assertNothingSent();
 })->with([
-    'vigente' => [[], true],
-    'cancelado' => [['pac_status' => 'canceled', 'cancellation_status' => 'accepted'], true],
-    'sin timbrar' => [['pac_external_id' => null, 'cfdi_uuid' => null, 'pac_status' => null, 'pac_issue_status' => null], false],
-    'pendiente' => [['pac_status' => 'pending'], false],
+    'vigente' => [[], null],
+    // Verificado en TEST: Facturapi lo enviaría sin ninguna marca de cancelación.
+    'cancelado' => [['pac_status' => 'canceled', 'cancellation_status' => 'accepted'], 'INVOICE_EMAIL_CFDI_CANCELED'],
+    'sin timbrar' => [['pac_external_id' => null, 'cfdi_uuid' => null, 'pac_status' => null, 'pac_issue_status' => null], 'INVOICE_EMAIL_NOT_ALLOWED'],
+    'pendiente' => [['pac_status' => 'pending'], 'INVOICE_EMAIL_NOT_ALLOWED'],
 ]);
+
+test('con el CFDI cancelado ningún rol tiene can_send_email ni recibe destinatarios', function (UserRole $role) {
+    [$company, $invoice] = phase630Invoice(['pac_status' => 'canceled', 'cancellation_status' => 'accepted']);
+    app(CurrentTenant::class)->clear();
+
+    $this->actingAs(phase630User($company, $role), 'api')->getJson("/api/invoices/{$invoice->id}/billing")->assertOk()
+        ->assertJsonPath('actions.can_send_email', false)
+        ->assertJsonPath('actions.can_edit_email_recipients', false)
+        ->assertJsonPath('email', null);
+})->with([UserRole::Admin, UserRole::Accountant, UserRole::Sales]);
 
 test('valida formato, máximo de 5 y lista vacía', function (array $recipients, int $status) {
     [$company, $invoice] = phase630Invoice();
