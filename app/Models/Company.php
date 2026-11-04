@@ -83,6 +83,7 @@ class Company extends Model
             'integration_status' => CompanyIntegrationStatus::class,
             'sandbox' => 'bool',
             'logo_updated_at' => 'immutable_datetime',
+            'auto_email_invoices' => 'bool',
             'decimal_precision' => 'int',
         ];
     }

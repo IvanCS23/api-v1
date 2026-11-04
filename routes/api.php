@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\CompanyCsdController;
+use App\Http\Controllers\Api\CompanyEmailSettingsController;
 use App\Http\Controllers\Api\CompanyFiscalController;
 use App\Http\Controllers\Api\CompanyLogoController;
 use App\Http\Controllers\Api\EmployeController;
@@ -134,6 +135,9 @@ Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::put('/company/fiscal', [CompanyFiscalController::class, 'update'])->middleware('throttle:company-fiscal');
     Route::post('/company/csd', [CompanyCsdController::class, 'store'])->middleware('throttle:company-csd');
     // Fase 6.29: logotipo del PDF (Facturapi) y su copia privada.
+    // Fase 6.30: envío automático de facturas por correo.
+    Route::get('/company/email-settings', [CompanyEmailSettingsController::class, 'show']);
+    Route::put('/company/email-settings', [CompanyEmailSettingsController::class, 'update'])->middleware('throttle:company-fiscal');
     Route::get('/company/logo', [CompanyLogoController::class, 'show']);
     Route::post('/company/logo', [CompanyLogoController::class, 'store'])->middleware('throttle:company-fiscal');
 
