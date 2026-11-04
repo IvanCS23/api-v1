@@ -88,7 +88,7 @@ test('endpoint autenticado expone snapshot fiscal explícito compatible con Invo
         ->assertOk()
         ->assertExactJsonStructure([
             'id', 'folio', 'status',
-            'actions' => ['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'can_fetch_cancellation_receipt', 'cancellation_mode', 'can_revert_issue'],
+            'actions' => ['can_issue', 'can_cancel', 'can_reconcile', 'can_fetch_artifacts', 'can_fetch_cancellation_receipt', 'cancellation_mode', 'can_revert_issue', 'can_send_email', 'can_edit_email_recipients'],
             'pac' => [
                 'mode', 'provider', 'status', 'cancellation_status', 'issue_status',
                 'reconciliation_required', 'last_sync_at',
@@ -99,6 +99,8 @@ test('endpoint autenticado expone snapshot fiscal explícito compatible con Invo
                 'artifacts' => ['status', 'xml_available', 'pdf_available', 'downloaded_at'],
             ],
             'cancellation_receipt' => ['status', 'available', 'downloaded_at', 'error_code'],
+            // Fase 6.30: null para un rol que no envía correos (el usuario de la factory).
+            'email',
             'timeline' => [
                 '*' => [
                     'id', 'type', 'occurred_at', 'pac_status',

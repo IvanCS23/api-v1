@@ -8,12 +8,14 @@ use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
 use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
+use App\Exceptions\Billing\InvoiceEmailException;
 use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
 use App\Exceptions\Billing\InvoiceNotReadyForPacException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
+use App\Exceptions\Billing\PacEmailNotSentException;
 use App\Exceptions\Billing\PacFolioAlreadyUsedException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
@@ -53,6 +55,15 @@ class InvoicePacActionExceptionResponder
             'action' => $action,
             'user_id' => auth('api')->id(),
         ]);
+
+        // Fase 6.30: envío por correo; el código y el estado vienen de la excepción.
+        if ($error instanceof InvoiceEmailException) {
+            return response()->json(['message' => $error->getMessage(), 'code' => $error->errorCode], $error->status);
+        }
+
+        if ($error instanceof PacEmailNotSentException) {
+            return response()->json(['message' => 'El proveedor fiscal no envió el correo. Revisa los destinatarios e intenta de nuevo.', 'code' => 'INVOICE_EMAIL_NOT_SENT'], 502);
+        }
 
         if ($error instanceof InvoiceNotReadyForPacException) {
             return response()->json([

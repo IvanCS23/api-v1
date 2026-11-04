@@ -90,6 +90,17 @@ class AppServiceProvider extends ServiceProvider
             return Limit::perMinute(10)->by($actor.'|'.$invoice);
         });
 
+        // Fase 6.30: envío por correo. 3 por factura cada 10 min (evita reenvíos
+        // en ráfaga al mismo cliente) y 20 por usuario por hora.
+        RateLimiter::for('invoice-email', function (Request $request): array {
+            $actor = $request->user()?->getAuthIdentifier() ?? $request->ip();
+
+            return [
+                Limit::perMinutes(10, 3)->by('invoice-email|invoice|'.$request->route('invoice')),
+                Limit::perHour(20)->by('invoice-email|user|'.$actor),
+            ];
+        });
+
         // Fase 6.27b: cada guardado de datos fiscales llama a Facturapi.
         RateLimiter::for('company-fiscal', function (Request $request): Limit {
             return Limit::perMinute(10)->by('company-fiscal|'.($request->user()?->getAuthIdentifier() ?? $request->ip()));
