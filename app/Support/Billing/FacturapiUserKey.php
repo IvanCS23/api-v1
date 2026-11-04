@@ -4,6 +4,7 @@ namespace App\Support\Billing;
 
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Models\FacturapiOrganization;
+use SensitiveParameter;
 
 /**
  * Fase 6.27b — User Key de Facturapi (`sk_user_`, FACTURAPI_USER_KEY).
@@ -17,7 +18,7 @@ final class FacturapiUserKey
 {
     public const PREFIX = 'sk_user_';
 
-    public function __construct(private readonly ?string $key) {}
+    public function __construct(#[SensitiveParameter] private readonly ?string $key) {}
 
     public static function fromConfig(): self
     {

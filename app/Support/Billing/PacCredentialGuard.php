@@ -4,6 +4,7 @@ namespace App\Support\Billing;
 
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Models\FacturapiOrganization;
+use SensitiveParameter;
 
 /**
  * Exige que la llave del PAC corresponda al modo configurado
@@ -30,7 +31,7 @@ final class PacCredentialGuard
 
     public function __construct(
         private readonly ?string $mode,
-        private readonly ?string $apiKey,
+        #[SensitiveParameter] private readonly ?string $apiKey,
         private readonly bool $organizationRequired = false,
         private readonly ?string $organizationId = null,
     ) {}

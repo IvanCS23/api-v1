@@ -30,6 +30,7 @@ use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
+use SensitiveParameter;
 
 /**
  * Adaptador HTTP hacia Facturapi. Fase 6.1: infraestructura de
@@ -66,7 +67,7 @@ class FacturapiProvider implements PacProvider
 
     public function __construct(
         private readonly string $baseUrl,
-        private readonly ?string $apiKey,
+        #[SensitiveParameter] private readonly ?string $apiKey,
         private readonly int $timeout,
         private readonly int $connectTimeout,
         private readonly ?string $mode = PacCredentialGuard::MODE_TEST,

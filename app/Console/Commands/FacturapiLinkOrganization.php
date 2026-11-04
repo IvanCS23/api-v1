@@ -18,6 +18,7 @@ use App\Support\Tenant\CurrentTenant;
 use Illuminate\Console\Command;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\DB;
+use SensitiveParameter;
 
 /**
  * Fase 6.27 — Vínculo inicial de una empresa con la organización de
@@ -125,7 +126,7 @@ class FacturapiLinkOrganization extends Command
         }
     }
 
-    private function link(Company $company, string $expected, string $key, bool $apply): int
+    private function link(Company $company, string $expected, #[SensitiveParameter] string $key, bool $apply): int
     {
         $this->info(sprintf('Vínculo de la empresa %d (%s) con Facturapi%s', $company->id, $company->trade_name, $apply ? '' : ' — dry-run'));
         $this->line('Llave de .env: '.FacturapiOrganization::hint($key).' (modo '.config('billing.pac_mode').')');

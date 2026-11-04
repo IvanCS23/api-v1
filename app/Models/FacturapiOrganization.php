@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use SensitiveParameter;
 
 /**
  * Fase 6.27: organización de Facturapi de una empresa (1:1).
@@ -55,7 +56,7 @@ class FacturapiOrganization extends Model
         'snapshot_at' => 'immutable_datetime',
     ];
 
-    public function setTestSecretKey(?string $key): static
+    public function setTestSecretKey(#[SensitiveParameter] ?string $key): static
     {
         return $this->forceFill([
             'test_secret_key' => $key,
@@ -65,7 +66,7 @@ class FacturapiOrganization extends Model
     }
 
     /** `sk_test_…a1b2`: prefijo y últimos 4 caracteres, nunca más. */
-    public static function hint(string $key): string
+    public static function hint(#[SensitiveParameter] string $key): string
     {
         $prefix = preg_match('/^(sk_[a-z]+_)/', $key, $matches) === 1 ? $matches[1] : '';
         $tail = mb_strlen($key) - mb_strlen($prefix) >= 12 ? mb_substr($key, -4) : '';

@@ -7,6 +7,7 @@ use App\Exceptions\Billing\PacOrganizationMismatchException;
 use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Support\Billing\PacOrganizationAccess;
+use SensitiveParameter;
 
 /**
  * Fase 6.27: FacturapiProvider con la organización y la llave Test de la
@@ -46,7 +47,7 @@ final class FacturapiProviderResolver implements PacProviderResolver
      * Sólo para que los comandos del operador comprueben a qué organización
      * pertenece una llave (GET /organizations/me) antes de guardarla.
      */
-    public function forKey(string $testKey): FacturapiProvider
+    public function forKey(#[SensitiveParameter] string $testKey): FacturapiProvider
     {
         return new FacturapiProvider(
             baseUrl: (string) config('services.facturapi.base_url'),

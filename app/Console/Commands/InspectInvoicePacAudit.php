@@ -78,9 +78,6 @@ class InspectInvoicePacAudit extends Command
         $encoded = json_encode($summary, JSON_UNESCAPED_SLASHES) ?: '[unavailable]';
         $encoded = PacSecretRedactor::redact($encoded);
 
-        $encoded = preg_replace('/\bBearer\s+[^\s"}]+/i', '[redacted]', $encoded) ?? '[redacted]';
-        $encoded = preg_replace('/\bsk_(?:live|test)_[A-Za-z0-9._-]+\b/i', '[redacted]', $encoded) ?? '[redacted]';
-
         return mb_substr($encoded, 0, 500);
     }
 }
