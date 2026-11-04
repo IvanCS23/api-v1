@@ -302,11 +302,12 @@ FASE 6.29 — Infraestructura pre-producción:
 FASE 6.30 — Envío de facturas por correo:
 - Clientes: `email_optional_1` y `email_optional_2` (el formulario ya los mostraba pero no se guardaban), validados y sin unicidad.
 - `PacProvider::sendInvoiceEmail` (`POST /invoices/{id}/email`, siempre con la lista explícita, máximo 10, sin reintentos).
-- `POST /api/invoices/{id}/operations/email`: CFDI vigente o cancelado; Admin, Contador y Ventas envían, sólo Admin y Contador cambian la lista (Ventas: `403 INVOICE_EMAIL_RECIPIENTS_LOCKED`); máximo 5 destinatarios; eventos `email_sent`/`email_failed`/`email_uncertain`/`email_skipped` con destinatarios en el contexto cifrado; limitador `invoice-email` y tope diario por empresa (100) contado en la BD.
+- `POST /api/invoices/{id}/operations/email`: sólo CFDI vigente (ver abajo la cancelada); Admin, Contador y Ventas envían, sólo Admin y Contador cambian la lista (Ventas: `403 INVOICE_EMAIL_RECIPIENTS_LOCKED`); máximo 5 destinatarios; eventos `email_sent`/`email_failed`/`email_uncertain`/`email_skipped` con destinatarios en el contexto cifrado; limitador `invoice-email` y tope diario por empresa (100) contado en la BD.
 - Envío automático opcional por empresa (`companies.auto_email_invoices`, `SendInvoiceEmailJob` de un intento, nunca afecta la emisión) y pantalla real Configuración > Correo.
 - Correo de contacto de la empresa → `legal.support_email` (aparece en PDF y correos), con aviso en Datos fiscales.
+- Verificado con dos envíos reales en TEST (2026-11-04, a un correo del usuario): llegan a la bandeja principal desde `"Mi Empresa" <facturacion@mg.facturapi.io>` con XML, PDF, logotipo y nombre comercial; "Responder" va al `support_email` de la organización (no documentado: funciona como reply-to). Un CFDI cancelado se enviaba sin ninguna marca de cancelación, así que se bloqueó: `can_send_email=false` y `409 INVOICE_EMAIL_CFDI_CANCELED`, con aviso en el panel.
 - Panel fiscal: "Enviar/Reenviar por correo" con destinatarios editables según el rol y avisos de modo test y de CFDI cancelado.
-- Commits api-v1: `d5a1a3e`, `fb79f0b`, `a7a2d6c`, `c3c1082`, `0acda6b` y el de documentación. app-front: `01488ba`, `5577bd0`, `46cb890`.
+- Commits api-v1: `d5a1a3e`, `fb79f0b`, `a7a2d6c`, `c3c1082`, `0acda6b`, `46780cd` (documentación), `d5f60e8` (cancelada no se envía) y el de documentación del cierre. app-front: `01488ba`, `5577bd0`, `46cb890`, `3f45607`.
 
 Documentación principal:
 
@@ -314,10 +315,10 @@ Documentación principal:
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.30 (verificada el 2026-11-03 sobre
+Línea base al cierre de la FASE 6.30 (verificada el 2026-11-04 sobre
 `changes-ivan` e `integracion-ivan`):
-- Backend: 1679 pruebas aprobadas, 7046 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
-- Frontend: 269 pruebas aprobadas en 28 archivos, 0 fallidas.
+- Backend: 1682 pruebas aprobadas, 7059 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
+- Frontend: 271 pruebas aprobadas en 28 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 33 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -335,7 +336,7 @@ Estado de la BD local de desarrollo:
 - 6.27b, aplicado con autorización el 2026-10-29: migración `create_facturapi_organization_audits_table` (lote 36) y `PUT /legal` real de la empresa 1 como el usuario 2 (razón social XENON INDUSTRIAL ARTICLES, RFC XIA190128J61, régimen 601, C.P. 06010; nombre comercial "Mi Empresa"; auditoría #1). `billing:pac-check --company=1`: WARN, sólo por el CSD ausente (en TEST no bloquea); la cuenta de la User Key es dueña de la organización. La empresa 1 vuelve a emitir: venta #29 (VTA-00000021) → factura #20 (FAC-00000019), `issued`/`valid` en TEST. CSD sin cargar por decisión del usuario.
 - 6.28, aplicado con autorización el 2026-10-30: migración `add_cfdi_folio_to_invoices_table` y `billing:backfill-cfdi-folio --apply` (13 facturas con la serie `F`: #1–#3 de la organización anterior y #8–#13, #16, #17, #19 y #20 de la actual, F-1 a F-10). No había ventas ni facturas PPD. Venta de prueba #30 (VTA-00000022, cliente 7, producto 14, 03/PUE, IVA 16 %, total 116.00) creada en borrador para emitirse desde la interfaz; el usuario la emitió: factura #21 (`FAC-00000020`), XML con `Serie="FAC" Folio="20"`, sin `cfdi_folio_mismatch`.
 - 6.29, aplicado con autorización el 2026-10-30: respaldo `backups/facturapro-2026-10-30-pre-6.29-timezone.sql` (fuera de los repos) y migración `normalize_timestamps_to_utc` (236 filas en 20 tablas; huella y 23 fechas de muestra idénticas antes y después; `db:timezone-check` OK). `GET /organizations/{id}` de la empresa 1: `legal.name` "Mi Empresa", `has_logo` true (imagen "Tecnologias S.A"). Migración `add_logo_to_facturapi_organizations_and_companies` aplicada después (2026-10-30); el logotipo lo sube el usuario desde Datos fiscales.
-- 6.30 (2026-11-03): migraciones `add_optional_emails_to_clients_table` y `add_auto_email_invoices_to_companies_table` pendientes de autorizar. Clientes locales: 1 y 2 usan `prueba.com` (dominio real), 7 usa `example.com`; no enviar correos reales a los dos primeros.
+- 6.30, aplicado con autorización el 2026-11-04: migraciones `add_optional_emails_to_clients_table` y `add_auto_email_invoices_to_companies_table` (envío automático de la empresa 1 apagado). Dos envíos reales en TEST, sólo a un correo del usuario: #22 (`FAC-00000021`, vigente) y #19 (`FAC-00000018`, cancelada), ambos `email_sent`. Los clientes 1 "prueba" y 2 "MOM" pasaron de `prueba.com` (dominio real) a `prueba@example.com` y `prueba2@example.com` (cambio de datos de desarrollo autorizado); los tres clientes locales usan `example.com`. La organización de desarrollo conserva un `support_email` heredado (del usuario) mientras la empresa 1 no capture su correo de contacto.
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
@@ -349,6 +350,8 @@ Deuda conocida:
 - Los endpoints legacy siguen disponibles por compatibilidad.
 
 Hallazgos de producto pendientes (verificados en el código):
+- `billing:pac-check` no compara el `support_email` de Facturapi con el correo de contacto local ni avisa si la organización trae un logotipo que no se subió desde el sistema (en desarrollo, ambos heredados).
+- Correo propio del sistema (fuera de Facturapi): necesario para notificar cancelaciones con su acuse; Facturapi no envía el acuse y un CFDI cancelado ya no se envía.
 - 17 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Complemento de pago (REP): requisito para reactivar PPD (bloqueado en la 6.28). Al construirlo, quitar PPD de `SalePaymentRules::UNAVAILABLE_METHODS`; la regla PPD ↔ 99 ya está lista.
 - `companies.default_cfdi_series` no tiene uso: la serie del CFDI sale del folio interno (`FAC`). Decidir si se elimina o si se permite configurar el prefijo del folio interno.
@@ -417,7 +420,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.30 — Envío de facturas por correo (ver sección 7). Falta, con autorización del usuario: aplicar sus dos migraciones en la BD local y dos envíos reales en TEST (una factura válida y una cancelada) a un correo del usuario, para confirmar entrega, remitente, contenido y el comportamiento con un CFDI cancelado.
+La última fase completada es la FASE 6.30 — Envío de facturas por correo (ver sección 7), incluidas sus migraciones y la verificación con dos envíos reales en TEST.
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -425,7 +428,7 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.28 — Folio del CFDI y bloqueo de PPD. Completa.
 - FASE 6.29 — Infraestructura pre-producción (zona horaria de MySQL, logs del guard, login de inactivos, checklist de despliegue en `DEPLOYMENT.md`, borrador validado antes de la transición y "Regresar a lista", logotipo del PDF). Completa.
 - FASE 6.30 — Envío del CFDI por correo. Completa.
-- FASE 6.31 — Modo Live con una empresa piloto (incluye la verificación obligatoria del acuse de cancelación con la primera cancelación real).
+- FASE 6.31 — Modo Live con una empresa piloto (incluye la verificación obligatoria del acuse de cancelación con la primera cancelación real). Incluye: correo de contacto de la empresa obligatorio antes de emitir (aviso en test, bloqueo en Live), porque es el reply-to de los correos al cliente.
 
 Hito 2 — Lanzamiento general:
 - Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
@@ -452,7 +455,7 @@ Después del lanzamiento:
 Prepara la FASE 6.31 — Modo Live con una empresa piloto antes de modificar archivos:
 
 1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Revisa qué cambia con `BILLING_PAC_MODE=live` (llave Live, CSD obligatorio, `pending_steps` de la organización, verificación del acuse de cancelación) y `DEPLOYMENT.md`.
+2. Revisa qué cambia con `BILLING_PAC_MODE=live` (llave Live, CSD obligatorio, `pending_steps` de la organización, verificación del acuse de cancelación, correo de contacto obligatorio como reply-to) y `DEPLOYMENT.md`.
 3. Propón alcance, archivos, pruebas, riesgos y orden de commits.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.

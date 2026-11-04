@@ -148,9 +148,13 @@ pudiendo reintentar explícitamente.
 `POST /api/invoices/{invoice}/operations/email` con `{ "confirm": true, "recipients"?: [...] }`.
 Facturapi (`POST /invoices/{id}/email`) envía el XML y el PDF del CFDI.
 
-- **Cuándo:** sólo con CFDI vigente o cancelado (`canSendEmailByState`) y de
-  la organización de la empresa. El acuse de cancelación no se puede enviar
-  por Facturapi.
+- **Cuándo:** sólo con CFDI vigente (`canSendEmailByState`) y de la
+  organización de la empresa. Un CFDI cancelado no se envía
+  (`409 INVOICE_EMAIL_CFDI_CANCELED`, `can_send_email=false` y un aviso en el
+  panel): verificado en TEST el 2026-11-04, Facturapi lo manda sin ninguna
+  marca de cancelación (ni en el correo ni en el PDF) y el correo dice que se
+  "emitió un comprobante". El acuse de cancelación tampoco se puede enviar
+  por Facturapi; notificar cancelaciones requiere un correo propio.
 - **Quién:** Admin, Contador y Ventas envían (`InvoicePolicy::sendEmail`);
   sólo Admin y Contador cambian los destinatarios (`editEmailRecipients`).
   Ventas envía a los del cliente: una lista distinta responde
@@ -176,12 +180,16 @@ Facturapi (`POST /invoices/{id}/email`) envía el XML y el PDF del CFDI.
   CFDI; un solo intento, único por factura, no repite si ya hubo un envío
   automático, registra `email_skipped` (`no_recipients`, `daily_limit`) y
   nunca afecta la emisión. Necesita el worker.
-- **Remitente y respuesta:** el remitente lo pone Facturapi; el reply-to no es
-  configurable. El correo de contacto de Datos fiscales (`companies.email`)
-  se envía como `legal.support_email` y Facturapi lo muestra en los PDF y
-  correos.
-- **Modo test:** el panel y Configuración > Correo avisan que el correo se
-  envía de verdad.
+- **Remitente y respuesta** (verificado en TEST el 2026-11-04): llega a la
+  bandeja principal desde `"<nombre comercial>" <facturacion@mg.facturapi.io>`,
+  con el XML y el PDF adjuntos, el logotipo y el nombre comercial.
+  **"Responder" va al `legal.support_email` de la organización**: Facturapi
+  no lo documenta, pero funciona como reply-to. Datos fiscales envía el
+  correo de contacto de la empresa (`companies.email`) como
+  `support_email`; si está vacío, la organización conserva el que tuviera
+  (en desarrollo traía uno heredado).
+- **Modo test:** Facturapi entrega el correo de verdad (verificado); el panel
+  y Configuración > Correo lo avisan.
 
 ## Flujo venta → factura (Fase 6.25)
 
