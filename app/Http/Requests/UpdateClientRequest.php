@@ -33,7 +33,7 @@ class UpdateClientRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->nullifyEmptyStrings(['no_exterior', 'no_interior', 'colonia', 'localidad', 'municipio']);
+        $this->nullifyEmptyStrings(['no_exterior', 'no_interior', 'colonia', 'localidad', 'municipio', 'email_optional_1', 'email_optional_2']);
         $this->normalizeFiscalData();
     }
 
@@ -62,6 +62,9 @@ class UpdateClientRequest extends FormRequest
         return [
             'name' => 'sometimes|required|string|max:255',
             'email' => ['sometimes', 'required', 'email', 'max:255', Rule::unique('clients', 'email')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($clientId)],
+            // Fase 6.30: destinatarios adicionales al enviar facturas por correo.
+            'email_optional_1' => 'nullable|email:rfc|max:255',
+            'email_optional_2' => 'nullable|email:rfc|max:255',
             'rfc' => ['sometimes', 'required', 'string', 'max:13', Rule::unique('clients', 'rfc')->where(fn ($query) => $query->where('company_id', $companyId))->ignore($clientId)],
             'codigo_postal' => 'sometimes|required|string|max:10',
             'regimen_fiscal' => 'sometimes|required|string|max:10',

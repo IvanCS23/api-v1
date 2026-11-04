@@ -2,10 +2,14 @@
 
 namespace App\Http\Resources\Billing;
 
+use App\Enums\InvoicePacEventType;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
+use App\Services\Billing\SendInvoiceEmailService;
+use App\Support\Billing\InvoiceEmailRecipients;
 use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacOrganizationAccess;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -21,11 +25,13 @@ class InvoiceBillingResource extends JsonResource
         $artifactsStored = $this->cfdi_artifacts_status === 'stored';
         $receiptStored = $this->cancellation_receipt_status === 'stored';
 
+        $actions = app(InvoiceBusinessCapabilitiesService::class)->for($this->resource, $request->user());
+
         return [
             'id' => $this->id,
             'folio' => $this->folio,
             'status' => $this->status?->value,
-            'actions' => app(InvoiceBusinessCapabilitiesService::class)->for($this->resource, $request->user()),
+            'actions' => $actions,
             'pac' => [
                 // Fase 6.22: modo configurado (test|live), nunca la llave ni
                 // un fragmento de ella. Permite explicar los acuses de TEST.
@@ -64,8 +70,24 @@ class InvoiceBillingResource extends JsonResource
                 'downloaded_at' => $this->cancellation_receipt_downloaded_at?->toIso8601String(),
                 'error_code' => $this->cancellationReceiptErrorCode(),
             ],
+            // Fase 6.30: sólo para quien puede enviar; los destinatarios salen de
+            // nuestra base (cliente), nunca de Facturapi.
+            'email' => $actions['can_send_email'] ? [
+                'default_recipients' => app(SendInvoiceEmailService::class)->defaultRecipients($this->resource),
+                'max_recipients' => InvoiceEmailRecipients::MAX,
+                'last_sent_at' => $this->lastEmailSentAt(),
+            ] : null,
             'timeline' => InvoicePacEventResource::collection($this->whenLoaded('pacEvents')),
         ];
+    }
+
+    private function lastEmailSentAt(): ?string
+    {
+        $sentAt = $this->resource->pacEvents()
+            ->where('event_type', InvoicePacEventType::EmailSent->value)
+            ->max('occurred_at');
+
+        return $sentAt === null ? null : CarbonImmutable::parse($sentAt, 'UTC')->toIso8601String();
     }
 
     private function cancellationReceiptErrorCode(): ?string

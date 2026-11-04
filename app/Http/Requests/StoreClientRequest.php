@@ -31,7 +31,7 @@ class StoreClientRequest extends FormRequest
 
     protected function prepareForValidation(): void
     {
-        $this->nullifyEmptyStrings(['no_exterior', 'no_interior', 'colonia', 'localidad', 'municipio']);
+        $this->nullifyEmptyStrings(['no_exterior', 'no_interior', 'colonia', 'localidad', 'municipio', 'email_optional_1', 'email_optional_2']);
         $this->normalizeFiscalData();
 
         if (! $this->filled('calle')) {
@@ -63,6 +63,9 @@ class StoreClientRequest extends FormRequest
         return [
             'name' => 'required|string|max:255',
             'email' => ['required', 'email', 'max:255', Rule::unique('clients', 'email')->where(fn ($query) => $query->where('company_id', $companyId))],
+            // Fase 6.30: destinatarios adicionales al enviar facturas por correo.
+            'email_optional_1' => 'nullable|email:rfc|max:255',
+            'email_optional_2' => 'nullable|email:rfc|max:255',
             'rfc' => ['required', 'string', 'max:13', Rule::unique('clients', 'rfc')->where(fn ($query) => $query->where('company_id', $companyId))],
             'codigo_postal' => 'required|string|max:10',
             'regimen_fiscal' => 'required|string|max:10',

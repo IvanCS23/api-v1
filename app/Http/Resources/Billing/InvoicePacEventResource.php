@@ -3,6 +3,7 @@
 namespace App\Http\Resources\Billing;
 
 use App\Enums\InvoicePacEventType;
+use App\Support\Billing\InvoiceEmailRecipients;
 use App\Support\Billing\PacSecretRedactor;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -88,6 +89,11 @@ class InvoicePacEventResource extends JsonResource
             InvoicePacEventType::OrganizationArchived => ['reason'],
             InvoicePacEventType::CfdiFolioMismatch => ['expected_folio', 'received_folio'],
             InvoicePacEventType::IssueReverted => ['previous_issue_status', 'pac_draft_status'],
+            // Fase 6.30: a quién, cómo y por qué; nunca el contenido.
+            InvoicePacEventType::EmailSent,
+            InvoicePacEventType::EmailFailed,
+            InvoicePacEventType::EmailUncertain => ['recipients', 'recipient_count', 'trigger', 'reason'],
+            InvoicePacEventType::EmailSkipped => ['trigger', 'reason'],
             default => [],
         };
 
@@ -111,6 +117,13 @@ class InvoicePacEventResource extends JsonResource
 
     private function safeContextValue(string $key, mixed $value): mixed
     {
+        if ($key === 'recipients') {
+            // Sólo direcciones de correo válidas, como texto.
+            return is_array($value)
+                ? array_values(array_filter($value, fn (mixed $email): bool => is_string($email) && InvoiceEmailRecipients::isValid($email)))
+                : null;
+        }
+
         if ($key === 'changed_fields') {
             if (! is_array($value)) {
                 return null;

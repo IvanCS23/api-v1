@@ -22,7 +22,7 @@ class InvoiceBusinessCapabilitiesService
      */
     public const ARTIFACT_PAC_STATUSES = ['valid', 'canceled'];
 
-    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, can_revert_issue: bool} */
+    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, can_revert_issue: bool, can_send_email: bool, can_edit_email_recipients: bool} */
     public function for(Invoice $invoice, ?User $user): array
     {
         // Fase 6.27: una factura de otra organización (o archivada) no ofrece
@@ -36,6 +36,8 @@ class InvoiceBusinessCapabilitiesService
                 'can_fetch_cancellation_receipt' => false,
                 'cancellation_mode' => null,
                 'can_revert_issue' => false,
+                'can_send_email' => false,
+                'can_edit_email_recipients' => false,
             ];
         }
 
@@ -51,6 +53,8 @@ class InvoiceBusinessCapabilitiesService
             && $user?->can('managePacArtifacts', $invoice) === true;
         $canFetchReceipt = $user?->can('managePacArtifacts', $invoice) === true
             && $this->cancellationReceiptFetchable($invoice);
+        $canSendEmail = $this->canSendEmailByState($invoice)
+            && $user?->can('sendEmail', $invoice) === true;
 
         return [
             'can_issue' => $canIssue,
@@ -62,6 +66,10 @@ class InvoiceBusinessCapabilitiesService
             // Fase 6.29: mismo permiso que emitir.
             'can_revert_issue' => $this->canRevertIssueByState($invoice)
                 && $user?->can('issueBusiness', $invoice) === true,
+            // Fase 6.30: Admin, Contador y Ventas envían; sólo Admin y Contador editan la lista.
+            'can_send_email' => $canSendEmail,
+            'can_edit_email_recipients' => $canSendEmail
+                && $user?->can('editEmailRecipients', $invoice) === true,
         ];
     }
 
@@ -281,6 +289,17 @@ class InvoiceBusinessCapabilitiesService
      * existe, se vuelve a consultar al ejecutar la acción: aquí sólo se
      * evalúa el estado local.
      */
+    /**
+     * Fase 6.30: sólo un CFDI timbrado (vigente o cancelado) se puede enviar
+     * por correo; Facturapi adjunta su XML y su PDF. El bloqueo por
+     * organización ajena ya lo aplica for().
+     */
+    public function canSendEmailByState(Invoice $invoice): bool
+    {
+        return $this->hasCompleteFiscalIdentity($invoice)
+            && in_array($invoice->pac_status, ['valid', 'canceled'], true);
+    }
+
     public function canRevertIssueByState(Invoice $invoice): bool
     {
         return $invoice->status === InvoiceStatus::Issued

@@ -140,4 +140,20 @@ return [
         'chunk_size' => (int) env('BILLING_HEALTH_CHUNK_SIZE', 500),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Envío del CFDI por correo (Fase 6.30)
+    |--------------------------------------------------------------------------
+    |
+    | - company_daily_limit: envíos (confirmados e inciertos) por empresa en
+    |   24 horas, manuales y automáticos juntos. Contado en la BD, no en el
+    |   caché. Además, la ruta tiene el limitador `invoice-email` (por
+    |   factura y por usuario).
+    |
+    */
+
+    'email' => [
+        'company_daily_limit' => (int) env('BILLING_EMAIL_COMPANY_DAILY_LIMIT', 100),
+    ],
+
 ];

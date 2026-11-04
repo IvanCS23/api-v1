@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Validation\Rule;
 
 /**
  * Fase 6.27b — Formato básico de los datos fiscales. Las reglas del SAT
@@ -38,6 +39,8 @@ class UpdateCompanyFiscalRequest extends FormRequest
             'city' => ['nullable', 'string', 'max:255'],
             'municipality' => ['nullable', 'string', 'max:255'],
             'state' => ['nullable', 'string', 'max:255'],
+            // Fase 6.30: contacto en los PDF y correos de Facturapi (support_email).
+            'email' => ['nullable', 'string', 'max:255', 'email:rfc', Rule::unique('companies', 'email')->ignore($this->user('api')?->company_id)],
             'organization_id' => ['prohibited'],
             'company_id' => ['prohibited'],
         ];

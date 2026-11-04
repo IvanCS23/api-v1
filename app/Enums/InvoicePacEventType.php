@@ -41,4 +41,10 @@ enum InvoicePacEventType: string
 
     // Fase 6.29: una factura issued sin CFDI regresó a ready.
     case IssueReverted = 'issue_reverted';
+
+    // Fase 6.30: envío del CFDI por correo (a quién, cómo y resultado; nunca el contenido).
+    case EmailSent = 'email_sent';
+    case EmailFailed = 'email_failed';
+    case EmailUncertain = 'email_uncertain';
+    case EmailSkipped = 'email_skipped';
 }

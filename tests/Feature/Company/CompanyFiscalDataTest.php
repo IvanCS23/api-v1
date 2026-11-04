@@ -293,3 +293,40 @@ test('el readiness de la venta exige el C.P. de la empresa para un cliente gené
     $codes = collect(app(SaleBillingReadinessService::class)->evaluate($sale->fresh())['errors'])->pluck('code');
     expect($codes)->not->toContain('CLIENT_GENERIC_POSTAL_CODE_MISMATCH');
 });
+
+test('Fase 6.30: el correo de contacto se envía como support_email y se guarda en la empresa', function () {
+    $company = phase627bFiscalCompany(['email' => 'antes@example.com']);
+    $admin = phase627bFiscalUser($company);
+    Http::fake(['example-pac.test/v2/organizations/*/legal' => Http::response(phase627bLegalResponse($company))]);
+
+    $this->actingAs($admin, 'api')->putJson('/api/company/fiscal', phase627bFiscalPayload(['email' => ' facturacion@example.com ']))
+        ->assertOk()
+        ->assertJsonPath('email', 'facturacion@example.com');
+
+    expect($company->fresh()->email)->toBe('facturacion@example.com');
+    Http::assertSent(fn (Request $r): bool => ($r->data()['support_email'] ?? null) === 'facturacion@example.com');
+});
+
+test('Fase 6.30: sin el campo email se conserva el correo actual; vacío lo quita', function () {
+    $company = phase627bFiscalCompany(['email' => 'contacto@example.com']);
+    $admin = phase627bFiscalUser($company);
+    Http::fake(['example-pac.test/v2/organizations/*/legal' => Http::response(phase627bLegalResponse($company))]);
+
+    $this->actingAs($admin, 'api')->putJson('/api/company/fiscal', phase627bFiscalPayload())->assertOk();
+    expect($company->fresh()->email)->toBe('contacto@example.com');
+    Http::assertSent(fn (Request $r): bool => ($r->data()['support_email'] ?? null) === 'contacto@example.com');
+
+    $this->actingAs($admin, 'api')->putJson('/api/company/fiscal', phase627bFiscalPayload(['email' => '']))->assertOk();
+    expect($company->fresh()->email)->toBeNull();
+});
+
+test('Fase 6.30: el correo de contacto debe ser válido y no estar en otra empresa', function () {
+    $company = phase627bFiscalCompany();
+    phase627bFiscalCompany(['email' => 'ocupado@example.com']);
+    $admin = phase627bFiscalUser($company);
+    Http::fake();
+
+    $this->actingAs($admin, 'api')->putJson('/api/company/fiscal', phase627bFiscalPayload(['email' => 'no-es-correo']))->assertUnprocessable()->assertJsonValidationErrors(['email']);
+    $this->actingAs($admin, 'api')->putJson('/api/company/fiscal', phase627bFiscalPayload(['email' => 'ocupado@example.com']))->assertUnprocessable()->assertJsonValidationErrors(['email']);
+    Http::assertNothingSent();
+});

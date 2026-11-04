@@ -47,6 +47,7 @@ Parte de `.env.example`. Las que no deben quedarse con el valor de desarrollo:
 | `BILLING_PAC_MODE` | `test` hasta la fase Live | con `live` exige CSD |
 | `BILLING_CFDI_FOLIO_CHECK` | `true` (default) | consulta de folio duplicado (6.28) |
 | `BILLING_ARTIFACTS_AUTO_DOWNLOAD` | `true` (default) | necesita el worker |
+| `BILLING_EMAIL_COMPANY_DAILY_LIMIT` | 100 (default) | envíos de facturas por correo por empresa en 24 h (6.30) |
 | `BILLING_FACTURAPI_STAMP_TIMEZONE` | `America/Mexico_City` (default) | zona de `stamp.date` de Facturapi |
 
 Frontend (`app-front/.env`):
@@ -103,8 +104,10 @@ Después, por cada empresa:
 ## 5. Worker de colas (supervisor)
 
 La descarga automática de XML/PDF tras el timbrado
-(`DownloadInvoiceArtifactsJob`) corre en la cola. Sin worker los jobs se
-acumulan en la tabla `jobs`; el botón "Obtener XML/PDF" sigue funcionando.
+(`DownloadInvoiceArtifactsJob`) y el envío automático por correo
+(`SendInvoiceEmailJob`, si la empresa lo activa) corren en la cola. Sin
+worker los jobs se acumulan en la tabla `jobs`; los botones "Obtener
+XML/PDF" y "Enviar por correo" siguen funcionando.
 
 ```ini
 [program:facturapro-worker]

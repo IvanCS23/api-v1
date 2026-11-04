@@ -73,6 +73,19 @@ class InvoicePolicy
         return $this->canManagePac($user, $invoice);
     }
 
+    /** Fase 6.30: enviar el CFDI por correo no cambia el estado fiscal; Ventas también. */
+    public function sendEmail(User $user, Invoice $invoice): bool
+    {
+        return $user->company_id === $invoice->company_id
+            && in_array($user->role, [UserRole::Admin, UserRole::Accountant, UserRole::Sales], true);
+    }
+
+    /** Fase 6.30: sólo Admin y Contador agregan o quitan destinatarios; Ventas usa los del cliente. */
+    public function editEmailRecipients(User $user, Invoice $invoice): bool
+    {
+        return $this->canManagePac($user, $invoice);
+    }
+
     private function canManagePac(User $user, Invoice $invoice): bool
     {
         return $user->company_id === $invoice->company_id
