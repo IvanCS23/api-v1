@@ -143,6 +143,46 @@ alcanzarlo, el panel deja de ofrecer "Obtener acuse" y `billing:health`
 sugiere `manual_review`. El endpoint y el comando de diagnóstico siguen
 pudiendo reintentar explícitamente.
 
+## Envío del CFDI por correo (Fase 6.30)
+
+`POST /api/invoices/{invoice}/operations/email` con `{ "confirm": true, "recipients"?: [...] }`.
+Facturapi (`POST /invoices/{id}/email`) envía el XML y el PDF del CFDI.
+
+- **Cuándo:** sólo con CFDI vigente o cancelado (`canSendEmailByState`) y de
+  la organización de la empresa. El acuse de cancelación no se puede enviar
+  por Facturapi.
+- **Quién:** Admin, Contador y Ventas envían (`InvoicePolicy::sendEmail`);
+  sólo Admin y Contador cambian los destinatarios (`editEmailRecipients`).
+  Ventas envía a los del cliente: una lista distinta responde
+  `403 INVOICE_EMAIL_RECIPIENTS_LOCKED`.
+- **Destinatarios** (`InvoiceEmailRecipients`): por defecto el correo
+  principal y los dos opcionales del cliente en nuestra base, sin repetidos;
+  entre 1 y 5, `email:rfc`. Siempre se envía la lista explícita: con el
+  cuerpo vacío Facturapi usaría el correo que tenga guardado del cliente.
+- **Resultado y historial:** `email_sent`; `email_failed` si Facturapi
+  responde `ok:false` (`502 INVOICE_EMAIL_NOT_SENT`) o rechaza;
+  `email_uncertain` ante timeout o 5xx (`502 INVOICE_EMAIL_UNCERTAIN`). El
+  envío no tiene llave de idempotencia: **nunca se reintenta solo**. El
+  contexto cifrado guarda destinatarios, `trigger` (manual/auto) y usuario;
+  nunca el contenido. El log (`billing.invoice.email_*`) enmascara los
+  correos (`p***@dominio`).
+- **Límites:** limitador `invoice-email` (3 por factura en 10 min, 20 por
+  usuario por hora) y `billing.email.company_daily_limit` (100 por empresa
+  en 24 h, contado en la BD con los envíos confirmados e inciertos:
+  `429 INVOICE_EMAIL_DAILY_LIMIT`).
+- **Automático:** `companies.auto_email_invoices` (apagado por defecto,
+  `GET/PUT /api/company/email-settings`, sólo Admin lo cambia).
+  `QueueInvoiceEmailOnIssue` encola `SendInvoiceEmailJob` al emitirse un
+  CFDI; un solo intento, único por factura, no repite si ya hubo un envío
+  automático, registra `email_skipped` (`no_recipients`, `daily_limit`) y
+  nunca afecta la emisión. Necesita el worker.
+- **Remitente y respuesta:** el remitente lo pone Facturapi; el reply-to no es
+  configurable. El correo de contacto de Datos fiscales (`companies.email`)
+  se envía como `legal.support_email` y Facturapi lo muestra en los PDF y
+  correos.
+- **Modo test:** el panel y Configuración > Correo avisan que el correo se
+  envía de verdad.
+
 ## Flujo venta → factura (Fase 6.25)
 
 La UI captura la venta en `/pages/sales/new` y `/pages/sales/{id}` y la
