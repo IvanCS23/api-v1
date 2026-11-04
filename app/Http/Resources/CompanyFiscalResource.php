@@ -35,6 +35,8 @@ class CompanyFiscalResource extends JsonResource
         return [
             'legal_name' => $this->legal_name,
             'trade_name' => $this->trade_name,
+            // Fase 6.30: contacto que Facturapi muestra en los PDF y correos.
+            'email' => $this->email,
             'rfc' => $this->rfc,
             'fiscal_regime' => $this->fiscal_regime,
             'postal_code' => $this->postal_code,

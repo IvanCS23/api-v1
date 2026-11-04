@@ -35,6 +35,8 @@ final class UpdateCompanyFiscalDataService
     public const FIELDS = [
         'legal_name', 'trade_name', 'rfc', 'fiscal_regime', 'postal_code',
         'street', 'external_number', 'internal_number', 'colony', 'city', 'municipality', 'state',
+        // Fase 6.30: correo de contacto; Facturapi lo muestra en los PDF y correos (legal.support_email).
+        'email',
     ];
 
     public function __construct(
@@ -47,6 +49,11 @@ final class UpdateCompanyFiscalDataService
     public function update(User $actor, Company $company, array $input): Company
     {
         $data = $this->normalize($input);
+
+        // Fase 6.30: un cliente del API que no manda el correo no lo borra.
+        if (! array_key_exists('email', $input)) {
+            $data['email'] = $company->email;
+        }
         $issues = $this->satValidator->issuerIssues($data);
 
         if ($issues !== []) {
@@ -126,6 +133,7 @@ final class UpdateCompanyFiscalDataService
             'name' => $data['trade_name'] ?? $data['legal_name'],
             'legal_name' => $data['legal_name'],
             'tax_system' => $data['fiscal_regime'],
+            'support_email' => $data['email'],
         ]) + ['address' => $filled([
             'zip' => $data['postal_code'],
             'street' => $data['street'],
