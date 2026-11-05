@@ -378,7 +378,7 @@ test('cancel soporta motivos y estados remotos definidos por el Service', functi
 })->with([
     '02 accepted' => ['02', 'canceled', 'accepted'],
     '03 pending' => ['03', 'valid', 'pending'],
-    '04 verifying' => ['04', 'valid', 'verifying'],
+    '02 verifying' => ['02', 'valid', 'verifying'],
     '02 rejected' => ['02', 'valid', 'rejected'],
     '03 expired' => ['03', 'valid', 'expired'],
 ]);

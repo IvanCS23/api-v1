@@ -209,7 +209,6 @@ test('motivo 01 envía substitution y motivos 02 03 04 nunca la envían', functi
     '01' => [CfdiCancellationMotive::ErrorsWithRelation, true],
     '02' => [CfdiCancellationMotive::ErrorsWithoutRelation, false],
     '03' => [CfdiCancellationMotive::OperationNotPerformed, false],
-    '04' => [CfdiCancellationMotive::GlobalInvoiceRelatedOperation, false],
 ]);
 
 test('política por cancellation_status persiste estados finales y ambiguos correctamente', function (string $status, string $cancellationStatus, bool $required, InvoicePacEventType $eventType) {

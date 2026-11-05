@@ -7,6 +7,7 @@ use App\Contracts\Billing\PacProviderResolver;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoicePacEventType;
+use App\Exceptions\Billing\CancellationMotiveUnavailableException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
@@ -57,6 +58,7 @@ class CancelInvoiceWithPacService
     ): Invoice {
         $tenantId = app(CurrentTenant::class)->id();
         $current = $this->requireCurrentTenantInvoice($invoice, $tenantId);
+        $this->assertMotiveAvailable($current, $motive);
         $substitutionUuid = $this->validatedSubstitutionUuid($current, $motive, $substitutionUuid);
 
         // Prevalidación rápida sin lock; la definitiva corre en reserve().
@@ -203,6 +205,17 @@ class CancelInvoiceWithPacService
 
         if (! in_array($invoice->cancellation_status, self::CANCELLABLE_STATUSES, true)) {
             throw new InvoiceCannotBeCancelledException($invoice, 'cancellation_status no es compatible');
+        }
+    }
+
+    /** Fase 6.31: antes de reservar; ver CfdiCancellationMotive::availableIn(). */
+    private function assertMotiveAvailable(Invoice $invoice, CfdiCancellationMotive $motive): void
+    {
+        $environment = PacEnvironment::forInvoice($invoice);
+        $available = CfdiCancellationMotive::availableIn($environment);
+
+        if (! in_array($motive, $available, true)) {
+            throw new CancellationMotiveUnavailableException($motive, $environment, array_map(fn (CfdiCancellationMotive $m): string => $m->value, $available));
         }
     }
 

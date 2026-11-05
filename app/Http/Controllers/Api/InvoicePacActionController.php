@@ -14,6 +14,7 @@ use App\Services\Billing\InvoiceWorkflow;
 use App\Services\Billing\IssueInvoiceToPacService;
 use App\Services\Billing\LoadInvoiceBillingSnapshotService;
 use App\Support\Billing\InvoicePacActionExceptionResponder;
+use App\Support\Billing\LegacyPacOperations;
 use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
@@ -34,6 +35,10 @@ class InvoicePacActionController extends Controller
 
     public function issue(IssueInvoiceWithPacRequest $request, int $invoice): InvoiceBillingResource|JsonResponse
     {
+        if (($rejected = $this->legacyRejection($invoice, 'issuePac')) !== null) {
+            return $rejected;
+        }
+
         return $this->perform($invoice, 'issuePac', function (Invoice $model): void {
             $this->issueInvoice->issue($model);
         });
@@ -55,6 +60,10 @@ class InvoicePacActionController extends Controller
 
     public function cancel(CancelInvoiceWithPacRequest $request, int $invoice): InvoiceBillingResource|JsonResponse
     {
+        if (($rejected = $this->legacyRejection($invoice, 'cancelPac')) !== null) {
+            return $rejected;
+        }
+
         return $this->perform($invoice, 'cancelPac', function (Invoice $model) use ($request): void {
             $this->workflow->cancelWithPac(
                 $model,
@@ -69,6 +78,15 @@ class InvoicePacActionController extends Controller
         return $this->perform($invoice, 'managePacArtifacts', function (Invoice $model): void {
             $this->receipts->download($model);
         });
+    }
+
+    /** Fase 6.31: /pac/issue y /pac/cancel no se ofrecen a una factura en producción. */
+    private function legacyRejection(int $invoice, string $ability): ?JsonResponse
+    {
+        $model = Invoice::findOrFail($invoice);
+        $this->authorize($ability, $model);
+
+        return LegacyPacOperations::rejectsInLive($model);
     }
 
     private function perform(int $invoice, string $ability, Closure $action): InvoiceBillingResource|JsonResponse

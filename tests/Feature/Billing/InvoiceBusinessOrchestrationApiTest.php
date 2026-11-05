@@ -311,7 +311,7 @@ test('cancelación fiscal rechazada devuelve conflicto y mantiene ERP issued y C
     app(CurrentTenant::class)->clear();
 
     $this->actingAs($user, 'api')
-        ->postJson("/api/invoices/{$invoice->id}/operations/cancel", ['confirm' => true, 'motive' => '04'])
+        ->postJson("/api/invoices/{$invoice->id}/operations/cancel", ['confirm' => true, 'motive' => '03'])
         ->assertConflict()
         ->assertJsonPath('code', 'INVOICE_CANCELLATION_NOT_COMPLETED');
 

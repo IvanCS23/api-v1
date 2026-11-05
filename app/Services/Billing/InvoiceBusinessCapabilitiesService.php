@@ -2,6 +2,7 @@
 
 namespace App\Services\Billing;
 
+use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
@@ -23,7 +24,7 @@ class InvoiceBusinessCapabilitiesService
      */
     public const ARTIFACT_PAC_STATUSES = ['valid', 'canceled'];
 
-    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, can_revert_issue: bool, can_send_email: bool, can_edit_email_recipients: bool} */
+    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, cancellation_motives: list<string>, can_revert_issue: bool, can_send_email: bool, can_edit_email_recipients: bool} */
     public function for(Invoice $invoice, ?User $user): array
     {
         // Fase 6.27: una factura de otra organización (o archivada) no ofrece
@@ -39,6 +40,7 @@ class InvoiceBusinessCapabilitiesService
                 'can_fetch_artifacts' => false,
                 'can_fetch_cancellation_receipt' => false,
                 'cancellation_mode' => null,
+                'cancellation_motives' => [],
                 'can_revert_issue' => false,
                 'can_send_email' => false,
                 'can_edit_email_recipients' => false,
@@ -67,6 +69,11 @@ class InvoiceBusinessCapabilitiesService
             'can_fetch_artifacts' => $canFetchArtifacts,
             'can_fetch_cancellation_receipt' => $canFetchReceipt,
             'cancellation_mode' => $canCancel ? $mode : null,
+            // Fase 6.31: motivos SAT que acepta la cancelación fiscal en el
+            // ambiente de la factura (Live: 02 y 03).
+            'cancellation_motives' => $canCancel && $mode === 'pac'
+                ? array_map(fn (CfdiCancellationMotive $motive): string => $motive->value, CfdiCancellationMotive::availableIn(PacEnvironment::forInvoice($invoice)))
+                : [],
             // Fase 6.29: mismo permiso que emitir.
             'can_revert_issue' => $this->canRevertIssueByState($invoice)
                 && $user?->can('issueBusiness', $invoice) === true,

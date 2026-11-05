@@ -2,6 +2,7 @@
 
 namespace App\Support\Billing;
 
+use App\Exceptions\Billing\CancellationMotiveUnavailableException;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
@@ -105,6 +106,14 @@ class InvoicePacActionExceptionResponder
                 409,
                 'CFDI_ARTIFACT_INTEGRITY_FAILURE',
                 'Los artifacts CFDI no superan la validación de integridad.',
+            ],
+            // Fase 6.31.
+            $error instanceof CancellationMotiveUnavailableException => [
+                422,
+                'CANCELLATION_MOTIVE_UNAVAILABLE',
+                $error->environment === 'live'
+                    ? 'En producción sólo se puede cancelar con los motivos 02 y 03.'
+                    : 'El motivo 04 no está disponible: el sistema no emite facturas globales.',
             ],
             $error instanceof InvoiceCannotBeCancelledException => [
                 409,
