@@ -309,7 +309,7 @@ FASE 6.30 — Envío de facturas por correo:
 - Panel fiscal: "Enviar/Reenviar por correo" con destinatarios editables según el rol y avisos de modo test y de CFDI cancelado.
 - Commits api-v1: `d5a1a3e`, `fb79f0b`, `a7a2d6c`, `c3c1082`, `0acda6b`, `46780cd` (documentación), `d5f60e8` (cancelada no se envía) y el de documentación del cierre. app-front: `01488ba`, `5577bd0`, `46cb890`, `3f45607`.
 
-FASE 6.31 — Modo Live con una empresa piloto (en código; el piloto queda pendiente):
+FASE 6.31 — Modo Live con una empresa piloto (código y R0 completos; P1 a P7 pendientes):
 - Ambiente por empresa (`facturapi_organizations.pac_environment`) y `BILLING_PAC_MODE` como techo: `test` es el paro de emergencia (una empresa Live no opera ni usa su llave Test); Live sólo con `APP_ENV=production` (`billing.live_allowed_app_envs`). `PacEnvironment` es la única clase que lee `billing.pac_mode` (una prueba lo exige).
 - Ambiente de cada factura (`invoices.pac_environment`) fijado con su primera reserva bajo lock; `409 PAC_ENVIRONMENT_MISMATCH` para facturas de otro ambiente o con operaciones sin ambiente; jobs que revalidan y fallan sin reintentar; `billing:backfill-pac-environment` (`--assume-test` con aborto ante rastros de Live).
 - `livemode` exigido según el ambiente, en ambos sentidos. Llave Live cifrada, capturada con prompt oculto (`billing:facturapi-live-key`), en `security:reencrypt`; `#[SensitiveParameter]` en todo parámetro con llave.
@@ -321,6 +321,8 @@ FASE 6.31 — Modo Live con una empresa piloto (en código; el piloto queda pend
 - Desviaciones: sólo en Test, en la emisión legacy y en las búsquedas por `external_id` y folio se tolera la ausencia de `livemode` (55 respuestas simuladas anteriores no lo traen); en Live se rechaza siempre (commit 13). El comando de importación de la llave quedó en el commit 3 porque necesita el guard por ambiente.
 - Commits api-v1: `a859f97`, `6a83b91`, `48f7e9c`, `9905fdd`, `f356172`, `53c4712`, `e45ccb8`, `d513714`, `2c77c44`, `15531c7`, `d93ebde`, `d088776` (documentación), `ee74271` (livemode estricto en Live y emisión legacy cerrada en Live) y el de documentación de R0. app-front: `de1a40c`.
 - Regresión R0 en Test (2026-11-05): ver el estado de la BD local en la sección 8.
+- Seguridad (commit `6477cce`): se retiraron las cinco rutas de `legacy-invoices` (tabla sin `company_id` ni Policy, accesible entre empresas).
+- Auditoría de aislamiento por empresa (2026-11-05, solo lectura, 95 rutas autenticadas): sin otros problemas. Todos los modelos de negocio usan `BelongsToCompany` (`CompanyScope`, que sin tenant no devuelve nada) y `TenantMiddleware` fija el tenant desde el usuario en el grupo `api`; no hay binding implícito de modelos. Las reglas `exists` sobre `clients`, `products` y `sales` filtran por `company_id`. De 83 `withoutGlobalScope`, 68 vuelven a filtrar por empresa en la misma consulta, 7 están en comandos del operador (sin HTTP) y 8, en servicios de ventas y facturación, buscan por `sale_id`/`quote_id` de una venta o cotización ya bloqueada con su `company_id`, o por sus `client_id`/`product_id`, que sólo se guardan validados por empresa. Sin Policy, a propósito: `AuthController@user`/`logout` y Settings (el propio usuario), catálogos globales (`SatCatalogController`, `TaxRateController`) y `UserController@index`/`show`, que filtran por la empresa del usuario (`UserController.php:36-38` y `:174-177`): cualquier rol ve a los usuarios de su propia empresa.
 - Pendiente del piloto (ver `DEPLOYMENT.md`, sección 10): empresa con CSD vigente, contador, servidor con `APP_ENV=production` y cuenta de Facturapi con suscripción activa.
 
 Documentación principal:
@@ -330,8 +332,8 @@ Documentación principal:
 ## 8. Estado de pruebas y línea base
 
 Línea base de la FASE 6.31 (verificada el 2026-11-05 sobre `changes-ivan` e
-`integracion-ivan`, después de R0 y del commit 13):
-- Backend: 1835 pruebas aprobadas, 7744 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
+`integracion-ivan`, después de R0 y del retiro de `legacy-invoices`):
+- Backend: 1840 pruebas aprobadas, 7754 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
 - Frontend: 280 pruebas aprobadas en 28 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 33 páginas generadas.
@@ -445,7 +447,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase con código completo es la FASE 6.31 — Modo Live con una empresa piloto (ver sección 7). La regresión R0 en Test es su último paso; el piloto (P1 a P7) queda pendiente de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi.
+La última fase completada es la FASE 6.31 — Modo Live con una empresa piloto (ver sección 7): código y R0 completos; P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi.
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -453,7 +455,7 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.28 — Folio del CFDI y bloqueo de PPD. Completa.
 - FASE 6.29 — Infraestructura pre-producción (zona horaria de MySQL, logs del guard, login de inactivos, checklist de despliegue en `DEPLOYMENT.md`, borrador validado antes de la transición y "Regresar a lista", logotipo del PDF). Completa.
 - FASE 6.30 — Envío del CFDI por correo. Completa.
-- FASE 6.31 — Modo Live con una empresa piloto. Completa en código (incluye el correo de contacto obligatorio en Live). El piloto, con la verificación obligatoria del acuse en la primera cancelación real, queda pendiente (ver `DEPLOYMENT.md`, sección 10).
+- FASE 6.31 — Modo Live con una empresa piloto. Código y R0 completos; P1 a P7 pendientes (incluye la verificación obligatoria del acuse en la primera cancelación real; ver `DEPLOYMENT.md`, sección 10).
 
 Hito 2 — Lanzamiento general:
 - Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
@@ -477,7 +479,7 @@ Después del lanzamiento:
 
 ## 11. Siguiente tarea
 
-Cerrar la FASE 6.31 con la regresión R0 en Test (una emisión y una cancelación completas, con autorización explícita para cada operación real) y su reporte. No avanzar al piloto (P1 a P7) hasta que existan la empresa piloto con CSD vigente, su contador, un servidor con `APP_ENV=production` y la suscripción activa de Facturapi.
+No avanzar al piloto (P1 a P7) hasta que existan la empresa piloto con CSD vigente, su contador, un servidor con `APP_ENV=production` y la suscripción activa de Facturapi. Cada paso del piloto requiere autorización explícita.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.
