@@ -148,6 +148,9 @@ class FacturapiProvider implements PacProvider
             );
         }
 
+        // Fase 6.31: la reconciliación usa este resultado; debe ser del ambiente.
+        $this->assertLivemode($only, 'findInvoiceByExternalId', $response->status(), required: false);
+
         return $this->mapInvoiceArray($only);
     }
 
@@ -185,6 +188,8 @@ class FacturapiProvider implements PacProvider
             }
 
             $this->assertSameOrganization($invoice, $response->status());
+            // Fase 6.31: un comprobante de otro ambiente no cuenta para el folio.
+            $this->assertLivemode($invoice, 'findInvoicesBySeriesFolio', $response->status(), required: false);
 
             $found[] = [
                 'id' => (string) $invoice['id'],
@@ -287,16 +292,7 @@ class FacturapiProvider implements PacProvider
             );
         }
 
-        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
-            throw new PacUnexpectedResponseException(
-                'La respuesta del PAC (stampDraftInvoice) no contiene el campo livemode.',
-                $response->status(),
-            );
-        }
-
-        if ($data['livemode'] === true) {
-            throw new PacUnexpectedEnvironmentException('stampDraftInvoice', (string) $data['id']);
-        }
+        $this->assertLivemode($data, 'stampDraftInvoice', $response->status());
 
         return $this->mapInvoiceArray($data);
     }
@@ -670,6 +666,9 @@ class FacturapiProvider implements PacProvider
             );
         }
 
+        // Fase 6.31: también la emisión directa (legacy) verifica el ambiente.
+        $this->assertLivemode($data, 'createInvoice', $response->status(), required: false);
+
         return $this->mapInvoiceArray($data);
     }
 
@@ -691,16 +690,7 @@ class FacturapiProvider implements PacProvider
             );
         }
 
-        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
-            throw new PacUnexpectedResponseException(
-                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
-                $response->status(),
-            );
-        }
-
-        if ($data['livemode'] === true) {
-            throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
-        }
+        $this->assertLivemode($data, $context, $response->status());
 
         return $this->mapInvoiceArray($data);
     }
@@ -768,16 +758,7 @@ class FacturapiProvider implements PacProvider
             );
         }
 
-        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
-            throw new PacUnexpectedResponseException(
-                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
-                $response->status(),
-            );
-        }
-
-        if ($data['livemode'] === true) {
-            throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
-        }
+        $this->assertLivemode($data, $context, $response->status());
 
         $this->assertSameOrganization($data, $response->status());
 
@@ -881,6 +862,37 @@ class FacturapiProvider implements PacProvider
      *
      * @param  array<string, mixed>  $data
      */
+    /**
+     * Fase 6.31: `livemode` es obligatorio en el objeto Invoice y debe ser
+     * el del ambiente con el que se opera (Test → false, Live → true).
+     * Nunca se asume cuando falta o tiene otro tipo.
+     *
+     * `required: false` sólo en los tres mapeos que hasta la 6.31 no lo
+     * revisaban (emisión legacy y búsquedas): ahí un livemode presente de
+     * otro ambiente se rechaza, pero su ausencia se tolera.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertLivemode(array $data, string $context, int $httpStatus, bool $required = true): void
+    {
+        if (! $required && ! array_key_exists('livemode', $data)) {
+            return;
+        }
+
+        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
+                $httpStatus,
+            );
+        }
+
+        $expected = PacEnvironment::expectsLivemode($this->environment);
+
+        if ($data['livemode'] !== $expected) {
+            throw new PacUnexpectedEnvironmentException($context, (string) ($data['id'] ?? ''), $expected);
+        }
+    }
+
     private function assertSameOrganization(array $data, int $httpStatus = 200): void
     {
         $received = $data['organization'] ?? null;

@@ -18,6 +18,7 @@ use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
@@ -246,18 +247,14 @@ class CancelInvoiceWithPacService
             ));
         }
 
-        if (($result->rawResponse['livemode'] ?? null) !== false) {
-            if (($result->rawResponse['livemode'] ?? null) === true) {
-                return new PacUnexpectedResponseException(sprintf(
-                    'cancelInvoice devolvió livemode=true para la factura [%d]; no se persiste información LIVE.',
-                    $invoice->id,
-                ));
-            }
+        // Fase 6.31: el livemode debe ser el del ambiente fijado en la factura.
+        $expectedLivemode = PacEnvironment::expectsLivemode($invoice->pac_environment);
+        $livemode = $result->rawResponse['livemode'] ?? null;
 
-            return new PacUnexpectedResponseException(sprintf(
-                'cancelInvoice no confirmó livemode=false para la factura [%d].',
-                $invoice->id,
-            ));
+        if ($livemode !== $expectedLivemode) {
+            return new PacUnexpectedResponseException(is_bool($livemode)
+                ? sprintf('cancelInvoice devolvió livemode=%s para la factura [%d], de otro ambiente; no se persiste la respuesta.', $livemode ? 'true' : 'false', $invoice->id)
+                : sprintf('cancelInvoice no confirmó livemode=%s para la factura [%d].', $expectedLivemode ? 'true' : 'false', $invoice->id));
         }
 
         return null;

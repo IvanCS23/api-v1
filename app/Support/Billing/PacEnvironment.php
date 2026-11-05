@@ -117,6 +117,12 @@ final class PacEnvironment
             : self::forCompany((int) $invoice->company_id);
     }
 
+    /** `livemode` que debe traer una respuesta del PAC en ese ambiente. */
+    public static function expectsLivemode(?string $environment): bool
+    {
+        return $environment === self::LIVE;
+    }
+
     /** Ambiente para mostrar (`test`|`live`), o null si no es válido. */
     public static function display(?string $environment): ?string
     {
