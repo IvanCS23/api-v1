@@ -309,16 +309,29 @@ FASE 6.30 — Envío de facturas por correo:
 - Panel fiscal: "Enviar/Reenviar por correo" con destinatarios editables según el rol y avisos de modo test y de CFDI cancelado.
 - Commits api-v1: `d5a1a3e`, `fb79f0b`, `a7a2d6c`, `c3c1082`, `0acda6b`, `46780cd` (documentación), `d5f60e8` (cancelada no se envía) y el de documentación del cierre. app-front: `01488ba`, `5577bd0`, `46cb890`, `3f45607`.
 
+FASE 6.31 — Modo Live con una empresa piloto (en código; el piloto queda pendiente):
+- Ambiente por empresa (`facturapi_organizations.pac_environment`) y `BILLING_PAC_MODE` como techo: `test` es el paro de emergencia (una empresa Live no opera ni usa su llave Test); Live sólo con `APP_ENV=production` (`billing.live_allowed_app_envs`). `PacEnvironment` es la única clase que lee `billing.pac_mode` (una prueba lo exige).
+- Ambiente de cada factura (`invoices.pac_environment`) fijado con su primera reserva bajo lock; `409 PAC_ENVIRONMENT_MISMATCH` para facturas de otro ambiente o con operaciones sin ambiente; jobs que revalidan y fallan sin reintentar; `billing:backfill-pac-environment` (`--assume-test` con aborto ante rastros de Live).
+- `livemode` exigido según el ambiente, en ambos sentidos. Llave Live cifrada, capturada con prompt oculto (`billing:facturapi-live-key`), en `security:reencrypt`; `#[SensitiveParameter]` en todo parámetro con llave.
+- Live: endpoints legacy `/issue`, `/cancel`, `/pac/issue`, `/pac/cancel` con `409 LEGACY_OPERATION_UNAVAILABLE`; motivos 02 y 03 (el 04 se retiró en ambos ambientes, el 01 sólo en Test); readiness del emisor (CSD vigente, lista para producción, correo de contacto igual al `support_email`).
+- Acuse: además del UUID, `EstatusUUID` 201 o 202 (`CANCELLATION_RECEIPT_STATUS_REJECTED`); diagnóstico de solo lectura `billing:cancellation-receipt-inspect` en cualquier ambiente.
+- `billing:pac-environment` (sólo consola, RFC escrito, datos remotos frescos, lista exacta de "factura Test sin terminar", cola vacía, sin vuelta a Test con facturas Live). `billing:pac-check` para Live (pasos pendientes, `support_email`, logotipo heredado, facturas de otro ambiente). `billing:health`: plazo del receptor en días hábiles + 24 h.
+- Frontend: etiqueta Pruebas/Producción, advertencias en Live al emitir y cancelar, motivos por ambiente, avisos de ambiente y de correo de contacto, Datos fiscales con el ambiente.
+- Hallazgos corregidos: un acuse con el UUID correcto y cualquier `EstatusUUID` se guardaba; con una configuración inválida `/pac/reconcile` marcaba la factura en revisión y `/pac/artifacts` la dejaba `failed` sin haber contactado al PAC.
+- Desviaciones: en la emisión legacy y en las búsquedas por `external_id` y folio se tolera la ausencia de `livemode` (se rechaza el de otro ambiente); el comando de importación de la llave quedó en el commit 3 porque necesita el guard por ambiente.
+- Commits api-v1: `a859f97`, `6a83b91`, `48f7e9c`, `9905fdd`, `f356172`, `53c4712`, `e45ccb8`, `d513714`, `2c77c44`, `15531c7`, `d93ebde` y el de documentación. app-front: `de1a40c`.
+- Pendiente del piloto (ver `DEPLOYMENT.md`, sección 10): empresa con CSD vigente, contador, servidor con `APP_ENV=production` y cuenta de Facturapi con suscripción activa.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md` y `api-v1/DEPLOYMENT.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.30 (verificada el 2026-11-04 sobre
-`changes-ivan` e `integracion-ivan`):
-- Backend: 1682 pruebas aprobadas, 7059 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
-- Frontend: 271 pruebas aprobadas en 28 archivos, 0 fallidas.
+Línea base de la FASE 6.31 en código (verificada el 2026-11-05 sobre
+`changes-ivan` e `integracion-ivan`, antes de R0):
+- Backend: 1832 pruebas aprobadas, 7707 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
+- Frontend: 280 pruebas aprobadas en 28 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 33 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -380,8 +393,12 @@ Riesgos pendientes:
 - Respaldos: una copia de la BD junto con el `.env` (`APP_KEY`) expone las llaves de Facturapi; ver `BILLING_LIFECYCLE.md` (rotación con `APP_PREVIOUS_KEYS`, `security:reencrypt` y `billing:facturapi-link --replace-key`).
 - User Key: abre todas las organizaciones de la cuenta y vive en el proceso web (datos fiscales y CSD). Mitigado con la lista cerrada del cliente, sólo Admin, límites de intentos, auditoría y redacción; si el `.env` se filtra, reemplazarla en Facturapi.
 - Sin verificar contra Facturapi real: la forma exacta de los errores del CSD, si `PUT /legal` borra los campos de dirección omitidos (se envían todos los que tiene la empresa), si una organización nueva sin `tax_id` timbra en TEST y qué responde `GET /organizations/{id}` con una organización de otra cuenta.
-- Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación.
-- Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
+- Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación. Desde la 6.31 también se exige `EstatusUUID` 201 o 202; la estructura `Folios/UUID` + `Folios/EstatusUUID` viene de fuentes secundarias y se confirma con ese primer acuse.
+- Llaves Live (6.31): una llave Live puede cambiar los datos fiscales y borrar o reemplazar el CSD de su organización; una User Key filtrada puede crear llaves Live en cualquier organización de la cuenta; los timbres de la suscripción se comparten entre organizaciones, así que una llave comprometida consume los de todas. Respuesta a incidentes en `DEPLOYMENT.md`, sección 10.
+- Rotación de llaves Live sin verificar: la documentación dice que `PUT /apikeys/live` no invalida las anteriores; un comentario del SDK dice lo contrario. Crear la nueva, importarla y comprobarla antes de revocar la anterior.
+- Sin verificar contra Facturapi Live: que `GET /organizations/me` acepte una llave Live (si no, la importación no guarda nada y la alternativa por `first_12` requiere aprobación), los tipos de `pending_steps`, que las facturas Test y Live estén aisladas entre sí y cómo reporta Facturapi el silencio del receptor tras un rechazo.
+- `billing:health` no modela los días festivos oficiales en el plazo del receptor: puede escalar antes de tiempo.
+- `legacy_invoices` no tiene `company_id` (sistema de tickets anterior): sus endpoints no están aislados por empresa. No toca el PAC; se documentó en la 6.31 y queda fuera de su alcance.- Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 - Folio del CFDI (6.28), sin verificar contra Facturapi: si rechaza folios duplicados (no lo documenta; lo cubre la consulta previa salvo emisiones simultáneas desde fuera), si el `PUT` del borrador respeta `series`/`folio_number` y cómo imprime el PDF la serie y el folio. Se confirma con la primera emisión real posterior a la 6.28.
 
 ## 9. Reglas de trabajo
@@ -420,7 +437,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.30 — Envío de facturas por correo (ver sección 7), incluidas sus migraciones y la verificación con dos envíos reales en TEST.
+La última fase con código completo es la FASE 6.31 — Modo Live con una empresa piloto (ver sección 7). La regresión R0 en Test es su último paso; el piloto (P1 a P7) queda pendiente de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi.
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -428,7 +445,7 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.28 — Folio del CFDI y bloqueo de PPD. Completa.
 - FASE 6.29 — Infraestructura pre-producción (zona horaria de MySQL, logs del guard, login de inactivos, checklist de despliegue en `DEPLOYMENT.md`, borrador validado antes de la transición y "Regresar a lista", logotipo del PDF). Completa.
 - FASE 6.30 — Envío del CFDI por correo. Completa.
-- FASE 6.31 — Modo Live con una empresa piloto (incluye la verificación obligatoria del acuse de cancelación con la primera cancelación real). Incluye: correo de contacto de la empresa obligatorio antes de emitir (aviso en test, bloqueo en Live), porque es el reply-to de los correos al cliente.
+- FASE 6.31 — Modo Live con una empresa piloto. Completa en código (incluye el correo de contacto obligatorio en Live). El piloto, con la verificación obligatoria del acuse en la primera cancelación real, queda pendiente (ver `DEPLOYMENT.md`, sección 10).
 
 Hito 2 — Lanzamiento general:
 - Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
@@ -452,11 +469,7 @@ Después del lanzamiento:
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.31 — Modo Live con una empresa piloto antes de modificar archivos:
-
-1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Revisa qué cambia con `BILLING_PAC_MODE=live` (llave Live, CSD obligatorio, `pending_steps` de la organización, verificación del acuse de cancelación, correo de contacto obligatorio como reply-to) y `DEPLOYMENT.md`.
-3. Propón alcance, archivos, pruebas, riesgos y orden de commits.
+Cerrar la FASE 6.31 con la regresión R0 en Test (una emisión y una cancelación completas, con autorización explícita para cada operación real) y su reporte. No avanzar al piloto (P1 a P7) hasta que existan la empresa piloto con CSD vigente, su contador, un servidor con `APP_ENV=production` y la suscripción activa de Facturapi.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.

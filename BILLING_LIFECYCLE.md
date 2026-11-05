@@ -89,8 +89,12 @@ sigue sugiriendo `operations_issue` para `issue_failed` y
 
 Payload mínimo sin CFDI: `{ "confirm": true }`.
 
-Con CFDI válido agrega `motive` (`01`-`04`) y, para `01`,
-`substitution_uuid`.
+Con CFDI válido agrega `motive` y, para `01`, `substitution_uuid`. Desde la
+Fase 6.31 los motivos dependen del ambiente (`actions.cancellation_motives`,
+`CfdiCancellationMotive::availableIn()`): Live admite 02 y 03; Test, 01, 02
+y 03. El 04 se retiró en ambos (Facturapi exige sustitución, el código la
+prohibía y el sistema no emite facturas globales). Otro motivo responde
+`422 CANCELLATION_MOTIVE_UNAVAILABLE` antes de reservar.
 
 - sin identidad CFDI: converge únicamente el ERP;
 - con CFDI válido: solicita cancelación PAC y sólo converge ERP cuando
@@ -125,6 +129,21 @@ Consecuencia esperada en TEST: "Obtener acuse" termina en
 `reconciliation_required` y no se guarda ningún archivo. No es un fallo de
 comparación ni debe relajarse la validación: el bloqueo protege contra
 acuses ajenos en LIVE. La cancelación del CFDI no depende del acuse.
+
+**EstatusUUID (Fase 6.31).** Además del UUID, el acuse se acepta sólo si el
+`EstatusUUID` del mismo `Acuse/Folios` es 201 o 202
+(`CancellationReceiptFolios`). Esos valores sólo indican que el SAT procesó
+la solicitud: se sigue exigiendo `pac_status=canceled` y
+`cancellation_status=accepted` antes de pedir el acuse. Otro valor, o su
+ausencia, responde `409 CANCELLATION_RECEIPT_STATUS_REJECTED`, deja el acuse
+en `reconciliation_required` sin guardar ningún archivo, registra
+`cancellation_receipt_status_rejected` (sólo el código y el UUID
+enmascarado) y cuenta para el límite de reintentos. Antes de la 6.31 un acuse
+con el UUID correcto y cualquier estatus se guardaba. La estructura
+`Folios/UUID` + `Folios/EstatusUUID` viene de fuentes secundarias de otros
+PAC: se confirma con el primer acuse Live y no se acepta otra sin evidencia.
+`billing:cancellation-receipt-inspect {invoice}` la muestra sin guardar nada,
+en cualquier ambiente.
 
 **Verificación obligatoria en Live.** En Facturapi TEST el acuse de
 cancelación contiene un UUID ajeno (EstatusUUID 205) y el sistema lo bloquea
@@ -377,6 +396,14 @@ cómo los imprime el PDF de Facturapi.
 - `/invoices/{invoice}/pac/issue`: operación PAC de bajo nivel conservada.
 - `/invoices/{invoice}/pac/cancel`: operación PAC de bajo nivel conservada.
 
+Fase 6.31: para una factura Live, los cuatro responden
+`409 LEGACY_OPERATION_UNAVAILABLE` sin tocar nada (`LegacyPacOperations`):
+los dos de ERP emitirían sin CFDI o cancelarían el ERP con el CFDI vigente, y
+las primitivas no tienen las validaciones de la operación empresarial.
+`/pac/reconcile`, `/pac/artifacts` y `/pac/cancellation-receipt` se conservan
+(los usa el panel). `legacy-invoices` no toca el PAC (`LegacyInvoiceController`
+sólo usa `LegacyInvoice`, `Request` y `Str`) y no se restringe.
+
 Los consumidores de UI nuevos deben usar `/operations/issue` y
 `/operations/cancel`. `GET /api/invoices/{invoice}/billing` publica
 `actions.can_issue`, `actions.can_cancel`, `actions.can_reconcile`,
@@ -452,25 +479,32 @@ una reserva más vieja que `billing.cancellation_receipt.pending_minutes`
 
 ### Modo y llave
 
-`billing.pac_mode` (`BILLING_PAC_MODE`, por omisión `test`) define qué llave
-se acepta: `test` exige prefijo `sk_test_`; `live` (`sk_live_`) **no está
-soportado** en esta fase. Desde la Fase 6.27 la llave es la de la organización
-de Facturapi de la empresa de cada factura (`facturapi_organizations`); no hay
+Desde la Fase 6.31 el ambiente (`test` o `live`) es de cada empresa y cada
+factura (ver "Modo Live con una empresa piloto"); `billing.pac_mode`
+(`BILLING_PAC_MODE`, por omisión `test`) es el techo del sistema. La llave
+debe tener el prefijo del ambiente con el que se opera (`sk_test_` /
+`sk_live_`). Desde la Fase 6.27 la llave es la de la organización de
+Facturapi de la empresa de cada factura (`facturapi_organizations`); no hay
 llave global en ejecución (ver "Organización de Facturapi por empresa").
 
-`PacCredentialGuard::forCompany()` se evalúa en `FacturapiProvider::client()`
-antes de construir cualquier petición (escrituras, consultas y descargas) y en
-los orquestadores antes de cualquier transición ERP. Motivos, en este orden:
-`pac_mode_unsupported`, `pac_organization_missing`, `pac_key_missing`,
-`pac_key_mode_mismatch`. Una configuración inválida lanza
+`PacCredentialGuard::forCompany()` / `forInvoice()` se evalúa en
+`FacturapiProvider::client()` antes de construir cualquier petición
+(escrituras, consultas y descargas), en los orquestadores antes de cualquier
+transición ERP y, desde la 6.31, en `/pac/*` y en el envío por correo antes
+de que el servicio reserve nada. Motivos, en este orden:
+`pac_mode_unsupported` (techo vacío o desconocido),
+`pac_environment_invalid`, `pac_live_not_enabled` (paro de emergencia),
+`pac_live_app_env_not_allowed`, `pac_organization_missing`,
+`pac_key_missing` / `pac_live_key_missing`, `pac_key_mode_mismatch`. Una
+configuración inválida lanza
 `PacConfigurationException` (fallo definitivo, `503 PAC_CONFIGURATION_INVALID`):
 el PAC nunca recibe la petición y el ERP no cambia. La respuesta no incluye el
 motivo y hoy tampoco se registra en `laravel.log` (pendiente en el documento
 maestro); `billing:pac-check` lo muestra.
 
 Los comandos `billing:facturapi-test-*` usan el trait
-`GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test` y llave
-con el prefijo del modo; nunca imprimen la llave.
+`GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test`, una
+empresa en Test y llave con el prefijo del ambiente; nunca imprimen la llave.
 
 ### Logs
 
@@ -648,6 +682,8 @@ estado de la factura ni dispara `--fail-on`.
 | `erp_cancelled_before_pac_confirmation` (ERP `cancelled`, CFDI `valid`, cancelación `pending`/`verifying`) | invalid | manual_review |
 | `identity_uuid_without_external_id`, `erp_behind_cfdi`, `issue_succeeded_without_valid_cfdi`, `pac_status_without_identity`, `idempotency_key_mismatch` | invalid | manual_review |
 | `cfdi_folio_mismatch` (CFDI timbrado con la serie `FAC` pero un folio distinto al del ERP; la serie `F` anterior a la 6.28 no se reporta) | invalid | manual_review |
+| `pac_environment_mismatch` (Fase 6.31: factura de otro ambiente, o con operaciones del PAC y sin ambiente; sustituye a sus demás hallazgos) | invalid | manual_review |
+| `cancellation_receipt_status_rejected` (Fase 6.31: acuse del CFDI con `EstatusUUID` distinto de 201 y 202, o sin él) | recoverable (ambos ambientes) | manual_review |
 
 El acuse nunca escala por sí mismo:
 
@@ -678,10 +714,15 @@ Umbrales en `config/billing.php` (`billing.health.*`):
 
 - Emisión pendiente: 60 min (Facturapi reintenta recuperar un CFDI aceptado
   con 202 hasta 5 veces cada 10 min).
-- Cancelación pendiente: 96 h = 72 h de plazo del receptor para aceptar o
-  rechazar (durante el cual Facturapi reporta `status=valid` +
+- Cancelación pendiente (Fase 6.31, `CancellationReceiverDeadline`): tres
+  días hábiles del receptor para aceptar o rechazar (lunes a viernes, hora
+  del centro de México; durante el plazo Facturapi reporta `status=valid` +
   `cancellation_status=pending`) + 24 h de margen operativo propio, no
-  normativo: el ERP sólo conoce el desenlace al reconciliar.
+  normativo: el ERP sólo conoce el desenlace al reconciliar
+  (`cancellation_receiver_business_days`, `cancellation_margin_hours`).
+  Una solicitud del viernes escala el jueves siguiente; antes, con 96 h
+  fijas, escalaba el martes. Los festivos oficiales no se modelan: el
+  hallazgo puede escalar antes de tiempo, nunca bloquea una operación.
 - Borrador remoto: 48 h aviso / 72 h límite (un CFDI no puede fecharse más
   de 72 h atrás).
 
@@ -693,6 +734,112 @@ comando, no un valor aceptado), `--format=table|json`, `--limit=50` y `--fail-on
 alcanza `--fail-on`, apto para cron o alertas. La salida sólo contiene IDs,
 folio, estados y códigos: nunca payloads PAC, errores crudos, rutas, llaves de
 idempotencia, `pac_external_id` ni `cfdi_uuid`.
+
+## Modo Live con una empresa piloto (Fase 6.31)
+
+Lo que hace falta para operar en Live está en el código; **ninguna empresa
+opera en Live todavía** y `BILLING_PAC_MODE` sigue en `test`. El piloto y sus
+pendientes están en `DEPLOYMENT.md`.
+
+### Ambiente de la empresa y techo del sistema
+
+- `facturapi_organizations.pac_environment` (`test` | `live`, nunca vacío;
+  sólo lo cambia `billing:pac-environment`). `PacEnvironment` es la única
+  clase que lee `billing.pac_mode` (una prueba lo exige).
+- `billing.pac_mode` es el techo: `test` = toda empresa opera en Test y una
+  empresa Live se rechaza con `pac_live_not_enabled` **sin usar su llave
+  Test** (paro de emergencia); `live` = cada empresa opera en su ambiente;
+  vacío o desconocido = nada opera.
+- Live exige además `APP_ENV` en `billing.live_allowed_app_envs`
+  (`['production']`, sin variable de entorno ni excepción para `testing`:
+  las pruebas lo fijan de forma explícita con HTTP simulado).
+- `pac.mode` de `GET /billing` y `pac_mode` de Configuración > Correo son
+  ahora el ambiente de la factura o de la empresa, no el techo.
+
+### Ambiente de la factura
+
+`invoices.pac_environment` se escribe con la **primera reserva**
+(`PacEnvironmentAccess::bind()`, dentro de su transacción, con la factura
+bloqueada y la organización con lock compartido): borrador, timbrado,
+emisión legacy, cancelación, XML/PDF y acuse. Antes de reservar, la factura
+opera con el ambiente de su empresa sin escribirlo: una falla de la consulta
+de folio no la ata a ningún ambiente. Después nunca cambia.
+
+Una factura con un ambiente distinto al de su empresa (`mismatch`), o con
+operaciones del PAC y sin ambiente (`unbound`, anterior a la 6.31 sin
+backfill), responde `409 PAC_ENVIRONMENT_MISMATCH` antes de cualquier HTTP
+(resolver, orquestadores, controlador, revert, correo), no ofrece acciones
+(`pac.environment_status`) y `billing:health` la reporta. El provider de una
+factura se construye después de reservar, con la llave de su ambiente. Los
+jobs de XML/PDF y correo revalidan ambiente y guard y fallan sin reintentar
+ni tocar la factura.
+
+`billing:backfill-pac-environment [--company=*] [--assume-test] [--apply]`
+deduce el ambiente de `livemode` en las respuestas guardadas (sin HTTP).
+`--assume-test` fija en test lo que no tiene evidencia y lo lista; aborta si
+alguna respuesta trae `livemode=true` o alguna empresa tiene o tuvo llave o
+ambiente Live.
+
+### livemode
+
+`FacturapiProvider::assertLivemode()` exige el `livemode` del ambiente (Test
+→ false, Live → true) en el timbrado, la consulta y la cancelación del CFDI
+y en crear, consultar y actualizar borradores; también lo comparan la
+cancelación y la reconciliación contra el ambiente fijado. En la emisión
+legacy (`createInvoice`) y en las búsquedas por `external_id` y por folio un
+`livemode` de otro ambiente se rechaza, pero su ausencia se tolera
+(desviación: exigirlo obligaba a reescribir 55 respuestas simuladas).
+
+### Llave Live
+
+`billing:facturapi-live-key --company= [--apply]`: el operador crea la llave
+en el panel de Facturapi y la pega en un prompt oculto
+(`secret(..., false)`), nunca por argumento ni por `.env` (`config:cache` la
+dejaría copiada). Se comprueba con `GET /organizations/me` usando la propia
+llave (exige techo `live` y `APP_ENV=production`); si Facturapi no la acepta
+o es de otra organización no se guarda nada. Se guarda cifrada
+(`live_secret_key`, incluida en `security:reencrypt`), sólo se muestra su
+pista y queda auditada (`live_key_stored` / `live_key_replaced`). La
+alternativa de comparar `first_12` con la User Key no está implementada y
+requiere aprobación.
+
+### Cambio de ambiente
+
+`billing:pac-environment --company= --set=live|test [--apply]`, sólo por
+consola y con el RFC escrito como confirmación:
+
+- A Live, con datos remotos frescos (`GET /organizations/me` con la llave
+  Live, fuera de cualquier lock): organización vinculada, CSD presente y
+  vigente, `is_production_ready=true` **y** `pending_steps` vacío, RFC,
+  régimen y C.P. iguales a los de la empresa y `support_email` igual al
+  correo de contacto. Además techo `live`, `APP_ENV` permitido y llave Live
+  guardada.
+- Ninguna "factura Test sin terminar" (`PacEnvironmentSwitchGuard`):
+  `sin_ambiente`, `emision_en_curso`, `revision_pendiente`,
+  `reserva_sin_borrador`, `borrador_sin_timbrar`, `emitida_sin_cfdi`,
+  `cancelacion_en_curso`, `descarga_en_curso`. Ningún job de la empresa en la
+  cola; con un driver que no se puede revisar (distinto de `database` o
+  `sync`) también se niega.
+- A Test se niega si la empresa tiene cualquier factura Live, aun borrada.
+- Con `--apply` bloquea la organización (`lockForUpdate`), repite las
+  revisiones locales dentro de la transacción, refresca la copia de la
+  organización y audita `environment_changed`.
+
+### Readiness del emisor en Live
+
+`COMPANY_CSD_MISSING`, `COMPANY_CSD_EXPIRED`, `COMPANY_NOT_PRODUCTION_READY`
+(`is_production_ready=false` o `pending_steps`), `COMPANY_CONTACT_EMAIL_MISSING`
+y `COMPANY_SUPPORT_EMAIL_MISMATCH` (el correo de contacto es el "Responder"
+de los correos al cliente; se compara con la copia local
+`legal_support_email`). En Test el correo sólo se avisa
+(`issuer.contact_email_issue` en `GET /billing` y en Datos fiscales).
+
+### Diagnóstico
+
+`billing:pac-check` muestra el ambiente y las pistas de ambas llaves; en
+Live falla con pasos pendientes o un `support_email` distinto; avisa de un
+logotipo que no se subió desde el sistema y lista las facturas de otro
+ambiente. `billing:cancellation-receipt-inspect` (ver "Cancelar factura").
 
 ## Organización de Facturapi por empresa (Fase 6.27a)
 
