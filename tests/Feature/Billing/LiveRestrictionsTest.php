@@ -127,9 +127,3 @@ test('el panel recibe sólo 02 y 03 para una factura Live', function () {
         ->assertJsonPath('actions.cancellation_mode', 'pac')
         ->assertJsonPath('actions.cancellation_motives', ['02', '03']);
 });
-
-test('legacy-invoices no depende del PAC (evidencia para no restringirlo)', function () {
-    $source = (string) file_get_contents(app_path('Http/Controllers/Api/LegacyInvoiceController.php'));
-
-    expect($source)->not->toMatch('/Pac|Facturapi|Billing|Http::|\bInvoice::/');
-});

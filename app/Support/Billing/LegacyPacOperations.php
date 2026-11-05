@@ -19,8 +19,8 @@ use Illuminate\Http\JsonResponse;
  * los usa el panel y pasan por el guard y el ambiente fijado.
  *
  * `legacy-invoices` (tabla legacy_invoices, sistema de tickets anterior)
- * no toca el PAC: LegacyInvoiceController sólo usa LegacyInvoice, Request
- * y Str. No se restringe.
+ * no tocaba el PAC; sus rutas se retiraron en la 6.31 por no estar aisladas
+ * por empresa (ver routes/api.php).
  */
 final class LegacyPacOperations
 {

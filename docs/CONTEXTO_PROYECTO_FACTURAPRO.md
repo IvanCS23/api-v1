@@ -360,6 +360,7 @@ Estado de la BD local de desarrollo:
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
+- Sin uso desde que se retiraron las rutas de `legacy-invoices` (6.31), conservados a propósito: `App\Http\Controllers\Api\LegacyInvoiceController`, el modelo `App\Models\LegacyInvoice` (sólo lo referencia la relación siguiente) y `Company::legacyInvoices()` (`app/Models/Company.php:142`), que nunca resolvió nada porque `legacy_invoices` no tiene `company_id`. Decidir si se eliminan junto con la tabla, después de respaldar su registro.
 - Lint global frontend: 31 errores / 51 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
 - `CompanyBillingReadinessService::evaluate()` (forma de pago de la empresa) no tiene consumidores desde la 6.25: decidir si se elimina.
 - Vulnerabilidades de dependencias reportadas, pendientes de nueva auditoría.
@@ -404,7 +405,7 @@ Riesgos pendientes:
 - Rotación de llaves Live sin verificar: la documentación dice que `PUT /apikeys/live` no invalida las anteriores; un comentario del SDK dice lo contrario. Crear la nueva, importarla y comprobarla antes de revocar la anterior.
 - Sin verificar contra Facturapi Live: que `GET /organizations/me` acepte una llave Live (si no, la importación no guarda nada y la alternativa por `first_12` requiere aprobación), los tipos de `pending_steps`, que las facturas Test y Live estén aisladas entre sí y cómo reporta Facturapi el silencio del receptor tras un rechazo.
 - `billing:health` no modela los días festivos oficiales en el plazo del receptor: puede escalar antes de tiempo.
-- `legacy_invoices` no tiene `company_id` ni Policy (sistema de tickets anterior): cualquier usuario activo de cualquier empresa puede listar, ver, crear, modificar y borrar todos sus registros, y `client_id` se valida sin filtrar por empresa. Nadie la usa (frontend, comandos ni pruebas); hay 1 registro en la BD local. Corrección propuesta (quitar las cinco rutas y conservar tabla y datos) pendiente de aprobación.
+- Resuelto en la 6.31: `legacy_invoices` no tiene `company_id` ni Policy (sistema de tickets anterior) y cualquier usuario activo de cualquier empresa podía listar, ver, crear, modificar y borrar todos sus registros. Se retiraron sus cinco rutas (`/api/legacy-invoices`); la tabla, el modelo, la migración y el registro existente se conservan. `LegacyInvoiceRoutesRemovedTest` falla si reaparecen.
 - Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 - Folio del CFDI (6.28), sin verificar contra Facturapi: si rechaza folios duplicados (no lo documenta; lo cubre la consulta previa salvo emisiones simultáneas desde fuera), si el `PUT` del borrador respeta `series`/`folio_number` y cómo imprime el PDF la serie y el folio. Se confirma con la primera emisión real posterior a la 6.28.
 
@@ -469,7 +470,7 @@ Hito 3 — Contabilidad y estadísticas:
 - Contabilidad electrónica.
 
 Después del lanzamiento:
-- Deprecación de endpoints legacy (`/api/invoices/{id}/issue`, `/cancel`, `/pac/issue`, `/pac/cancel`, `legacy-invoices`): headers `Deprecation`, successor links y pruebas.
+- Deprecación de endpoints legacy (`/api/invoices/{id}/issue`, `/cancel`, `/pac/issue`, `/pac/cancel`): headers `Deprecation`, successor links y pruebas. `legacy-invoices` ya no está: sus rutas se retiraron en la 6.31.
 - Lint y Pint globales.
 - Aprobación de ventas por rol.
 - Sesiones múltiples por usuario (hoy `POST /api/login` reemplaza el `api_token`).

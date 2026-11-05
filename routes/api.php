@@ -13,7 +13,6 @@ use App\Http\Controllers\Api\InvoiceBusinessActionController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\InvoiceItemController;
 use App\Http\Controllers\Api\InvoicePacActionController;
-use App\Http\Controllers\Api\LegacyInvoiceController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
@@ -72,12 +71,11 @@ Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::get('/employees/{id}', [EmployeController::class, 'show']);
     Route::delete('/employees/{id}', [EmployeController::class, 'destroy']);
 
-    // Legacy invoices / tickets (renombrado en Fase 5, ver LegacyInvoice)
-    Route::get('/legacy-invoices', [LegacyInvoiceController::class, 'index']);
-    Route::post('/legacy-invoices', [LegacyInvoiceController::class, 'store']);
-    Route::put('/legacy-invoices/{id}', [LegacyInvoiceController::class, 'update']);
-    Route::get('/legacy-invoices/{id}', [LegacyInvoiceController::class, 'show']);
-    Route::delete('/legacy-invoices/{id}', [LegacyInvoiceController::class, 'destroy']);
+    // Fase 6.31: las rutas /legacy-invoices (tickets del sistema anterior) se
+    // retiraron: la tabla legacy_invoices no tiene company_id ni Policy y
+    // cualquier usuario de cualquier empresa leía y modificaba todos sus
+    // registros. La tabla, el modelo, la migración y los datos se conservan.
+    // LegacyInvoiceRoutesRemovedTest falla si reaparecen.
 
     // Sales (Fase 2 — motor comercial, sin Facturapi)
     Route::get('/sales', [SaleController::class, 'index']);

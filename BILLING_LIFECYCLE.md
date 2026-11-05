@@ -415,8 +415,9 @@ Fase 6.31: para una factura Live, los cuatro responden
 los dos de ERP emitirían sin CFDI o cancelarían el ERP con el CFDI vigente, y
 las primitivas no tienen las validaciones de la operación empresarial.
 `/pac/reconcile`, `/pac/artifacts` y `/pac/cancellation-receipt` se conservan
-(los usa el panel). `legacy-invoices` no toca el PAC (`LegacyInvoiceController`
-sólo usa `LegacyInvoice`, `Request` y `Str`) y no se restringe.
+(los usa el panel). `legacy-invoices` (tickets del sistema anterior) no tocaba
+el PAC; sus rutas se retiraron en la 6.31 porque la tabla no está aislada por
+empresa (ver el documento maestro).
 
 Los consumidores de UI nuevos deben usar `/operations/issue` y
 `/operations/cancel`. `GET /api/invoices/{invoice}/billing` publica
