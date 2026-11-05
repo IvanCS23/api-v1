@@ -3,12 +3,14 @@
 use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\InvoiceStatus;
 use App\Enums\UserRole;
+use App\Exceptions\Billing\LegacyOperationUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Models\User;
+use App\Services\Billing\IssueInvoiceService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\DB;
@@ -103,10 +105,23 @@ test('el livemode del ambiente se acepta', function (string $environment) {
     expect(Http::recorded())->toHaveCount(9);
 })->with(['test', 'live']);
 
-test('sin livemode fallan los mapeos que ya lo exigían y se toleran los tres que no lo revisaban', function (string $environment) {
+test('en Live toda respuesta sin livemode se rechaza, también las búsquedas y la emisión legacy', function () {
     phase631LivemodeFake(null);
 
-    foreach (phase631LivemodeCalls($environment) as $name => [$call, $required]) {
+    foreach (phase631LivemodeCalls('live') as $name => [$call]) {
+        try {
+            $call();
+            test()->fail("{$name} aceptó una respuesta Live sin livemode");
+        } catch (PacUnexpectedResponseException $e) {
+            expect($e->getMessage())->toContain('livemode')->toContain($name);
+        }
+    }
+});
+
+test('en Test sólo los tres mapeos que no lo revisaban toleran la ausencia de livemode', function () {
+    phase631LivemodeFake(null);
+
+    foreach (phase631LivemodeCalls('test') as $name => [$call, $required]) {
         if (! $required) {
             $call();
 
@@ -115,7 +130,30 @@ test('sin livemode fallan los mapeos que ya lo exigían y se toleran los tres qu
 
         expect($call)->toThrow(PacUnexpectedResponseException::class, 'livemode');
     }
+});
+
+test('un livemode que no es booleano se rechaza en ambos ambientes', function (string $environment) {
+    Http::fake(['*' => Http::response(['id' => 'inv_1', 'status' => 'draft', 'livemode' => 'true', 'is_ready_to_stamp' => true, 'total' => 100])]);
+
+    foreach (phase631LivemodeCalls($environment) as $name => [$call]) {
+        if ($name === 'findInvoiceByExternalId' || $name === 'findInvoicesBySeriesFolio') {
+            continue;
+        }
+
+        expect($call)->toThrow(PacUnexpectedResponseException::class, 'livemode');
+    }
 })->with(['test', 'live']);
+
+test('la emisión legacy sin borrador no se ofrece en Live y no contacta al PAC', function () {
+    [$company, , $invoice] = phase631LiveReadyInvoice();
+    app(CurrentTenant::class)->set($company->id);
+
+    expect(fn () => app(IssueInvoiceService::class)->issue($invoice->fresh()))
+        ->toThrow(LegacyOperationUnavailableException::class);
+
+    expect(DB::table('invoices')->where('id', $invoice->id)->value('pac_idempotency_key'))->toBeNull();
+    Http::assertNothingSent();
+});
 
 /** @return array{Company, User, Invoice} */
 function phase631LiveReadyInvoice(): array

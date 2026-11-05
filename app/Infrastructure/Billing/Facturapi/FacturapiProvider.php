@@ -149,7 +149,7 @@ class FacturapiProvider implements PacProvider
         }
 
         // Fase 6.31: la reconciliación usa este resultado; debe ser del ambiente.
-        $this->assertLivemode($only, 'findInvoiceByExternalId', $response->status(), required: false);
+        $this->assertLivemode($only, 'findInvoiceByExternalId', $response->status(), toleratedMissingInTest: true);
 
         return $this->mapInvoiceArray($only);
     }
@@ -189,7 +189,7 @@ class FacturapiProvider implements PacProvider
 
             $this->assertSameOrganization($invoice, $response->status());
             // Fase 6.31: un comprobante de otro ambiente no cuenta para el folio.
-            $this->assertLivemode($invoice, 'findInvoicesBySeriesFolio', $response->status(), required: false);
+            $this->assertLivemode($invoice, 'findInvoicesBySeriesFolio', $response->status(), toleratedMissingInTest: true);
 
             $found[] = [
                 'id' => (string) $invoice['id'],
@@ -667,7 +667,7 @@ class FacturapiProvider implements PacProvider
         }
 
         // Fase 6.31: también la emisión directa (legacy) verifica el ambiente.
-        $this->assertLivemode($data, 'createInvoice', $response->status(), required: false);
+        $this->assertLivemode($data, 'createInvoice', $response->status(), toleratedMissingInTest: true);
 
         return $this->mapInvoiceArray($data);
     }
@@ -867,15 +867,18 @@ class FacturapiProvider implements PacProvider
      * el del ambiente con el que se opera (Test → false, Live → true).
      * Nunca se asume cuando falta o tiene otro tipo.
      *
-     * `required: false` sólo en los tres mapeos que hasta la 6.31 no lo
-     * revisaban (emisión legacy y búsquedas): ahí un livemode presente de
-     * otro ambiente se rechaza, pero su ausencia se tolera.
+     * `toleratedMissingInTest` sólo en los tres mapeos que hasta la 6.31 no
+     * lo revisaban (emisión legacy y búsquedas por external_id y folio), y
+     * sólo en el ambiente Test: ahí se tolera su AUSENCIA porque 55
+     * respuestas simuladas anteriores a la 6.31 no lo traen. Un livemode
+     * presente de otro ambiente se rechaza siempre, y en Live su ausencia
+     * también.
      *
      * @param  array<string, mixed>  $data
      */
-    private function assertLivemode(array $data, string $context, int $httpStatus, bool $required = true): void
+    private function assertLivemode(array $data, string $context, int $httpStatus, bool $toleratedMissingInTest = false): void
     {
-        if (! $required && ! array_key_exists('livemode', $data)) {
+        if ($toleratedMissingInTest && $this->environment === PacEnvironment::TEST && ! array_key_exists('livemode', $data)) {
             return;
         }
 

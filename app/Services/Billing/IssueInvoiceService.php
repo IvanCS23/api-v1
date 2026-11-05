@@ -10,6 +10,7 @@ use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
+use App\Exceptions\Billing\LegacyOperationUnavailableException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacRateLimitException;
@@ -19,6 +20,7 @@ use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Tenant\CurrentTenant;
@@ -89,6 +91,12 @@ class IssueInvoiceService
 
     public function issue(Invoice $invoice): Invoice
     {
+        // Fase 6.31: la emisión directa sin borrador (InvoiceWorkflow::issueToPac)
+        // no se ofrece en Live; se rechaza antes de reservar o contactar al PAC.
+        if (PacEnvironment::forInvoice($invoice) === PacEnvironment::LIVE) {
+            throw new LegacyOperationUnavailableException((int) $invoice->id, 'IssueInvoiceService::issue');
+        }
+
         $reserved = $this->reserve($invoice);
 
         $this->audit->appendSafely($reserved, InvoicePacEventType::IssueAttempted, [

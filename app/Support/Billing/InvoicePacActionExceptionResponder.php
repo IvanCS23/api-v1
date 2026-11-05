@@ -13,6 +13,7 @@ use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
 use App\Exceptions\Billing\InvoiceEmailException;
 use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
 use App\Exceptions\Billing\InvoiceNotReadyForPacException;
+use App\Exceptions\Billing\LegacyOperationUnavailableException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
@@ -192,6 +193,12 @@ class InvoicePacActionExceptionResponder
                 409,
                 'PAC_ORGANIZATION_MISMATCH',
                 'La factura pertenece a otra organización de Facturapi y la llave de esta empresa no tiene acceso a ella. No se contactó al proveedor fiscal.',
+            ],
+            // Fase 6.31.
+            $error instanceof LegacyOperationUnavailableException => [
+                409,
+                LegacyPacOperations::CODE,
+                'Esta operación histórica no está disponible para facturas en producción. Usa Emitir factura o Cancelar factura.',
             ],
             // Fase 6.31: también antes de PacConfigurationException.
             $error instanceof PacEnvironmentMismatchException => [
