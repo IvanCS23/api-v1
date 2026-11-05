@@ -32,6 +32,8 @@ enum InvoicePacEventType: string
     case CancellationReceiptStored = 'cancellation_receipt_stored';
     case CancellationReceiptUnavailable = 'cancellation_receipt_unavailable';
     case CancellationReceiptIdentityMismatch = 'cancellation_receipt_identity_mismatch';
+    // Fase 6.31: el acuse corresponde al CFDI pero su EstatusUUID no es 201/202.
+    case CancellationReceiptStatusRejected = 'cancellation_receipt_status_rejected';
 
     // Fase 6.27: cierre de una factura de una organización Facturapi inaccesible.
     case OrganizationArchived = 'organization_archived';

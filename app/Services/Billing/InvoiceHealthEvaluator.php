@@ -6,6 +6,7 @@ use App\Enums\InvoiceHealthAction as Action;
 use App\Enums\InvoiceHealthStatus as Health;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
+use App\Exceptions\Billing\CancellationReceiptStatusRejectedException;
 use App\Models\Invoice;
 use App\Support\Billing\InvoiceHealthFinding as Finding;
 use App\Support\Billing\InvoiceHealthReport;
@@ -352,8 +353,15 @@ class InvoiceHealthEvaluator
      */
     private function receiptFinding(Invoice $invoice): Finding
     {
-        $identityMismatch = PacErrorCode::from($invoice->cancellation_receipt_last_error)
-            === CancellationReceiptIdentityMismatchException::ERROR_CODE;
+        $code = PacErrorCode::from($invoice->cancellation_receipt_last_error);
+
+        // Fase 6.31: un EstatusUUID rechazado exige revisión en ambos ambientes:
+        // a diferencia del acuse ajeno de TEST, no es un comportamiento esperado.
+        if ($code === CancellationReceiptStatusRejectedException::ERROR_CODE) {
+            return new Finding('cancellation_receipt_status_rejected', Health::Recoverable, Action::ManualReview);
+        }
+
+        $identityMismatch = $code === CancellationReceiptIdentityMismatchException::ERROR_CODE;
 
         if (! $identityMismatch) {
             return new Finding('cancellation_receipt_retry_pending', Health::Valid, Action::FetchReceipt);

@@ -67,7 +67,7 @@ function phase610Pdf(): string
 function phase610ReceiptXml(string $uuid): string
 {
     return '<?xml version="1.0" encoding="UTF-8"?>'
-        .'<Acuse xmlns="http://cancelacfd.sat.gob.mx"><Folios><UUID>'.$uuid.'</UUID></Folios></Acuse>';
+        .'<Acuse xmlns="http://cancelacfd.sat.gob.mx"><Folios><UUID>'.$uuid.'</UUID><EstatusUUID>201</EstatusUUID></Folios></Acuse>';
 }
 
 function phase610ReceiptPdf(): string

@@ -123,7 +123,8 @@ class InvoiceBusinessCapabilitiesService
         }
 
         return $invoice->pacEvents()
-            ->where('event_type', InvoicePacEventType::CancellationReceiptIdentityMismatch->value)
+            // Fase 6.31: un EstatusUUID rechazado cuenta igual que un acuse ajeno.
+            ->whereIn('event_type', [InvoicePacEventType::CancellationReceiptIdentityMismatch->value, InvoicePacEventType::CancellationReceiptStatusRejected->value])
             ->count();
     }
 

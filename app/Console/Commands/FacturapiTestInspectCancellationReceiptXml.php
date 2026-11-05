@@ -105,6 +105,12 @@ class FacturapiTestInspectCancellationReceiptXml extends Command
                 ),
             );
 
+            // Fase 6.31: Acuse/Folios con su EstatusUUID.
+            $this->table(
+                ['folio_uuid', 'matches_local', 'estatus_uuid', 'aceptado'],
+                array_map(fn (array $folio): array => [$folio['uuid'], $folio['matches_invoice'] ? 'yes' : 'no', $folio['estatus_uuid'], $folio['accepted'] ? 'yes' : 'no'], $inspection['folios']),
+            );
+
             $this->info('Diagnostico terminado: el XML fue descartado sin persistirse.');
 
             return self::SUCCESS;

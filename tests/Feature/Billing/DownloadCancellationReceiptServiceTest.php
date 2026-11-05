@@ -355,7 +355,7 @@ test('varios Folios aceptan UUID esperado en segundo lugar y casing distinto', f
     app(CurrentTenant::class)->set($company->id);
     $xml = '<Acuse xmlns="http://cancelacfd.sat.gob.mx">'
         .'<Folios><UUID>11111111-1111-1111-1111-111111111111</UUID></Folios>'
-        .'<Folios><UUID>'.strtoupper((string) $invoice->cfdi_uuid).'</UUID></Folios>'
+        .'<Folios><UUID>'.strtoupper((string) $invoice->cfdi_uuid).'</UUID><EstatusUUID>201</EstatusUUID></Folios>'
         .'</Acuse>';
     fakeCancellationReceiptHttp($invoice, $xml);
 

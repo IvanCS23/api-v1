@@ -5,6 +5,7 @@ namespace App\Support\Billing;
 use App\Exceptions\Billing\CancellationMotiveUnavailableException;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
+use App\Exceptions\Billing\CancellationReceiptStatusRejectedException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
@@ -85,6 +86,11 @@ class InvoicePacActionExceptionResponder
                 409,
                 'INVOICE_LIFECYCLE_INCONSISTENT',
                 'Los estados ERP y fiscal requieren revisión antes de continuar.',
+            ],
+            $error instanceof CancellationReceiptStatusRejectedException => [
+                409,
+                CancellationReceiptStatusRejectedException::ERROR_CODE,
+                'El acuse corresponde al CFDI, pero el SAT no reporta la solicitud como procesada (EstatusUUID distinto de 201 y 202). Requiere revisión.',
             ],
             $error instanceof CancellationReceiptIdentityMismatchException => [
                 409,

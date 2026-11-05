@@ -86,6 +86,11 @@ class InvoicePacEventResource extends JsonResource
                 'pac_external_id_masked', 'elapsed_ms',
                 'cancellation_receipt_status',
             ],
+            InvoicePacEventType::CancellationReceiptStatusRejected => [
+                'receipt_status', 'expected_uuid_masked',
+                'pac_external_id_masked', 'elapsed_ms',
+                'cancellation_receipt_status',
+            ],
             InvoicePacEventType::OrganizationArchived => ['reason'],
             InvoicePacEventType::CfdiFolioMismatch => ['expected_folio', 'received_folio'],
             InvoicePacEventType::IssueReverted => ['previous_issue_status', 'pac_draft_status'],
