@@ -30,6 +30,7 @@ class FacturapiOrganization extends Model
         'legal_tax_id',
         'legal_tax_system',
         'legal_zip',
+        'legal_support_email',
         'has_certificate',
         'certificate_serial_number',
         'certificate_expires_at',

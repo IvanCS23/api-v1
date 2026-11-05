@@ -97,11 +97,16 @@ function facturapiOrganizationsFromConfigKey(): void
 
 /**
  * Fase 6.31: copia local de una organización lista para producción (CSD
- * vigente, sin pasos pendientes), como la exige la readiness en Live.
+ * vigente, sin pasos pendientes y el correo de contacto sincronizado), como
+ * la exige la readiness en Live.
  */
 function phase631ProductionReadyOrganization(Company $company): void
 {
+    $email = "contacto-{$company->id}@example.com";
+    $company->forceFill(['email' => $email])->save();
+
     FacturapiOrganization::withoutGlobalScopes()->where('company_id', $company->id)->firstOrFail()->forceFill([
+        'legal_support_email' => $email,
         'has_certificate' => true,
         'certificate_serial_number' => '30001000000500003416',
         'certificate_expires_at' => now()->addYear(),

@@ -3,6 +3,9 @@
 namespace App\Http\Resources\Billing;
 
 use App\Enums\InvoicePacEventType;
+use App\Models\Company;
+use App\Models\FacturapiOrganization;
+use App\Services\Billing\CompanyBillingReadinessService;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Services\Billing\SendInvoiceEmailService;
 use App\Support\Billing\InvoiceEmailRecipients;
@@ -28,6 +31,7 @@ class InvoiceBillingResource extends JsonResource
         $receiptStored = $this->cancellation_receipt_status === 'stored';
 
         $actions = app(InvoiceBusinessCapabilitiesService::class)->for($this->resource, $request->user());
+        $company = Company::query()->find($this->company_id);
 
         return [
             'id' => $this->id,
@@ -51,6 +55,14 @@ class InvoiceBillingResource extends JsonResource
                 // Fase 6.31: bound | mismatch | unbound (null si la factura
                 // todavía no tiene ambiente ni operaciones del PAC).
                 'environment_status' => PacEnvironmentAccess::statusFor($this->resource),
+            ],
+            // Fase 6.31: aviso del correo de contacto (missing | mismatch | null).
+            // En Test no bloquea; en Live lo bloquea la readiness de emisión.
+            'issuer' => [
+                'contact_email_issue' => $company === null ? null : CompanyBillingReadinessService::contactEmailIssue(
+                    $company,
+                    FacturapiOrganization::query()->where('company_id', $this->company_id)->first(),
+                ),
             ],
             'cfdi' => [
                 'uuid' => $this->cfdi_uuid,
