@@ -34,6 +34,8 @@ function healthInvoice(array $attributes = []): Invoice
         'company_id' => 7,
         'folio' => 'FAC-00000501',
         'status' => InvoiceStatus::Draft,
+        // Fase 6.31: ambiente fijado, como las facturas reales tras su primera reserva.
+        'pac_environment' => 'test',
         'pac_external_id' => null,
         'cfdi_uuid' => null,
         'pac_status' => null,

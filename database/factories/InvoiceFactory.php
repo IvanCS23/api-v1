@@ -33,6 +33,9 @@ class InvoiceFactory extends Factory
             'created_by' => null,
             'folio' => 'FAC-'.str_pad((string) fake()->unique()->numberBetween(1, 99999999), 8, '0', STR_PAD_LEFT),
             'status' => InvoiceStatus::Draft,
+            // Fase 6.31: las facturas de prueba con datos del PAC representan
+            // operaciones ya fijadas en Test. Las pruebas del binding lo anulan.
+            'pac_environment' => 'test',
             'subtotal' => 0,
             'discount_total' => 0,
             'tax_total' => 0,

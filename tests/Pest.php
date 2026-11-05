@@ -3,7 +3,9 @@
 use App\Infrastructure\Billing\Facturapi\FacturapiProvider;
 use App\Models\Company;
 use App\Models\FacturapiOrganization;
+use App\Models\Invoice;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Support\SatCatalogFixture;
 use Tests\TestCase;
 
@@ -98,7 +100,7 @@ function facturapiOrganizationsFromConfigKey(): void
  * APP_ENV `production` y su organización con ambiente `live` y una llave
  * Live de prueba. Las pruebas que lo usan deben simular el HTTP.
  */
-function phase631MakeLive(int $companyId, string $key = 'sk_live_PHASE_631_SECRET_KEY_0001'): void
+function phase631MakeLive(int $companyId, string $key = 'sk_live_PHASE_631_SECRET_KEY_0001', Invoice ...$invoices): void
 {
     config(['billing.pac_mode' => 'live']);
     app()['env'] = 'production';
@@ -107,5 +109,12 @@ function phase631MakeLive(int $companyId, string $key = 'sk_live_PHASE_631_SECRE
 
     if ($organization !== null) {
         $organization->forceFill(['pac_environment' => 'live'])->setLiveSecretKey($key)->save();
+    }
+
+    // Las facturas que la fábrica dejó fijadas en Test pasan a ser de Live.
+    DB::table('invoices')->where('company_id', $companyId)->where('pac_environment', 'test')->update(['pac_environment' => 'live']);
+
+    foreach ($invoices as $invoice) {
+        $invoice->forceFill(['pac_environment' => 'live'])->syncOriginalAttribute('pac_environment');
     }
 }

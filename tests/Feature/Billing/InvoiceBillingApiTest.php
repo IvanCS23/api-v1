@@ -92,7 +92,7 @@ test('endpoint autenticado expone snapshot fiscal explícito compatible con Invo
             'pac' => [
                 'mode', 'provider', 'status', 'cancellation_status', 'issue_status',
                 'reconciliation_required', 'last_sync_at',
-                'organization_status', 'organization_archived_at',
+                'organization_status', 'organization_archived_at', 'environment_status',
             ],
             'cfdi' => [
                 'uuid', 'series', 'folio_number', 'folio', 'folio_matches_erp', 'stamped_at',

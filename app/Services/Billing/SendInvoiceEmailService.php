@@ -14,6 +14,8 @@ use App\Models\InvoicePacEvent;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Support\Billing\InvoiceEmailRecipients;
+use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -60,6 +62,11 @@ class SendInvoiceEmailService
         $current = $this->requireCurrentTenantInvoice($invoice);
 
         PacOrganizationAccess::assertAccessible($current);
+        // Fase 6.31: ni una factura de otro ambiente del PAC, y con una
+        // configuración inválida (p. ej. el paro de emergencia) no se
+        // registra ningún intento.
+        PacEnvironmentAccess::assertAccessible($current);
+        PacCredentialGuard::forInvoice($current)->assertConfigured();
 
         if (! $this->capabilities->canSendEmailByState($current)) {
             throw $current->pac_status === 'canceled'

@@ -19,6 +19,7 @@ use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -234,6 +235,9 @@ class IssueInvoiceService
             if (in_array($locked->pac_issue_status, [self::STATUS_PENDING, self::STATUS_RECONCILIATION_REQUIRED], true)) {
                 throw new InvoiceIssuanceInProgressException($locked);
             }
+
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
 
             $idempotencyKey = $locked->pac_idempotency_key
                 ?? PacIdentifiers::idempotencyKey($locked->company_id, $locked->id);

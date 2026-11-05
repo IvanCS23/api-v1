@@ -14,6 +14,8 @@ use App\Services\Billing\InvoiceWorkflow;
 use App\Services\Billing\IssueInvoiceToPacService;
 use App\Services\Billing\LoadInvoiceBillingSnapshotService;
 use App\Support\Billing\InvoicePacActionExceptionResponder;
+use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use Closure;
 use Illuminate\Http\JsonResponse;
@@ -77,6 +79,11 @@ class InvoicePacActionController extends Controller
         try {
             // Fase 6.27: antes de que el servicio reserve nada.
             PacOrganizationAccess::assertAccessible($model);
+            // Fase 6.31: ni una factura de otro ambiente del PAC. Una
+            // configuración inválida (p. ej. el paro de emergencia) se
+            // rechaza antes de que el servicio reserve o marque nada.
+            PacEnvironmentAccess::assertAccessible($model);
+            PacCredentialGuard::forInvoice($model)->assertConfigured();
             $action($model);
         } catch (Throwable $error) {
             $response = $this->errors->respond($error, $model, $ability);

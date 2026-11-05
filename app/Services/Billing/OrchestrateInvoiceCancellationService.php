@@ -12,6 +12,7 @@ use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -77,6 +78,7 @@ class OrchestrateInvoiceCancellationService
         PacCredentialGuard::forInvoice($invoice)->assertConfigured();
         // Fase 6.27: una factura de otra organización no registra solicitud de cancelación.
         PacOrganizationAccess::assertAccessible($invoice);
+        PacEnvironmentAccess::assertAccessible($invoice);
 
         $result = $this->workflow->cancelWithPac($invoice, $motive, $substitutionUuid);
 

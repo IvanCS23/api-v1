@@ -108,7 +108,7 @@ test('modo test: el primer bloqueo de identidad apaga el botón', function () {
 
 test('modo live: se permite reintentar hasta 3 bloqueos de identidad', function (int $mismatches, bool $expected) {
     [$invoice, $user] = phase622ReceiptCapabilityInvoice(mismatches: $mismatches);
-    phase631MakeLive((int) $invoice->company_id);
+    phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
 
     expect(phase622CanFetchReceipt($invoice, $user))->toBe($expected);
 })->with([
@@ -120,7 +120,7 @@ test('modo live: se permite reintentar hasta 3 bloqueos de identidad', function 
 
 test('modo live: al llegar al límite billing:health sugiere revisión manual', function () {
     [$invoice] = phase622ReceiptCapabilityInvoice(mismatches: 3);
-    phase631MakeLive((int) $invoice->company_id);
+    phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
 
     $finding = app(InvoiceHealthEvaluator::class)
         ->evaluate($invoice, CarbonImmutable::now())
@@ -134,7 +134,7 @@ test('GET /billing publica pac.mode y la capability, nunca la llave', function (
     [$invoice, $user] = phase622ReceiptCapabilityInvoice();
 
     if ($mode === 'live') {
-        phase631MakeLive((int) $invoice->company_id);
+        phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
     }
 
     app(CurrentTenant::class)->clear();

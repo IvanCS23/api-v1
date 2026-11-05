@@ -9,6 +9,7 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use SensitiveParameter;
 
@@ -35,17 +36,23 @@ final class FacturapiProviderResolver implements PacProviderResolver
         $organization = $this->organization((int) $invoice->company_id);
         $status = PacOrganizationAccess::status($invoice, $organization?->organization_id);
 
+        $companyEnvironment = PacEnvironment::forOrganization($organization);
+
         return $this->provider(
             $organization,
             PacEnvironment::forInvoice($invoice, $organization),
-            PacOrganizationAccess::isBlocked($status)
-                ? new PacOrganizationMismatchException(
+            match (true) {
+                PacOrganizationAccess::isBlocked($status) => new PacOrganizationMismatchException(
                     (int) $invoice->id,
                     $invoice->pac_organization_id,
                     $organization?->organization_id,
                     $status === PacOrganizationAccess::ARCHIVED,
-                )
-                : null,
+                ),
+                // Fase 6.31: una factura de otro ambiente (o con operaciones
+                // previas sin ambiente) se rechaza antes del HTTP.
+                PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment)) => PacEnvironmentAccess::exceptionFor($invoice, $companyEnvironment),
+                default => null,
+            },
         );
     }
 

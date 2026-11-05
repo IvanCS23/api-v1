@@ -4,10 +4,15 @@ namespace App\Jobs\Billing;
 
 use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\InvoiceEmailException;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Models\Invoice;
 use App\Models\InvoicePacEvent;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Billing\SendInvoiceEmailService;
+use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
+use App\Support\Billing\PacGuardRejectionLog;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -54,6 +59,21 @@ class SendInvoiceEmailJob implements ShouldBeUnique, ShouldQueue
                 return;
             }
 
+            // Fase 6.31: el ambiente y el guard se revalidan al ejecutar; si no
+            // corresponden, el job falla sin reintentar (y sin enviar).
+            $rejection = $this->configurationRejection($invoice);
+
+            if ($rejection !== null) {
+                PacGuardRejectionLog::record($rejection, [
+                    'company_id' => $this->companyId,
+                    'invoice_id' => $this->invoiceId,
+                    'action' => 'email_auto_send',
+                ]);
+                $this->fail($rejection);
+
+                return;
+            }
+
             if ($email->defaultRecipients($invoice) === []) {
                 $email->recordSkipped($invoice, 'no_recipients');
 
@@ -81,6 +101,19 @@ class SendInvoiceEmailJob implements ShouldBeUnique, ShouldQueue
         } finally {
             $previousTenant === null ? $tenant->clear() : $tenant->set($previousTenant);
         }
+    }
+
+    private function configurationRejection(Invoice $invoice): ?PacConfigurationException
+    {
+        $companyEnvironment = PacEnvironment::forCompany($this->companyId);
+
+        if (PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment))) {
+            return PacEnvironmentAccess::exceptionFor($invoice, $companyEnvironment);
+        }
+
+        $violation = PacCredentialGuard::forInvoice($invoice)->violation();
+
+        return $violation === null ? null : new PacConfigurationException($violation);
     }
 
     private function logFailure(Throwable $e): void

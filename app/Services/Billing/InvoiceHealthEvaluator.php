@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Support\Billing\InvoiceHealthFinding as Finding;
 use App\Support\Billing\InvoiceHealthReport;
 use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Billing\PacOrganizationAccess;
@@ -45,6 +46,7 @@ class InvoiceHealthEvaluator
         CarbonImmutable $now,
         ?CarbonImmutable $cancellationRequestedAt = null,
         ?string $companyOrganizationId = null,
+        ?string $companyEnvironment = null,
     ): InvoiceHealthReport {
         // Fase 6.27: una factura de otra organización de Facturapi no admite
         // ninguna acción PAC, así que sus demás hallazgos (reconciliar,
@@ -61,6 +63,19 @@ class InvoiceHealthEvaluator
         if ($organization === PacOrganizationAccess::OTHER) {
             return InvoiceHealthReport::fromFindings((int) $invoice->id, (int) $invoice->company_id, [
                 new Finding('pac_organization_mismatch', Health::Invalid, Action::ManualReview),
+            ]);
+        }
+
+        // Fase 6.31: una factura de otro ambiente del PAC (o con operaciones
+        // previas sin ambiente) tampoco admite acciones: sustituye a sus
+        // demás hallazgos. El llamador pasa el ambiente de la empresa; sin él
+        // (el evaluador no consulta la BD) sólo se detecta la factura con
+        // operaciones previas y sin ambiente.
+        $companyEnvironment ??= $invoice->pac_environment;
+
+        if (PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment))) {
+            return InvoiceHealthReport::fromFindings((int) $invoice->id, (int) $invoice->company_id, [
+                new Finding('pac_environment_mismatch', Health::Invalid, Action::ManualReview),
             ]);
         }
 
@@ -344,7 +359,7 @@ class InvoiceHealthEvaluator
             return new Finding('cancellation_receipt_retry_pending', Health::Valid, Action::FetchReceipt);
         }
 
-        return PacEnvironment::forInvoice($invoice) !== PacEnvironment::LIVE
+        return ($invoice->pac_environment ?? PacEnvironment::TEST) !== PacEnvironment::LIVE
             ? new Finding('cancellation_receipt_identity_mismatch', Health::Valid, Action::ManualReview)
             : new Finding('cancellation_receipt_identity_mismatch', Health::Recoverable, Action::ManualReview);
     }

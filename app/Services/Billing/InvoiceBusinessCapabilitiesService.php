@@ -7,6 +7,7 @@ use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\User;
 use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 
 /**
@@ -27,7 +28,10 @@ class InvoiceBusinessCapabilitiesService
     {
         // Fase 6.27: una factura de otra organización (o archivada) no ofrece
         // ninguna acción PAC; la llave de la empresa no tiene acceso a ella.
-        if (PacOrganizationAccess::isBlocked(PacOrganizationAccess::status($invoice, PacOrganizationAccess::companyOrganizationId((int) $invoice->company_id)))) {
+        // Fase 6.31: tampoco una factura de otro ambiente del PAC (o con
+        // operaciones previas sin ambiente).
+        if (PacOrganizationAccess::isBlocked(PacOrganizationAccess::status($invoice, PacOrganizationAccess::companyOrganizationId((int) $invoice->company_id)))
+            || PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::statusFor($invoice))) {
             return [
                 'can_issue' => false,
                 'can_cancel' => false,

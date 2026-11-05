@@ -72,7 +72,7 @@ test('el bloqueo de identidad del acuse depende del ambiente de la factura', fun
     ]);
 
     if ($mode === 'live') {
-        phase631MakeLive((int) $invoice->company_id);
+        phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
     }
 
     $finding = phase622ReceiptFinding($invoice);
@@ -92,7 +92,7 @@ test('un acuse no disponible es informativo en ambos modos', function (string $m
     ]);
 
     if ($mode === 'live') {
-        phase631MakeLive((int) $invoice->company_id);
+        phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
     }
 
     $finding = phase622ReceiptFinding($invoice);
@@ -116,7 +116,7 @@ test('billing:health: el bloqueo no dispara --fail-on=recoverable en test y sí 
     config(['billing.pac_mode' => 'test']);
     expect(Artisan::call('billing:health', ['--fail-on' => 'recoverable']))->toBe(0);
 
-    phase631MakeLive((int) $invoice->company_id);
+    phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
     expect(Artisan::call('billing:health', ['--fail-on' => 'recoverable', '--format' => 'json']))->toBe(1);
 
     $output = Artisan::output();

@@ -8,6 +8,7 @@ use App\Services\Billing\SendInvoiceEmailService;
 use App\Support\Billing\InvoiceEmailRecipients;
 use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacOrganizationAccess;
 use Carbon\CarbonImmutable;
@@ -47,6 +48,9 @@ class InvoiceBillingResource extends JsonResource
                 // factura nunca llegó al PAC). Nunca el ID de la organización.
                 'organization_status' => PacOrganizationAccess::status($this->resource, PacOrganizationAccess::companyOrganizationId((int) $this->company_id)),
                 'organization_archived_at' => $this->pac_organization_archived_at?->toIso8601String(),
+                // Fase 6.31: bound | mismatch | unbound (null si la factura
+                // todavía no tiene ambiente ni operaciones del PAC).
+                'environment_status' => PacEnvironmentAccess::statusFor($this->resource),
             ],
             'cfdi' => [
                 'uuid' => $this->cfdi_uuid,

@@ -16,6 +16,7 @@ use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacEmailNotSentException;
+use App\Exceptions\Billing\PacEnvironmentMismatchException;
 use App\Exceptions\Billing\PacFolioAlreadyUsedException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
@@ -176,6 +177,12 @@ class InvoicePacActionExceptionResponder
                 409,
                 'PAC_ORGANIZATION_MISMATCH',
                 'La factura pertenece a otra organización de Facturapi y la llave de esta empresa no tiene acceso a ella. No se contactó al proveedor fiscal.',
+            ],
+            // Fase 6.31: también antes de PacConfigurationException.
+            $error instanceof PacEnvironmentMismatchException => [
+                409,
+                'PAC_ENVIRONMENT_MISMATCH',
+                'La factura se operó en otro ambiente del proveedor fiscal (pruebas o producción) que el de esta empresa. No se contactó al proveedor fiscal.',
             ],
             $error instanceof PacConfigurationException => [
                 503,

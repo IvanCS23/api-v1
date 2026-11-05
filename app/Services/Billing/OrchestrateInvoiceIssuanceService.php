@@ -10,6 +10,7 @@ use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -59,6 +60,8 @@ class OrchestrateInvoiceIssuanceService
         PacCredentialGuard::forInvoice($current)->assertConfigured();
         // Fase 6.27: una factura de otra organización se rechaza antes de transicionar.
         PacOrganizationAccess::assertAccessible($current);
+        // Fase 6.31: ni una factura de otro ambiente del PAC.
+        PacEnvironmentAccess::assertAccessible($current);
         // Fase 6.28: un folio ya usado en la organización se rechaza antes de
         // transicionar: la factura sigue en `ready`, sin cambios.
         $this->folioAvailability->assertAvailable($current);

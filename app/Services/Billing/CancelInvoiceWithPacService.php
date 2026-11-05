@@ -18,6 +18,7 @@ use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -304,6 +305,9 @@ class CancelInvoiceWithPacService
             }
 
             $this->assertCancellable($locked);
+
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
 
             $locked->forceFill([
                 'pac_cancel_request_status' => self::REQUEST_IN_FLIGHT,
