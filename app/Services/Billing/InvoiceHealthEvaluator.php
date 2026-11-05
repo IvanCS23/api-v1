@@ -9,7 +9,7 @@ use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Models\Invoice;
 use App\Support\Billing\InvoiceHealthFinding as Finding;
 use App\Support\Billing\InvoiceHealthReport;
-use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Billing\PacOrganizationAccess;
@@ -344,7 +344,7 @@ class InvoiceHealthEvaluator
             return new Finding('cancellation_receipt_retry_pending', Health::Valid, Action::FetchReceipt);
         }
 
-        return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+        return PacEnvironment::forInvoice($invoice) !== PacEnvironment::LIVE
             ? new Finding('cancellation_receipt_identity_mismatch', Health::Valid, Action::ManualReview)
             : new Finding('cancellation_receipt_identity_mismatch', Health::Recoverable, Action::ManualReview);
     }

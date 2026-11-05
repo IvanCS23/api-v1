@@ -7,6 +7,7 @@ use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Services\Billing\SendInvoiceEmailService;
 use App\Support\Billing\InvoiceEmailRecipients;
 use App\Support\Billing\InvoiceFolio;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacOrganizationAccess;
 use Carbon\CarbonImmutable;
@@ -35,7 +36,7 @@ class InvoiceBillingResource extends JsonResource
             'pac' => [
                 // Fase 6.22: modo configurado (test|live), nunca la llave ni
                 // un fragmento de ella. Permite explicar los acuses de TEST.
-                'mode' => in_array(config('billing.pac_mode'), ['test', 'live'], true) ? config('billing.pac_mode') : null,
+                'mode' => PacEnvironment::display(PacEnvironment::forInvoice($this->resource)),
                 'provider' => $this->pac_provider,
                 'status' => $this->pac_status,
                 'cancellation_status' => $this->cancellation_status,

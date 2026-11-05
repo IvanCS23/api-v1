@@ -16,7 +16,6 @@ use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacEmailNotSentException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
-use App\Exceptions\Billing\PacOrganizationMismatchException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
@@ -25,6 +24,7 @@ use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
 use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
@@ -70,11 +70,13 @@ class FacturapiProvider implements PacProvider
         #[SensitiveParameter] private readonly ?string $apiKey,
         private readonly int $timeout,
         private readonly int $connectTimeout,
-        private readonly ?string $mode = PacCredentialGuard::MODE_TEST,
+        // Fase 6.31: ambiente con el que se opera (antes, el modo global).
+        private readonly ?string $environment = PacEnvironment::TEST,
         private readonly ?string $stampTimezone = FacturapiDates::DEFAULT_STAMP_TIMEZONE,
         private readonly ?string $organizationId = null,
         private readonly bool $organizationRequired = false,
-        private readonly ?PacOrganizationMismatchException $blockedBy = null,
+        // Fase 6.31: también un ambiente que no corresponde (PacEnvironmentMismatchException).
+        private readonly ?PacConfigurationException $blockedBy = null,
     ) {}
 
     public function name(): string
@@ -611,7 +613,7 @@ class FacturapiProvider implements PacProvider
         // aborta antes de construir el request — el PAC nunca recibe nada.
         // Fase 6.27: construido por FacturapiProviderResolver exige además
         // la organización de la empresa (pac_organization_missing).
-        (new PacCredentialGuard($this->mode, $this->apiKey, $this->organizationRequired, $this->organizationId))->assertConfigured();
+        (new PacCredentialGuard($this->environment, $this->apiKey, $this->organizationRequired, $this->organizationId))->assertConfigured();
 
         // Fase 6.27: una factura de otra organización (o archivada) se rechaza
         // con un error claro en vez del 404 ambiguo que daría Facturapi.

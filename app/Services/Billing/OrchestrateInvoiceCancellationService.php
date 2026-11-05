@@ -74,7 +74,7 @@ class OrchestrateInvoiceCancellationService
             throw new InvoiceCannotBeCancelledException($invoice, 'la cancelación fiscal requiere motivo SAT');
         }
 
-        PacCredentialGuard::forCompany((int) $invoice->company_id)->assertConfigured();
+        PacCredentialGuard::forInvoice($invoice)->assertConfigured();
         // Fase 6.27: una factura de otra organización no registra solicitud de cancelación.
         PacOrganizationAccess::assertAccessible($invoice);
 

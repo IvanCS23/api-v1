@@ -138,13 +138,18 @@ test('el guard por empresa conserva los motivos de la 6.19', function (?string $
         : Company::factory()->withFacturapiOrganization($key)->create();
     app(CurrentTenant::class)->set($company->id);
 
+    if ($mode === 'sandbox') {
+        config(['billing.pac_mode' => 'sandbox']);
+    }
+
     expect(PacCredentialGuard::forCompany($company->id)->violation())->toBe($reason);
 })->with([
     'válida' => ['test', 'sk_test_VALID_COMPANY_KEY_0000', null],
     'sin organización' => ['test', 'sin organización', 'pac_organization_missing'],
     'organización sin llave' => ['test', null, 'pac_key_missing'],
     'llave live en modo test' => ['test', 'sk_live_COMPANY_KEY_0000', 'pac_key_mode_mismatch'],
-    'modo live, antes que la organización' => ['live', 'sin organización', 'pac_mode_unsupported'],
+    // Fase 6.31: el techo inválido se rechaza antes que la organización.
+    'techo desconocido, antes que la organización' => ['sandbox', 'sin organización', 'pac_mode_unsupported'],
 ]);
 
 test('operations/issue de una empresa sin organización no transiciona el ERP ni contacta al PAC', function () {

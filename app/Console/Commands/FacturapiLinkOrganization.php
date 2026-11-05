@@ -13,6 +13,7 @@ use App\Models\Invoice;
 use App\Services\Billing\FacturapiOrganizationAuditor;
 use App\Support\Billing\FacturapiUserKey;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\StoredPacOrganization;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Console\Command;
@@ -108,7 +109,7 @@ class FacturapiLinkOrganization extends Command
         }
 
         $key = config('services.facturapi.test_key');
-        $violation = (new PacCredentialGuard(config('billing.pac_mode'), $key))->violation();
+        $violation = (new PacCredentialGuard(PacEnvironment::TEST, $key))->violation();
 
         if ($violation !== null) {
             $this->error("La llave de .env no permite operar ({$violation}); no se contactó al PAC.");
@@ -129,7 +130,7 @@ class FacturapiLinkOrganization extends Command
     private function link(Company $company, string $expected, #[SensitiveParameter] string $key, bool $apply): int
     {
         $this->info(sprintf('Vínculo de la empresa %d (%s) con Facturapi%s', $company->id, $company->trade_name, $apply ? '' : ' — dry-run'));
-        $this->line('Llave de .env: '.FacturapiOrganization::hint($key).' (modo '.config('billing.pac_mode').')');
+        $this->line('Llave de .env: '.FacturapiOrganization::hint($key).' (ambiente test)');
 
         $current = $company->facturapiOrganization;
 
@@ -283,7 +284,7 @@ class FacturapiLinkOrganization extends Command
     {
         $key = config('services.facturapi.test_key');
 
-        if (($violation = (new PacCredentialGuard(config('billing.pac_mode'), $key))->violation()) !== null) {
+        if (($violation = (new PacCredentialGuard(PacEnvironment::TEST, $key))->violation()) !== null) {
             $this->error("La llave de .env no permite operar ({$violation}); no se contactó al PAC.");
 
             return null;

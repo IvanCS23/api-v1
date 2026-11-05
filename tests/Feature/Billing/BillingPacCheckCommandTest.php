@@ -161,10 +161,9 @@ test('el CSD en modo test: vigente ok, por vencer o ausente warn, vencido fail',
 ]);
 
 test('el CSD ausente es aviso en modo test y fallo en modo live', function (string $mode, string $status) {
-    config(['billing.pac_mode' => $mode]);
     $snapshot = FacturapiOrganizationSnapshot::fromResponse(phase627CheckOrganization(['certificate' => ['has_certificate' => false]]));
 
-    $check = app(PacCheckService::class)->certificateCheck($snapshot, CarbonImmutable::now());
+    $check = app(PacCheckService::class)->certificateCheck($snapshot, CarbonImmutable::now(), $mode);
 
     expect($check['code'])->toBe('certificate')
         ->and($check['status'])->toBe($status);

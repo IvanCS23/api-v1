@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\FacturapiOrganization;
 use App\Services\Sat\SatFiscalValidator;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\SalePaymentRules;
 
 /**
@@ -123,7 +124,7 @@ class CompanyBillingReadinessService
             );
         }
 
-        if (config('billing.pac_mode') !== PacCredentialGuard::MODE_TEST && ! ($organization?->has_certificate ?? false)) {
+        if (PacEnvironment::forOrganization($organization) !== PacEnvironment::TEST && ! ($organization?->has_certificate ?? false)) {
             $errors[] = $this->error('COMPANY_CSD_MISSING', 'company.csd', 'La organización de la empresa no tiene CSD cargado.');
         }
 

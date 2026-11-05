@@ -265,8 +265,8 @@ test('el readiness de emisión exige un emisor válido, el RFC del CSD y el C.P.
         ->and($codes)->toContain('CLIENT_GENERIC_POSTAL_CODE_MISMATCH')
         ->and($codes)->not->toContain('COMPANY_CSD_MISSING');
 
-    config(['billing.pac_mode' => 'live']);
-    $codes = collect(app(InvoicePacReadinessService::class)->evaluate($invoice)['errors'])->pluck('code');
+    phase631MakeLive((int) $invoice->company_id);
+    $codes = collect(app(InvoicePacReadinessService::class)->evaluate($invoice->fresh())['errors'])->pluck('code');
     expect($codes)->toContain('COMPANY_CSD_MISSING');
 });
 

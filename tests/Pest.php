@@ -60,14 +60,14 @@ function something()
  * descargas) la construyen con la llave de config; la resolución por
  * empresa se prueba aparte (PacProviderResolverTest).
  */
-function facturapiProviderFromConfig(): FacturapiProvider
+function facturapiProviderFromConfig(?string $environment = 'test'): FacturapiProvider
 {
     return new FacturapiProvider(
         baseUrl: (string) config('services.facturapi.base_url'),
         apiKey: config('services.facturapi.test_key'),
         timeout: (int) config('services.facturapi.timeout'),
         connectTimeout: (int) config('services.facturapi.connect_timeout'),
-        mode: config('billing.pac_mode'),
+        environment: $environment,
         stampTimezone: config('billing.facturapi.stamp_timezone'),
     );
 }
@@ -91,4 +91,21 @@ function facturapiOrganizationsFromConfigKey(): void
 
         FacturapiOrganization::factory()->testKey($key)->create(['company_id' => $company->id]);
     });
+}
+
+/**
+ * Fase 6.31: simula una empresa en Live de forma explícita: techo `live`,
+ * APP_ENV `production` y su organización con ambiente `live` y una llave
+ * Live de prueba. Las pruebas que lo usan deben simular el HTTP.
+ */
+function phase631MakeLive(int $companyId, string $key = 'sk_live_PHASE_631_SECRET_KEY_0001'): void
+{
+    config(['billing.pac_mode' => 'live']);
+    app()['env'] = 'production';
+
+    $organization = FacturapiOrganization::withoutGlobalScopes()->where('company_id', $companyId)->first();
+
+    if ($organization !== null) {
+        $organization->forceFill(['pac_environment' => 'live'])->setLiveSecretKey($key)->save();
+    }
 }

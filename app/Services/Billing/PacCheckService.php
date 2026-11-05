@@ -11,6 +11,7 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Support\Billing\FacturapiUserKey;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
@@ -99,7 +100,7 @@ class PacCheckService
             return [...$checks, ...$this->invoiceChecks($organization->organization_id)];
         }
 
-        $checks[] = $this->result('credentials', self::OK, 'La llave corresponde al modo '.config('billing.pac_mode').'.');
+        $checks[] = $this->result('credentials', self::OK, 'La llave corresponde al ambiente '.PacEnvironment::forCompany($company->id).'.');
 
         try {
             $snapshot = $this->providers->forCompany($company->id)->currentOrganization();
@@ -120,7 +121,7 @@ class PacCheckService
         return [
             ...$checks,
             ...$this->fiscalChecks($company, $snapshot),
-            $this->certificateCheck($snapshot, $now),
+            $this->certificateCheck($snapshot, $now, PacEnvironment::forCompany($company->id)),
             $this->result('pending_steps', self::INFO, $snapshot->pendingSteps === []
                 ? 'Sin pasos pendientes para Live.'
                 : 'Pendiente para Live (fuera de alcance): '.implode(', ', array_column($snapshot->pendingSteps, 'type')).'.'),
@@ -197,10 +198,10 @@ class PacCheckService
      *
      * @return array{code: string, status: string, detail: string}
      */
-    public function certificateCheck(FacturapiOrganizationSnapshot $snapshot, CarbonImmutable $now): array
+    public function certificateCheck(FacturapiOrganizationSnapshot $snapshot, CarbonImmutable $now, ?string $environment = PacEnvironment::TEST): array
     {
         if (! $snapshot->hasCertificate) {
-            return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+            return $environment === PacEnvironment::TEST
                 ? $this->result('certificate', self::WARN, 'La organización no tiene CSD cargado. En modo test Facturapi timbra sin él; en live es obligatorio.')
                 : $this->result('certificate', self::FAIL, 'La organización no tiene CSD cargado.');
         }

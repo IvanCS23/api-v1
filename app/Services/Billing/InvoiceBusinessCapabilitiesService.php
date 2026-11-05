@@ -6,7 +6,7 @@ use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\User;
-use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacOrganizationAccess;
 
 /**
@@ -94,12 +94,12 @@ class InvoiceBusinessCapabilitiesService
             return false;
         }
 
-        return $this->identityMismatchCount($invoice) < $this->identityMismatchLimit();
+        return $this->identityMismatchCount($invoice) < $this->identityMismatchLimit($invoice);
     }
 
-    public function identityMismatchLimit(): int
+    public function identityMismatchLimit(Invoice $invoice): int
     {
-        return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+        return PacEnvironment::forInvoice($invoice) !== PacEnvironment::LIVE
             ? 1
             : max(1, (int) config('billing.cancellation_receipt.live_identity_mismatch_limit'));
     }
