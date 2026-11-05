@@ -201,8 +201,8 @@ class PacCheckService
 
     /**
      * Facturapi timbra en modo test sin CSD, así que ahí su ausencia es un
-     * aviso. En cualquier otro modo (live) es un fallo. Pública para poder
-     * probar la regla de live, que hoy el guard rechaza antes de llegar aquí.
+     * aviso. En Live es un fallo. Pública para poder probarla con cualquier
+     * ambiente sin pasar por el guard.
      *
      * @return array{code: string, status: string, detail: string}
      */

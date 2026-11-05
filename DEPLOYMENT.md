@@ -50,7 +50,7 @@ Parte de `.env.example`. Las que no deben quedarse con el valor de desarrollo:
 | `FACTURAPI_USER_KEY` | User Key de la cuenta (`sk_user_…`) | ver la sección 7 |
 | `FACTURAPI_TEST_KEY` | vacía | sólo la usa `billing:facturapi-link` al vincular |
 | `FACTURAPI_TIMEOUT` / `FACTURAPI_CONNECT_TIMEOUT` | 15 / 5 (defaults) | |
-| `BILLING_PAC_MODE` | `test` (paro de emergencia) o `live` | techo del sistema, no el modo de cada empresa; ver la sección 10 |
+| `BILLING_PAC_MODE` | `test` (paro de emergencia) o `live` | techo del sistema, no el modo de cada empresa; cambiarlo a `live` va en la ventana de mantenimiento de P3 (sección 10) |
 | `BILLING_CFDI_FOLIO_CHECK` | `true` (default) | consulta de folio duplicado (6.28) |
 | `BILLING_ARTIFACTS_AUTO_DOWNLOAD` | `true` (default) | necesita el worker |
 | `BILLING_EMAIL_COMPANY_DAILY_LIMIT` | 100 (default) | envíos de facturas por correo por empresa en 24 h (6.30) |
@@ -244,8 +244,14 @@ cambia a Live y no se crea ni se importa ninguna llave Live.
   `.env` ni historial. Si `GET /organizations/me` no la acepta, no se guarda
   nada (la alternativa por `first_12` requiere aprobación).
 
-**P3. Cambiar la empresa a Live**
+**P3. Cambiar la empresa a Live (en una ventana de mantenimiento)**
 
+- El cambio se hace en una ventana de mantenimiento acordada: avisar a los
+  usuarios, dejar que la cola termine (`php artisan queue:work
+  --stop-when-empty`; `billing:pac-environment` se niega con jobs de la
+  empresa en la cola), `php artisan down` y detener el worker. Al terminar,
+  `php artisan up` y reiniciar el worker. Ninguna factura de la empresa
+  debe estar a medio emitir o cancelar (el comando también lo revisa).
 - Antes: respaldo de la base de datos **restaurado y comprobado** en otro
   servidor; worker supervisado (sección 5) y la cola vacía;
   `zend.exception_ignore_args=On`; `php artisan db:timezone-check` en OK;

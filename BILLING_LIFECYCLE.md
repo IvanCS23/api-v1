@@ -45,10 +45,20 @@ Payload: `{ "confirm": true }`.
    todos esos casos la factura queda en `ready`;
 4. confirma `ready -> issued` en una transacción corta;
 5. timbra el borrador ya preparado (el timbrado lo vuelve a sincronizar
-   antes de `/stamp`; una emisión normal hace las mismas tres llamadas que
-   antes: crear, sincronizar y timbrar);
+   antes de `/stamp`);
 6. sólo responde 200 final cuando ERP=`issued`, PAC=`valid`, existe identidad,
    `pac_issue_status=succeeded` y no se requiere reconciliación.
+
+**Flujo observado en Facturapi TEST** (FASE 6.31, R0, y las tres emisiones
+anteriores de la organización actual, #20–#22): consulta de folio
+(`GET /invoices?series&folio_number`), crear el borrador (`POST /invoices`),
+sincronizar (`GET`), actualizarlo (`PUT`), sincronizar (`GET`) y timbrar
+(`POST /stamp`): seis llamadas. Facturapi devuelve el borrador recién creado
+con `is_ready_to_stamp=false` y, después del `PUT`, con `true`. La causa no
+está verificada: el ERP no guarda los cuerpos enviados y, según el código,
+la creación y el `PUT` llevan el mismo contenido (mismo snapshot, llave de
+idempotencia y `external_id`). El `PUT` es idempotente y hay un solo
+timbrado.
 
 Un timeout o resultado ambiguo conserva ERP=`issued`, marca reconciliación y
 nunca repite el stamp a ciegas. La misma operación es idempotente cuando el
@@ -143,7 +153,9 @@ con el UUID correcto y cualquier estatus se guardaba. La estructura
 `Folios/UUID` + `Folios/EstatusUUID` viene de fuentes secundarias de otros
 PAC: se confirma con el primer acuse Live y no se acepta otra sin evidencia.
 `billing:cancellation-receipt-inspect {invoice}` la muestra sin guardar nada,
-en cualquier ambiente.
+en cualquier ambiente. En Facturapi TEST (R0, 2026-11-05) el acuse real tuvo
+raíz `Acuse` sin namespace, un `Acuse/Folios` con `UUID` y `EstatusUUID`
+hermanos (`EstatusUUID=205`, UUID ajeno) y `Acuse/Signature` (firma XML).
 
 **Verificación obligatoria en Live.** En Facturapi TEST el acuse de
 cancelación contiene un UUID ajeno (EstatusUUID 205) y el sistema lo bloquea
@@ -326,10 +338,12 @@ productos que ya no cumplen; de los clientes sólo muestra códigos y campos,
 nunca el RFC. La API expone lo mismo en `fiscal_issues` de clientes y
 productos, y las pantallas avisan al editar. Nada se corrige solo.
 
-**Pendiente:** el RFC genérico exige además el código postal del emisor
-(lugar de expedición), y `companies.postal_code` aún no se configura; se
-valida en la 6.27. La unicidad de `(company_id, rfc)` impide registrar dos
-clientes con `XEXX010101000` en la misma empresa.
+El RFC genérico exige además que el C.P. del cliente sea el de la empresa
+(lugar de expedición): resuelto en la 6.27b con Datos fiscales
+(`companies.postal_code`) y `CLIENT_GENERIC_POSTAL_CODE_MISMATCH` en el
+readiness de venta y de emisión. Sigue pendiente que la unicidad de
+`(company_id, rfc)` impide registrar dos clientes con `XEXX010101000` en la
+misma empresa.
 
 ## Folio del CFDI (Fase 6.28)
 
@@ -499,8 +513,8 @@ de que el servicio reserve nada. Motivos, en este orden:
 configuración inválida lanza
 `PacConfigurationException` (fallo definitivo, `503 PAC_CONFIGURATION_INVALID`):
 el PAC nunca recibe la petición y el ERP no cambia. La respuesta no incluye el
-motivo y hoy tampoco se registra en `laravel.log` (pendiente en el documento
-maestro); `billing:pac-check` lo muestra.
+motivo; desde la 6.29 se registra en `laravel.log` como
+`billing.pac.guard_rejected` (ver "Logs") y `billing:pac-check` lo muestra.
 
 Los comandos `billing:facturapi-test-*` usan el trait
 `GuardsFacturapiTestCommand`: sólo `local`/`testing`, `pac_mode=test`, una
@@ -785,10 +799,14 @@ ambiente Live.
 `FacturapiProvider::assertLivemode()` exige el `livemode` del ambiente (Test
 → false, Live → true) en el timbrado, la consulta y la cancelación del CFDI
 y en crear, consultar y actualizar borradores; también lo comparan la
-cancelación y la reconciliación contra el ambiente fijado. En la emisión
-legacy (`createInvoice`) y en las búsquedas por `external_id` y por folio un
-`livemode` de otro ambiente se rechaza, pero su ausencia se tolera
-(desviación: exigirlo obligaba a reescribir 55 respuestas simuladas).
+cancelación y la reconciliación contra el ambiente fijado. En Live también
+las búsquedas por `external_id` y por folio y la emisión legacy
+(`createInvoice`) rechazan una respuesta sin `livemode`. Sólo en Test, y
+sólo en esos tres mapeos, se tolera su ausencia (`toleratedMissingInTest`):
+55 respuestas simuladas anteriores a la 6.31 no lo traen. Un `livemode` de
+otro ambiente o que no sea booleano se rechaza siempre. La emisión directa
+sin borrador (`IssueInvoiceService`, vía `InvoiceWorkflow::issueToPac()`)
+no se ofrece en Live (`409 LEGACY_OPERATION_UNAVAILABLE`).
 
 ### Llave Live
 
