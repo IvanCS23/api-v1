@@ -103,3 +103,25 @@ test('el snapshot de la organización guarda legal.support_email', function () {
 
     expect($snapshot->toAttributes()['legal_support_email'])->toBe('contacto@example.com');
 });
+
+test('Datos fiscales publica el ambiente y el aviso del correo de contacto', function (string $environment, ?string $supportEmail, ?string $issue) {
+    [$company, , $user] = phase631IssuerInvoice($environment);
+
+    // 'sincronizado': phase631ProductionReadyOrganization ya dejó el mismo correo en ambos lados.
+    if ($supportEmail !== 'sincronizado') {
+        FacturapiOrganization::withoutGlobalScopes()->where('company_id', $company->id)->update(['legal_support_email' => $supportEmail]);
+    }
+
+    app(CurrentTenant::class)->clear();
+
+    $this->actingAs($user, 'api')
+        ->getJson('/api/company/fiscal')
+        ->assertOk()
+        ->assertJsonPath('organization.pac_environment', $environment)
+        ->assertJsonPath('organization.contact_email_issue', $issue);
+})->with([
+    'test sincronizado' => ['test', 'sincronizado', null],
+    'live sincronizado' => ['live', 'sincronizado', null],
+    'live distinto' => ['live', 'otro@example.com', 'mismatch'],
+    'test sin support_email' => ['test', null, 'mismatch'],
+]);
