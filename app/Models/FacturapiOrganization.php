@@ -40,13 +40,22 @@ class FacturapiOrganization extends Model
         'snapshot_at',
     ];
 
+    /** Fase 6.31: mismo default que la columna, para instancias sin recargar. */
+    protected $attributes = [
+        'pac_environment' => 'test',
+    ];
+
     protected $hidden = [
         'test_secret_key',
+        'live_secret_key',
     ];
 
     protected $casts = [
         'test_secret_key' => 'encrypted',
         'test_key_set_at' => 'immutable_datetime',
+        // Fase 6.31: llave Live, mismo trato que la Test.
+        'live_secret_key' => 'encrypted',
+        'live_key_set_at' => 'immutable_datetime',
         'has_certificate' => 'boolean',
         'certificate_expires_at' => 'immutable_datetime',
         'certificate_updated_at' => 'immutable_datetime',
@@ -62,6 +71,20 @@ class FacturapiOrganization extends Model
             'test_secret_key' => $key,
             'test_key_hint' => $key === null ? null : self::hint($key),
             'test_key_set_at' => $key === null ? null : now(),
+        ]);
+    }
+
+    /**
+     * Fase 6.31: sólo la usa `billing:facturapi-live-key`, después de
+     * comprobar con GET /organizations/me que la llave es de esta
+     * organización. No es fillable ni sale en ninguna serialización.
+     */
+    public function setLiveSecretKey(#[SensitiveParameter] ?string $key): static
+    {
+        return $this->forceFill([
+            'live_secret_key' => $key,
+            'live_key_hint' => $key === null ? null : self::hint($key),
+            'live_key_set_at' => $key === null ? null : now(),
         ]);
     }
 
