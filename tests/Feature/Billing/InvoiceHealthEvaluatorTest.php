@@ -5,6 +5,7 @@ use App\Enums\InvoiceHealthStatus;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Services\Billing\InvoiceHealthEvaluator;
+use App\Support\Billing\CancellationReceiverDeadline;
 use App\Support\Billing\PacIdentifiers;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
@@ -14,7 +15,8 @@ beforeEach(function () {
     Http::preventStrayRequests();
     config([
         'billing.health.issue_pending_minutes' => 60,
-        'billing.health.cancellation_pending_hours' => 96,
+        'billing.health.cancellation_receiver_business_days' => 3,
+        'billing.health.cancellation_margin_hours' => 24,
         'billing.health.draft_date_warning_hours' => 48,
         'billing.health.draft_date_limit_hours' => 72,
         'billing.cancel_in_flight_minutes' => 5,
@@ -236,22 +238,38 @@ test('emision pendiente reciente es solo transitoria aunque el flag de revision 
         ->and($report->codes())->toBe(['issue_pending_recent']);
 });
 
-test('cancelacion pendiente usa el evento CancellationRequested y respeta el umbral', function () {
+test('cancelacion pendiente usa el evento CancellationRequested y tres días hábiles más el margen', function () {
     $pending = healthInvoice(healthyIssuedAttributes([
         'cancellation_status' => 'pending',
         'pac_reconciliation_required' => true,
         'last_pac_sync_at' => healthNow()->subHours(200),
     ]));
+    // Fase 6.31: viernes 2026-10-16 10:00 en el centro de México. Tres días
+    // hábiles vencen el miércoles 21 a las 10:00; con 24 h de margen escala
+    // el jueves 22 a las 10:00 (16:00 UTC). Con las 96 h de antes habría
+    // escalado el martes 20.
+    $requestedAt = CarbonImmutable::parse('2026-10-16 16:00:00', 'UTC');
+    $at = fn (string $now) => app(InvoiceHealthEvaluator::class)->evaluate($pending, CarbonImmutable::parse($now, 'UTC'), $requestedAt);
 
-    $recent = evaluateHealth($pending, healthNow()->subHours(95));
-    $stale = evaluateHealth($pending, healthNow()->subHours(96));
+    $afterOld96h = $at('2026-10-20 16:00:00');
+    $justBefore = $at('2026-10-22 15:59:00');
+    $stale = $at('2026-10-22 16:00:00');
 
-    expect($recent->status)->toBe(InvoiceHealthStatus::Transient)
-        ->and($recent->codes())->toBe(['cancellation_pending_recent'])
-        ->and($recent->findings[0]->ageMinutes)->toBe(95 * 60)
+    expect($afterOld96h->codes())->toBe(['cancellation_pending_recent'])
+        ->and($afterOld96h->findings[0]->ageMinutes)->toBe(96 * 60)
+        ->and($justBefore->status)->toBe(InvoiceHealthStatus::Transient)
         ->and($stale->status)->toBe(InvoiceHealthStatus::Recoverable)
         ->and($stale->codes())->toBe(['cancellation_pending_stale']);
 });
+
+test('el plazo del receptor no cuenta el fin de semana ni depende del día de la solicitud', function (string $requestedAt, string $deadline) {
+    expect(CancellationReceiverDeadline::for(CarbonImmutable::parse($requestedAt, 'UTC'))->toDateTimeString())->toBe($deadline);
+})->with([
+    'lunes 10:00 MX' => ['2026-10-19 16:00:00', '2026-10-23 16:00:00'],
+    'miércoles 10:00 MX' => ['2026-10-21 16:00:00', '2026-10-27 16:00:00'],
+    'viernes 10:00 MX' => ['2026-10-16 16:00:00', '2026-10-22 16:00:00'],
+    'sábado 10:00 MX' => ['2026-10-17 16:00:00', '2026-10-22 16:00:00'],
+]);
 
 test('cancelacion pendiente sin evento usa last_pac_sync_at como respaldo', function () {
     $report = evaluateHealth(healthInvoice(healthyIssuedAttributes([

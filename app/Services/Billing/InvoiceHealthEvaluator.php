@@ -8,6 +8,7 @@ use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
 use App\Exceptions\Billing\CancellationReceiptStatusRejectedException;
 use App\Models\Invoice;
+use App\Support\Billing\CancellationReceiverDeadline;
 use App\Support\Billing\InvoiceHealthFinding as Finding;
 use App\Support\Billing\InvoiceHealthReport;
 use App\Support\Billing\PacEnvironment;
@@ -143,8 +144,10 @@ class InvoiceHealthEvaluator
         $findings = [];
 
         if ($this->isCancellationPending($invoice)) {
-            $age = $this->ageInMinutes($requestedAt ?? $invoice->last_pac_sync_at, $now);
-            $findings[] = $age !== null && $age < $this->threshold('cancellation_pending_hours') * 60
+            $since = $requestedAt ?? $invoice->last_pac_sync_at;
+            $age = $this->ageInMinutes($since, $now);
+            // Fase 6.31: tres días hábiles del receptor + margen, no 96 h de reloj.
+            $findings[] = $age !== null && $now->lt(CancellationReceiverDeadline::for(CarbonImmutable::instance($since)))
                 ? new Finding('cancellation_pending_recent', Health::Transient, Action::Wait, $age)
                 : new Finding('cancellation_pending_stale', Health::Recoverable, Action::Reconcile, $age);
         }

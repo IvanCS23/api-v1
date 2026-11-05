@@ -194,7 +194,8 @@ test('la cancelacion pendiente usa el evento CancellationRequested sobre last_pa
         ->and($report['totals']['transient'])->toBe(1)
         ->and($report['invoices'][0]['findings'][0]['code'])->toBe('cancellation_pending_recent');
 
-    $this->travel(97)->hours();
+    // Fase 6.31: tres días hábiles + 24 h; ocho días naturales siempre los rebasan.
+    $this->travel(8)->days();
     [$exitLater, $later] = runBillingHealthJson(['--fail-on' => 'recoverable']);
 
     expect($exitLater)->toBe(1)

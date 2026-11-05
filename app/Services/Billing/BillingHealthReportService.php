@@ -92,7 +92,8 @@ class BillingHealthReportService
             ],
             'thresholds' => [
                 'issue_pending_minutes' => (int) config('billing.health.issue_pending_minutes'),
-                'cancellation_pending_hours' => (int) config('billing.health.cancellation_pending_hours'),
+                'cancellation_receiver_business_days' => (int) config('billing.health.cancellation_receiver_business_days'),
+                'cancellation_margin_hours' => (int) config('billing.health.cancellation_margin_hours'),
                 'draft_date_warning_hours' => (int) config('billing.health.draft_date_warning_hours'),
                 'draft_date_limit_hours' => (int) config('billing.health.draft_date_limit_hours'),
                 'cancel_in_flight_minutes' => (int) config('billing.cancel_in_flight_minutes'),
