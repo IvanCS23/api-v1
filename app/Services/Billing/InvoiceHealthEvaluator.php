@@ -6,10 +6,13 @@ use App\Enums\InvoiceHealthAction as Action;
 use App\Enums\InvoiceHealthStatus as Health;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
+use App\Exceptions\Billing\CancellationReceiptStatusRejectedException;
 use App\Models\Invoice;
+use App\Support\Billing\CancellationReceiverDeadline;
 use App\Support\Billing\InvoiceHealthFinding as Finding;
 use App\Support\Billing\InvoiceHealthReport;
-use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Billing\PacOrganizationAccess;
@@ -45,6 +48,7 @@ class InvoiceHealthEvaluator
         CarbonImmutable $now,
         ?CarbonImmutable $cancellationRequestedAt = null,
         ?string $companyOrganizationId = null,
+        ?string $companyEnvironment = null,
     ): InvoiceHealthReport {
         // Fase 6.27: una factura de otra organización de Facturapi no admite
         // ninguna acción PAC, así que sus demás hallazgos (reconciliar,
@@ -61,6 +65,19 @@ class InvoiceHealthEvaluator
         if ($organization === PacOrganizationAccess::OTHER) {
             return InvoiceHealthReport::fromFindings((int) $invoice->id, (int) $invoice->company_id, [
                 new Finding('pac_organization_mismatch', Health::Invalid, Action::ManualReview),
+            ]);
+        }
+
+        // Fase 6.31: una factura de otro ambiente del PAC (o con operaciones
+        // previas sin ambiente) tampoco admite acciones: sustituye a sus
+        // demás hallazgos. El llamador pasa el ambiente de la empresa; sin él
+        // (el evaluador no consulta la BD) sólo se detecta la factura con
+        // operaciones previas y sin ambiente.
+        $companyEnvironment ??= $invoice->pac_environment;
+
+        if (PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment))) {
+            return InvoiceHealthReport::fromFindings((int) $invoice->id, (int) $invoice->company_id, [
+                new Finding('pac_environment_mismatch', Health::Invalid, Action::ManualReview),
             ]);
         }
 
@@ -127,8 +144,10 @@ class InvoiceHealthEvaluator
         $findings = [];
 
         if ($this->isCancellationPending($invoice)) {
-            $age = $this->ageInMinutes($requestedAt ?? $invoice->last_pac_sync_at, $now);
-            $findings[] = $age !== null && $age < $this->threshold('cancellation_pending_hours') * 60
+            $since = $requestedAt ?? $invoice->last_pac_sync_at;
+            $age = $this->ageInMinutes($since, $now);
+            // Fase 6.31: tres días hábiles del receptor + margen, no 96 h de reloj.
+            $findings[] = $age !== null && $now->lt(CancellationReceiverDeadline::for(CarbonImmutable::instance($since)))
                 ? new Finding('cancellation_pending_recent', Health::Transient, Action::Wait, $age)
                 : new Finding('cancellation_pending_stale', Health::Recoverable, Action::Reconcile, $age);
         }
@@ -337,14 +356,21 @@ class InvoiceHealthEvaluator
      */
     private function receiptFinding(Invoice $invoice): Finding
     {
-        $identityMismatch = PacErrorCode::from($invoice->cancellation_receipt_last_error)
-            === CancellationReceiptIdentityMismatchException::ERROR_CODE;
+        $code = PacErrorCode::from($invoice->cancellation_receipt_last_error);
+
+        // Fase 6.31: un EstatusUUID rechazado exige revisión en ambos ambientes:
+        // a diferencia del acuse ajeno de TEST, no es un comportamiento esperado.
+        if ($code === CancellationReceiptStatusRejectedException::ERROR_CODE) {
+            return new Finding('cancellation_receipt_status_rejected', Health::Recoverable, Action::ManualReview);
+        }
+
+        $identityMismatch = $code === CancellationReceiptIdentityMismatchException::ERROR_CODE;
 
         if (! $identityMismatch) {
             return new Finding('cancellation_receipt_retry_pending', Health::Valid, Action::FetchReceipt);
         }
 
-        return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+        return ($invoice->pac_environment ?? PacEnvironment::TEST) !== PacEnvironment::LIVE
             ? new Finding('cancellation_receipt_identity_mismatch', Health::Valid, Action::ManualReview)
             : new Finding('cancellation_receipt_identity_mismatch', Health::Recoverable, Action::ManualReview);
     }

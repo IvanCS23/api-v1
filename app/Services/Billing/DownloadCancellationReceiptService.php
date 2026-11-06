@@ -8,6 +8,7 @@ use App\Data\Billing\CancellationReceiptResult;
 use App\Enums\InvoicePacEventType;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
+use App\Exceptions\Billing\CancellationReceiptStatusRejectedException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
@@ -16,6 +17,8 @@ use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\CancellationReceiptFolios;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
@@ -180,6 +183,9 @@ class DownloadCancellationReceiptService
                 ));
             }
 
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
+
             $locked->forceFill([
                 'cancellation_receipt_status' => 'pending',
                 'cancellation_receipt_started_at' => now(),
@@ -335,17 +341,24 @@ class DownloadCancellationReceiptService
             throw new RuntimeException(sprintf('La factura [%d]: el acuse XML no contiene Acuse/Folios/UUID.', $invoice->id));
         }
 
-        $matches = false;
+        // Fase 6.31: el UUID y su EstatusUUID son hermanos dentro del mismo
+        // Folios. Además de corresponder al CFDI, el estatus debe ser 201 o
+        // 202 (CancellationReceiptFolios).
+        $match = null;
 
-        foreach ($nodes as $node) {
-            if (strcasecmp(trim((string) $node->textContent), (string) $invoice->cfdi_uuid) === 0) {
-                $matches = true;
+        foreach (CancellationReceiptFolios::of($dom) as $folio) {
+            if (strcasecmp($folio['uuid'], (string) $invoice->cfdi_uuid) === 0) {
+                $match = $folio;
                 break;
             }
         }
 
-        if (! $matches) {
+        if ($match === null) {
             throw new CancellationReceiptIdentityMismatchException($invoice->id, $nodes->length);
+        }
+
+        if (! CancellationReceiptFolios::isAccepted($match['status'])) {
+            throw new CancellationReceiptStatusRejectedException($invoice->id, CancellationReceiptFolios::displayStatus($match['status']));
         }
     }
 
@@ -406,7 +419,8 @@ class DownloadCancellationReceiptService
     private function failureStatus(Throwable $e): string
     {
         if ($e instanceof CancellationReceiptUnavailableException
-            || $e instanceof CancellationReceiptIdentityMismatchException) {
+            || $e instanceof CancellationReceiptIdentityMismatchException
+            || $e instanceof CancellationReceiptStatusRejectedException) {
             return 'reconciliation_required';
         }
 
@@ -420,7 +434,7 @@ class DownloadCancellationReceiptService
 
     private function sanitizeErrorMessage(Throwable $e): string
     {
-        if ($e instanceof CancellationReceiptIdentityMismatchException) {
+        if ($e instanceof CancellationReceiptIdentityMismatchException || $e instanceof CancellationReceiptStatusRejectedException) {
             return $e->getMessage();
         }
 
@@ -514,9 +528,18 @@ class DownloadCancellationReceiptService
 
         $type = match (true) {
             $error instanceof CancellationReceiptIdentityMismatchException => InvoicePacEventType::CancellationReceiptIdentityMismatch,
+            $error instanceof CancellationReceiptStatusRejectedException => InvoicePacEventType::CancellationReceiptStatusRejected,
             $error instanceof CancellationReceiptUnavailableException => InvoicePacEventType::CancellationReceiptUnavailable,
             default => InvoicePacEventType::ReconciliationRequired,
         };
+
+        if ($error instanceof CancellationReceiptStatusRejectedException) {
+            $context += [
+                'receipt_status' => $error->receiptStatus,
+                'expected_uuid_masked' => $this->maskUuid((string) $fresh->cfdi_uuid),
+                'pac_external_id_masked' => $this->maskIdentifier((string) $fresh->pac_external_id),
+            ];
+        }
 
         if ($error instanceof CancellationReceiptIdentityMismatchException) {
             $context += [

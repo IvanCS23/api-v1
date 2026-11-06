@@ -58,8 +58,10 @@ dataset('invalid pac configurations', [
     'llave sin prefijo' => ['test', 'PHASE_619_SECRET', 'pac_key_mode_mismatch'],
     'llave vacia' => ['test', '', 'pac_key_missing'],
     'llave nula' => ['test', null, 'pac_key_missing'],
-    'modo live no soportado' => ['live', 'sk_live_PHASE_619_SECRET', 'pac_mode_unsupported'],
-    'modo desconocido' => ['sandbox', 'sk_test_PHASE_619_SECRET', 'pac_mode_unsupported'],
+    // Fase 6.31: el primer valor es el ambiente con el que se opera; el techo sigue en test.
+    'ambiente live con el techo en test (paro de emergencia)' => ['live', 'sk_live_PHASE_619_SECRET', 'pac_live_not_enabled'],
+    'ambiente desconocido' => ['sandbox', 'sk_test_PHASE_619_SECRET', 'pac_environment_invalid'],
+    'ambiente vacío' => ['', 'sk_test_PHASE_619_SECRET', 'pac_environment_invalid'],
 ]);
 
 test('el guard acepta solo modo test con llave sk_test_', function () {
@@ -71,10 +73,10 @@ test('el guard rechaza combinaciones invalidas con un motivo estable', function 
 })->with('invalid pac configurations');
 
 test('el provider no envia ninguna peticion con configuracion invalida, en escrituras, consultas y descargas', function (?string $mode, ?string $key, string $reason) {
-    config(['billing.pac_mode' => $mode, 'services.facturapi.test_key' => $key]);
+    config(['services.facturapi.test_key' => $key]);
     [, , $invoice] = phase619Invoice();
     $request = new PacInvoiceRequest($invoice, 'erp-invoice:1:1:v1', 'company-1-invoice-1');
-    $provider = facturapiProviderFromConfig();
+    $provider = facturapiProviderFromConfig($mode);
 
     $calls = [
         'createInvoice' => fn () => $provider->createInvoice($request),
@@ -198,3 +200,9 @@ test('los comandos de prueba rechazan una llave live sin mostrarla', function (s
 
     Http::assertNothingSent();
 })->with('facturapi test commands');
+
+test('un techo vacío o desconocido rechaza también el ambiente test (Fase 6.31)', function (?string $ceiling) {
+    config(['billing.pac_mode' => $ceiling]);
+
+    expect((new PacCredentialGuard('test', 'sk_test_abc'))->violation())->toBe('pac_mode_unsupported');
+})->with([null, '', 'sandbox']);

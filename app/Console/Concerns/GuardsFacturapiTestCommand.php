@@ -5,6 +5,7 @@ namespace App\Console\Concerns;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Tenant\CurrentTenant;
 
 /**
@@ -29,7 +30,7 @@ trait GuardsFacturapiTestCommand
             return $this->rejectFacturapiTestCommand('Este comando solo se ejecuta en entornos local/testing.');
         }
 
-        if (config('billing.pac_mode') !== PacCredentialGuard::MODE_TEST) {
+        if (PacEnvironment::ceiling() !== PacEnvironment::TEST) {
             return $this->rejectFacturapiTestCommand('billing.pac_mode debe ser "test" para ejecutar comandos contra Facturapi TEST.');
         }
 
@@ -45,6 +46,10 @@ trait GuardsFacturapiTestCommand
 
         if ($violation === 'pac_organization_missing') {
             return $this->rejectFacturapiTestCommand("La empresa {$companyId} no tiene organización de Facturapi vinculada (billing:facturapi-link); no se contactará al PAC.");
+        }
+
+        if (PacEnvironment::forCompany((int) $companyId) !== PacEnvironment::TEST) {
+            return $this->rejectFacturapiTestCommand("La empresa {$companyId} opera en Live; los comandos de prueba sólo usan Facturapi TEST.");
         }
 
         if ($violation !== null) {

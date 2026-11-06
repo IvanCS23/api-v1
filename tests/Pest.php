@@ -3,7 +3,9 @@
 use App\Infrastructure\Billing\Facturapi\FacturapiProvider;
 use App\Models\Company;
 use App\Models\FacturapiOrganization;
+use App\Models\Invoice;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\Support\SatCatalogFixture;
 use Tests\TestCase;
 
@@ -60,14 +62,14 @@ function something()
  * descargas) la construyen con la llave de config; la resolución por
  * empresa se prueba aparte (PacProviderResolverTest).
  */
-function facturapiProviderFromConfig(): FacturapiProvider
+function facturapiProviderFromConfig(?string $environment = 'test'): FacturapiProvider
 {
     return new FacturapiProvider(
         baseUrl: (string) config('services.facturapi.base_url'),
         apiKey: config('services.facturapi.test_key'),
         timeout: (int) config('services.facturapi.timeout'),
         connectTimeout: (int) config('services.facturapi.connect_timeout'),
-        mode: config('billing.pac_mode'),
+        environment: $environment,
         stampTimezone: config('billing.facturapi.stamp_timezone'),
     );
 }
@@ -91,4 +93,48 @@ function facturapiOrganizationsFromConfigKey(): void
 
         FacturapiOrganization::factory()->testKey($key)->create(['company_id' => $company->id]);
     });
+}
+
+/**
+ * Fase 6.31: copia local de una organización lista para producción (CSD
+ * vigente, sin pasos pendientes y el correo de contacto sincronizado), como
+ * la exige la readiness en Live.
+ */
+function phase631ProductionReadyOrganization(Company $company): void
+{
+    $email = "contacto-{$company->id}@example.com";
+    $company->forceFill(['email' => $email])->save();
+
+    FacturapiOrganization::withoutGlobalScopes()->where('company_id', $company->id)->firstOrFail()->forceFill([
+        'legal_support_email' => $email,
+        'has_certificate' => true,
+        'certificate_serial_number' => '30001000000500003416',
+        'certificate_expires_at' => now()->addYear(),
+        'is_production_ready' => true,
+        'pending_steps' => [],
+    ])->save();
+}
+
+/**
+ * Fase 6.31: simula una empresa en Live de forma explícita: techo `live`,
+ * APP_ENV `production` y su organización con ambiente `live` y una llave
+ * Live de prueba. Las pruebas que lo usan deben simular el HTTP.
+ */
+function phase631MakeLive(int $companyId, string $key = 'sk_live_PHASE_631_SECRET_KEY_0001', Invoice ...$invoices): void
+{
+    config(['billing.pac_mode' => 'live']);
+    app()['env'] = 'production';
+
+    $organization = FacturapiOrganization::withoutGlobalScopes()->where('company_id', $companyId)->first();
+
+    if ($organization !== null) {
+        $organization->forceFill(['pac_environment' => 'live'])->setLiveSecretKey($key)->save();
+    }
+
+    // Las facturas que la fábrica dejó fijadas en Test pasan a ser de Live.
+    DB::table('invoices')->where('company_id', $companyId)->where('pac_environment', 'test')->update(['pac_environment' => 'live']);
+
+    foreach ($invoices as $invoice) {
+        $invoice->forceFill(['pac_environment' => 'live'])->syncOriginalAttribute('pac_environment');
+    }
 }

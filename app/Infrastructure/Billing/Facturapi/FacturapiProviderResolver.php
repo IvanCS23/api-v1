@@ -3,16 +3,26 @@
 namespace App\Infrastructure\Billing\Facturapi;
 
 use App\Contracts\Billing\PacProviderResolver;
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacOrganizationMismatchException;
 use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
+use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
+use SensitiveParameter;
 
 /**
- * Fase 6.27: FacturapiProvider con la organización y la llave Test de la
+ * Fase 6.27: FacturapiProvider con la organización y la llave de la
  * empresa. FacturapiOrganization usa el scope de tenant, así que con el
  * tenant de otra empresa no se encuentra y el provider queda sin
  * organización: falla cerrado antes de cualquier HTTP.
+ *
+ * Fase 6.31: la llave sale del ambiente con el que se opera. Para una
+ * factura es el fijado en su primera reserva (o, antes de ella, el de la
+ * empresa); por eso los servicios construyen el provider después de
+ * reservar, con la factura reservada.
  */
 final class FacturapiProviderResolver implements PacProviderResolver
 {
@@ -26,34 +36,47 @@ final class FacturapiProviderResolver implements PacProviderResolver
         $organization = $this->organization((int) $invoice->company_id);
         $status = PacOrganizationAccess::status($invoice, $organization?->organization_id);
 
-        return $this->provider($organization, PacOrganizationAccess::isBlocked($status)
-            ? new PacOrganizationMismatchException(
-                (int) $invoice->id,
-                $invoice->pac_organization_id,
-                $organization?->organization_id,
-                $status === PacOrganizationAccess::ARCHIVED,
-            )
-            : null);
+        $companyEnvironment = PacEnvironment::forOrganization($organization);
+
+        return $this->provider(
+            $organization,
+            PacEnvironment::forInvoice($invoice, $organization),
+            match (true) {
+                PacOrganizationAccess::isBlocked($status) => new PacOrganizationMismatchException(
+                    (int) $invoice->id,
+                    $invoice->pac_organization_id,
+                    $organization?->organization_id,
+                    $status === PacOrganizationAccess::ARCHIVED,
+                ),
+                // Fase 6.31: una factura de otro ambiente (o con operaciones
+                // previas sin ambiente) se rechaza antes del HTTP.
+                PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment)) => PacEnvironmentAccess::exceptionFor($invoice, $companyEnvironment),
+                default => null,
+            },
+        );
     }
 
     public function forCompany(int $companyId): FacturapiProvider
     {
-        return $this->provider($this->organization($companyId));
+        $organization = $this->organization($companyId);
+
+        return $this->provider($organization, PacEnvironment::forOrganization($organization));
     }
 
     /**
      * Fase 6.27b: provider con una llave suelta, sin organización exigida.
      * Sólo para que los comandos del operador comprueben a qué organización
      * pertenece una llave (GET /organizations/me) antes de guardarla.
+     * Fase 6.31: con el ambiente de esa llave (Test por omisión).
      */
-    public function forKey(string $testKey): FacturapiProvider
+    public function forKey(#[SensitiveParameter] string $testKey, string $environment = PacEnvironment::TEST): FacturapiProvider
     {
         return new FacturapiProvider(
             baseUrl: (string) config('services.facturapi.base_url'),
             apiKey: $testKey,
             timeout: (int) config('services.facturapi.timeout'),
             connectTimeout: (int) config('services.facturapi.connect_timeout'),
-            mode: config('billing.pac_mode'),
+            environment: $environment,
             stampTimezone: config('billing.facturapi.stamp_timezone'),
         );
     }
@@ -63,14 +86,14 @@ final class FacturapiProviderResolver implements PacProviderResolver
         return FacturapiOrganization::query()->where('company_id', $companyId)->first();
     }
 
-    private function provider(?FacturapiOrganization $organization, ?PacOrganizationMismatchException $blockedBy = null): FacturapiProvider
+    private function provider(?FacturapiOrganization $organization, ?string $environment, ?PacConfigurationException $blockedBy = null): FacturapiProvider
     {
         return new FacturapiProvider(
             baseUrl: (string) config('services.facturapi.base_url'),
-            apiKey: $organization?->test_secret_key,
+            apiKey: PacCredentialGuard::keyFor($organization, $environment),
             timeout: (int) config('services.facturapi.timeout'),
             connectTimeout: (int) config('services.facturapi.connect_timeout'),
-            mode: config('billing.pac_mode'),
+            environment: $environment,
             stampTimezone: config('billing.facturapi.stamp_timezone'),
             organizationId: $organization?->organization_id,
             organizationRequired: true,

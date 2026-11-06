@@ -167,11 +167,7 @@ class InvoicePacAuditService
 
     private function redactSecrets(string $value): string
     {
-        $value = PacSecretRedactor::redact($value);
-
-        $value = preg_replace('/\bBearer\s+[^\s]+/i', '[redacted]', $value) ?? '[redacted]';
-
-        return preg_replace('/\bsk_(?:live|test)_[A-Za-z0-9._-]+\b/i', '[redacted]', $value) ?? '[redacted]';
+        return PacSecretRedactor::redact($value);
     }
 
     private function safePacCode(?string $pacCode): ?string

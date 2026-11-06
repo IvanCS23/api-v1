@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Company;
 use App\Services\Billing\SendInvoiceEmailService;
+use App\Support\Billing\PacEnvironment;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -40,7 +41,8 @@ class CompanyEmailSettingsController extends Controller
     {
         return response()->json([
             'auto_email_invoices' => (bool) $company->auto_email_invoices,
-            'pac_mode' => in_array(config('billing.pac_mode'), ['test', 'live'], true) ? config('billing.pac_mode') : null,
+            // Fase 6.31: ambiente de la empresa, no el techo del sistema.
+            'pac_mode' => PacEnvironment::display(PacEnvironment::forCompany((int) $company->id)),
             'daily_limit' => $this->email->dailyLimit(),
             'sent_last_24h' => $this->email->sentInLastDay((int) $company->id),
             'can_edit' => (bool) $request->user('api')?->can('updateFiscal', $company),

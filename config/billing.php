@@ -7,14 +7,28 @@ return [
     | Modo del PAC (Fase 6.19)
     |--------------------------------------------------------------------------
     |
-    | La llave de Facturapi debe corresponder a este modo (test → sk_test_,
-    | live → sk_live_) o no se envía ninguna petición, ni escrituras ni
-    | descargas. En esta fase sólo `test` está soportado: `live` se rechaza
-    | hasta una fase explícita de producción.
+    | Fase 6.31: es el TECHO del sistema, no el modo de cada empresa (ese
+    | vive en facturapi_organizations.pac_environment). Sólo lo lee
+    | App\Support\Billing\PacEnvironment.
+    |
+    | - test: toda empresa opera en Test; una empresa en Live se rechaza
+    |   (pac_live_not_enabled) sin usar su llave Test. Es el paro de
+    |   emergencia.
+    | - live: cada empresa opera en el ambiente de su organización.
+    | - vacío o desconocido: nada opera (pac_mode_unsupported).
+    |
+    | La llave debe corresponder al ambiente (sk_test_ / sk_live_) o no se
+    | envía ninguna petición.
+    |
+    | live_allowed_app_envs: APP_ENV en los que se permite Live. Sin
+    | variable de entorno y sin excepción para `testing`: las pruebas lo
+    | fijan de forma explícita con HTTP simulado.
     |
     */
 
     'pac_mode' => env('BILLING_PAC_MODE', 'test'),
+
+    'live_allowed_app_envs' => ['production'],
 
     /*
     |--------------------------------------------------------------------------
@@ -120,7 +134,8 @@ return [
     |
     | - issue_pending_minutes: Facturapi puede responder 202 y reintentar
     |   recuperar el CFDI hasta 5 veces cada 10 minutos.
-    | - cancellation_pending_hours (96 h) = 72 h + 24 h:
+    | - cancellation_receiver_business_days (3) + cancellation_margin_hours
+    |   (24) — Fase 6.31, antes 96 h fijas (72 h + 24 h):
     |   * 72 h: plazo del receptor para aceptar o rechazar una cancelación
     |     que requiere su aceptación. Mientras corre, Facturapi responde
     |     status=valid + cancellation_status=pending (regla de Facturapi
@@ -134,7 +149,8 @@ return [
 
     'health' => [
         'issue_pending_minutes' => (int) env('BILLING_HEALTH_ISSUE_PENDING_MINUTES', 60),
-        'cancellation_pending_hours' => (int) env('BILLING_HEALTH_CANCELLATION_PENDING_HOURS', 96),
+        'cancellation_receiver_business_days' => (int) env('BILLING_HEALTH_CANCELLATION_RECEIVER_BUSINESS_DAYS', 3),
+        'cancellation_margin_hours' => (int) env('BILLING_HEALTH_CANCELLATION_MARGIN_HOURS', 24),
         'draft_date_warning_hours' => (int) env('BILLING_HEALTH_DRAFT_DATE_WARNING_HOURS', 48),
         'draft_date_limit_hours' => (int) env('BILLING_HEALTH_DRAFT_DATE_LIMIT_HOURS', 72),
         'chunk_size' => (int) env('BILLING_HEALTH_CHUNK_SIZE', 500),

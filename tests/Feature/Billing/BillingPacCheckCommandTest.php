@@ -36,6 +36,8 @@ function phase627CheckCompany(array $attributes = [], ?string $key = PHASE_627_C
         'rfc' => 'XIA190128J61',
         'fiscal_regime' => '601',
         'postal_code' => '06010',
+        // Fase 6.31: correo de contacto sincronizado con legal.support_email.
+        'email' => 'contacto@example.com',
     ], $attributes));
 }
 
@@ -45,7 +47,7 @@ function phase627CheckOrganization(array $overrides = []): array
         'id' => PHASE_627_CHECK_ORG,
         'is_production_ready' => false,
         'pending_steps' => [['type' => 'manifiesto', 'description' => 'Firma la carta manifiesto']],
-        'legal' => ['legal_name' => 'XENON INDUSTRIAL ARTICLES', 'tax_id' => 'XIA190128J61', 'tax_system' => '601', 'address' => ['zip' => '06010']],
+        'legal' => ['legal_name' => 'XENON INDUSTRIAL ARTICLES', 'tax_id' => 'XIA190128J61', 'tax_system' => '601', 'address' => ['zip' => '06010'], 'support_email' => 'contacto@example.com'],
         'certificate' => ['has_certificate' => true, 'serial_number' => '30001000000500003416', 'expires_at' => '2027-06-01T00:00:00.000Z'],
     ], $overrides);
 }
@@ -78,7 +80,8 @@ test('una empresa bien configurada pasa todas las verificaciones sin escribir na
             'organization' => 'ok', 'credentials' => 'ok', 'remote_identity' => 'ok',
             'fiscal_rfc' => 'ok', 'fiscal_regime' => 'ok', 'fiscal_postal_code' => 'ok',
             'certificate' => 'ok', 'pending_steps' => 'info', 'account' => 'info',
-            'invoices_without_organization' => 'ok', 'invoices_other_organization' => 'ok', 'invoices_archived' => 'info',
+            'support_email' => 'ok', 'logo' => 'ok',
+            'invoices_without_organization' => 'ok', 'invoices_other_organization' => 'ok', 'invoices_other_environment' => 'ok', 'invoices_archived' => 'info',
         ])
         ->and(DB::table('facturapi_organizations')->get()->toArray())->toEqual($before);
 
@@ -161,10 +164,9 @@ test('el CSD en modo test: vigente ok, por vencer o ausente warn, vencido fail',
 ]);
 
 test('el CSD ausente es aviso en modo test y fallo en modo live', function (string $mode, string $status) {
-    config(['billing.pac_mode' => $mode]);
     $snapshot = FacturapiOrganizationSnapshot::fromResponse(phase627CheckOrganization(['certificate' => ['has_certificate' => false]]));
 
-    $check = app(PacCheckService::class)->certificateCheck($snapshot, CarbonImmutable::now());
+    $check = app(PacCheckService::class)->certificateCheck($snapshot, CarbonImmutable::now(), $mode);
 
     expect($check['code'])->toBe('certificate')
         ->and($check['status'])->toBe($status);
@@ -250,4 +252,47 @@ test('rechaza opciones inválidas', function () {
     expect(Artisan::call('billing:pac-check', ['--format' => 'xml']))->toBe(1)
         ->and(Artisan::call('billing:pac-check', ['--fail-on' => 'invalid']))->toBe(1);
     Http::assertNothingSent();
+});
+
+test('en Live pac-check exige lista para producción y el correo de respuesta (Fase 6.31)', function (array $overrides, array $companyAttributes, array $expected) {
+    $company = phase627CheckCompany($companyAttributes);
+    phase631MakeLive($company->id, 'sk_live_PAC_CHECK_LIVE_KEY_000000');
+    $remote = phase627CheckOrganization(array_replace_recursive(['is_production_ready' => true], $overrides));
+    // array_replace_recursive conserva el paso pendiente del fixture base con [].
+    $remote['pending_steps'] = $overrides['pending_steps'] ?? [];
+    Http::fake(['example-pac.test/v2/organizations/me' => Http::response($remote)]);
+
+    [$exit, $report] = phase627PacCheck(['--company' => [$company->id]]);
+    $statuses = phase627CheckStatuses($report['companies'][0]);
+
+    expect($statuses)->toMatchArray($expected)
+        ->and($exit)->toBe(in_array('fail', $expected, true) ? 1 : 0)
+        ->and(json_encode($report))->not->toContain('sk_live_PAC_CHECK_LIVE_KEY_000000');
+    Http::assertSent(fn (Request $request): bool => $request->hasHeader('Authorization', 'Bearer sk_live_PAC_CHECK_LIVE_KEY_000000'));
+})->with([
+    'lista' => [[], [], ['pending_steps' => 'ok', 'support_email' => 'ok', 'credentials' => 'ok']],
+    'pasos pendientes' => [['pending_steps' => [['type' => 'manifiesto', 'description' => 'Firma']]], [], ['pending_steps' => 'fail']],
+    'no lista' => [['is_production_ready' => false], [], ['pending_steps' => 'fail']],
+    'support_email distinto' => [['legal' => ['support_email' => 'heredado@example.com']], [], ['support_email' => 'fail']],
+    'sin correo de contacto' => [[], ['email' => null], ['support_email' => 'fail']],
+]);
+
+test('pac-check avisa de un logotipo que no se subió desde el sistema (Fase 6.31)', function () {
+    $company = phase627CheckCompany();
+    Http::fake(['example-pac.test/v2/organizations/me' => Http::response(phase627CheckOrganization(['customization' => ['has_logo' => true]]))]);
+
+    [, $report] = phase627PacCheck(['--company' => [$company->id]]);
+
+    expect(phase627CheckStatuses($report['companies'][0])['logo'])->toBe('warn');
+});
+
+test('pac-check reporta facturas de otro ambiente o sin ambiente (Fase 6.31)', function () {
+    $company = phase627CheckCompany();
+    Invoice::factory()->create(['company_id' => $company->id, 'pac_environment' => 'live', 'pac_external_id' => 'inv_live', 'pac_organization_id' => PHASE_627_CHECK_ORG]);
+    Http::fake(['example-pac.test/v2/organizations/me' => Http::response(phase627CheckOrganization())]);
+
+    [$exit, $report] = phase627PacCheck(['--company' => [$company->id]]);
+
+    expect(phase627CheckStatuses($report['companies'][0])['invoices_other_environment'])->toBe('fail')
+        ->and($exit)->toBe(1);
 });

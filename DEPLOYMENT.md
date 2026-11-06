@@ -2,16 +2,22 @@
 
 Checklist para preparar un servidor de pre-producción o producción. Cada
 punto remite a la documentación de detalle (`BILLING_LIFECYCLE.md`) cuando
-existe. Fase 6.29.
+existe. Fase 6.29; el modo Live (sección 10) es de la Fase 6.31.
 
 ## 1. Requisitos
 
 | Componente | Versión |
 |---|---|
-| PHP | 8.2 o superior, con `pdo_mysql`, `openssl`, `mbstring`, `fileinfo` |
+| PHP | 8.2 o superior, con `pdo_mysql`, `openssl`, `mbstring`, `fileinfo`; **`zend.exception_ignore_args=On`** en `php.ini` |
 | Laravel | 12 (lo fija `composer.json`) |
 | Base de datos | **MySQL 8.0 o MariaDB 10.6 o superior** (recomendado) |
 | Node.js | el que pida `app-front/package.json` (Next.js) |
+
+Sobre PHP: con `zend.exception_ignore_args=Off` las trazas de `laravel.log`
+incluyen los argumentos de cada llamada. Los parámetros que reciben llaves
+llevan `#[SensitiveParameter]` (Fase 6.31), pero en producción se apagan
+los argumentos de todas las trazas. `php -i | grep exception_ignore_args`
+debe mostrar `On`.
 
 Sobre la base de datos:
 
@@ -44,11 +50,15 @@ Parte de `.env.example`. Las que no deben quedarse con el valor de desarrollo:
 | `FACTURAPI_USER_KEY` | User Key de la cuenta (`sk_user_…`) | ver la sección 7 |
 | `FACTURAPI_TEST_KEY` | vacía | sólo la usa `billing:facturapi-link` al vincular |
 | `FACTURAPI_TIMEOUT` / `FACTURAPI_CONNECT_TIMEOUT` | 15 / 5 (defaults) | |
-| `BILLING_PAC_MODE` | `test` hasta la fase Live | con `live` exige CSD |
+| `BILLING_PAC_MODE` | `test` (paro de emergencia) o `live` | techo del sistema, no el modo de cada empresa; cambiarlo a `live` va en la ventana de mantenimiento de P3 (sección 10) |
 | `BILLING_CFDI_FOLIO_CHECK` | `true` (default) | consulta de folio duplicado (6.28) |
 | `BILLING_ARTIFACTS_AUTO_DOWNLOAD` | `true` (default) | necesita el worker |
 | `BILLING_EMAIL_COMPANY_DAILY_LIMIT` | 100 (default) | envíos de facturas por correo por empresa en 24 h (6.30) |
-| `BILLING_FACTURAPI_STAMP_TIMEZONE` | `America/Mexico_City` (default) | zona de `stamp.date` de Facturapi |
+| `BILLING_FACTURAPI_STAMP_TIMEZONE` | `America/Mexico_City` (default) | zona de `stamp.date` de Facturapi y de los días hábiles de `billing:health` |
+| `BILLING_HEALTH_CANCELLATION_RECEIVER_BUSINESS_DAYS` / `BILLING_HEALTH_CANCELLATION_MARGIN_HOURS` | 3 / 24 (defaults) | plazo del receptor en `billing:health` (6.31; sustituyen a `BILLING_HEALTH_CANCELLATION_PENDING_HOURS`) |
+
+La llave Live **nunca** va en `.env`: se captura con
+`billing:facturapi-live-key` (sección 10). No hay `FACTURAPI_LIVE_KEY`.
 
 Frontend (`app-front/.env`):
 
@@ -178,3 +188,122 @@ php artisan queue:restart
 
 Y en `laravel.log`, revisar `billing.pac.guard_rejected` (configuración del
 PAC rechazada: código interno, empresa y factura).
+
+## 10. Modo Live con una empresa piloto (Fase 6.31)
+
+### Pendiente antes del piloto
+
+El código del modo Live está listo y probado con HTTP simulado, pero **el
+piloto no puede empezar** hasta tener:
+
+1. una **empresa piloto con CSD vigente** (no la empresa 1, que es sólo de
+   desarrollo);
+2. su **contador**, que define los casos reales de emisión y cancelación;
+3. un **servidor con `APP_ENV=production`** (Live se niega en cualquier otro
+   `APP_ENV`, también en `local` y `testing`);
+4. la **cuenta de Facturapi con suscripción activa** y el costo por timbre
+   confirmado.
+
+Hasta entonces `BILLING_PAC_MODE` se queda en `test`, ninguna empresa
+cambia a Live y no se crea ni se importa ninguna llave Live.
+
+### Cómo funciona
+
+- Cada empresa tiene su ambiente (`test` o `live`) y cada factura queda
+  fijada en el ambiente de su primera reserva. Detalle en
+  `BILLING_LIFECYCLE.md`, "Modo Live con una empresa piloto".
+- `BILLING_PAC_MODE` es el techo: con `live` cada empresa opera en su
+  ambiente; con `test` (o vacío/desconocido) **ninguna empresa Live opera**:
+  es el paro de emergencia. No usa la llave Test como respaldo: las
+  operaciones responden `PAC_CONFIGURATION_INVALID` sin contactar al PAC y
+  sin marcar ninguna factura. Al reactivar, XML/PDF y reconciliación se
+  recuperan; las cancelaciones pendientes se reconcilian entonces.
+- Para activar o quitar el paro: cambiar `BILLING_PAC_MODE`,
+  `php artisan config:cache` y `php artisan queue:restart`.
+
+### Procedimiento del piloto (cada paso con autorización explícita)
+
+**P1. Preparar la empresa piloto**
+
+- Carta Manifiesto firmada en Facturapi.
+- Suscripción activa y costo por timbre confirmado.
+- Datos fiscales capturados desde la aplicación (incluido el correo de
+  contacto: es el "Responder" de los correos al cliente), CSD vigente y
+  logotipo.
+- `auto_email_invoices` **apagado** para la empresa piloto.
+- `billing:pac-check --company=<id>` sin fallos en Test.
+
+**P2. Llave Live**
+
+- Crearla en el panel de Facturapi. Según la documentación actual
+  (`PUT /organizations/{id}/apikeys/live`, User Key) crea una llave sin
+  invalidar las anteriores; un comentario del SDK dice lo contrario: **la
+  rotación no está verificada**.
+- `php artisan billing:facturapi-live-key --company=<id>` (dry-run) y luego
+  con `--apply`. La llave se pega en el prompt oculto; nunca va en argumentos,
+  `.env` ni historial. Si `GET /organizations/me` no la acepta, no se guarda
+  nada (la alternativa por `first_12` requiere aprobación).
+
+**P3. Cambiar la empresa a Live (en una ventana de mantenimiento)**
+
+- El cambio se hace en una ventana de mantenimiento acordada: avisar a los
+  usuarios, dejar que la cola termine (`php artisan queue:work
+  --stop-when-empty`; `billing:pac-environment` se niega con jobs de la
+  empresa en la cola), `php artisan down` y detener el worker. Al terminar,
+  `php artisan up` y reiniciar el worker. Ninguna factura de la empresa
+  debe estar a medio emitir o cancelar (el comando también lo revisa).
+- Antes: respaldo de la base de datos **restaurado y comprobado** en otro
+  servidor; worker supervisado (sección 5) y la cola vacía;
+  `zend.exception_ignore_args=On`; `php artisan db:timezone-check` en OK;
+  `php artisan sat:import-catalogs` ejecutado; Carta Manifiesto, suscripción
+  y `auto_email_invoices` apagado (P1) confirmados.
+- `BILLING_PAC_MODE=live`, `config:cache`, `queue:restart`.
+- `php artisan billing:pac-environment --company=<id> --set=live` (revisión)
+  y luego con `--apply` y el RFC escrito.
+
+**P4. Antes de la primera emisión**
+
+El contador revisa la Constancia de Situación Fiscal del cliente (RFC,
+nombre exacto, régimen y C.P.): el SAT valida el nombre al timbrar.
+
+**P5. Primer CFDI**
+
+Total de hasta $1,000, con una operación real que defina el contador.
+
+**P6. Revisar la emisión**
+
+XML (`Serie="FAC"` y el folio del ERP), PDF, descarga automática,
+`billing:health` y `billing:pac-check`. El correo sólo de forma manual
+(`auto_email_invoices` sigue apagado).
+
+**P7. Primera cancelación (verificación obligatoria del acuse)**
+
+- El caso y el motivo (02 o 03; en Live no hay otros) los define el contador.
+- Sin aceptación del receptor: total de hasta $1,000 o dentro de las 24 horas
+  de la emisión. Con aceptación: el receptor tiene tres días hábiles; en la
+  primera solicitud el silencio cancela, tras un rechazo el silencio en
+  solicitudes posteriores deja el CFDI vigente. (Reglas dadas por la
+  revisión de la fase; contrastarlas con la RMF vigente.)
+- **Un responsable nombrado reconcilia la factura hasta su estado final.**
+- El acuse se acepta sólo si `Acuse/Folios/UUID` es el del CFDI y su
+  `EstatusUUID` es 201 o 202. Si se bloquea:
+  `php artisan billing:cancellation-receipt-inspect <invoice>` (solo
+  lectura) y revisión manual. No se relaja la validación.
+
+### Respuesta a incidentes
+
+- **Llave Live expuesta**: revocarla en el panel de Facturapi, crear otra e
+  importarla con `billing:facturapi-live-key`; si se expuso con la base de
+  datos y el `.env`, rotar `APP_KEY` (sección 6). Una llave Live también
+  puede **cambiar los datos fiscales y borrar o reemplazar el CSD** de la
+  organización: revisar `billing:pac-check` y los datos fiscales en
+  Facturapi después de un incidente.
+- **User Key expuesta**: abre todas las organizaciones de la cuenta y puede
+  **crear llaves Live** (la lista cerrada del sistema no lo hace, pero un
+  atacante no pasa por el código). Revocarla, revisar la lista de llaves Live
+  de cada organización en el panel y revocar las desconocidas.
+- **Timbres compartidos**: los timbres de la suscripción se comparten entre
+  organizaciones; una llave comprometida consume también los de las demás
+  empresas.
+- **Detener todo Live de inmediato**: `BILLING_PAC_MODE=test`,
+  `config:cache`, `queue:restart` (paro de emergencia).

@@ -33,7 +33,11 @@ return [
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),
-            'serve' => true,
+            // Fase 6.31: sin rutas /storage/{path} (GET y PUT con URL firmada
+            // por APP_KEY). Aquí viven los XML/PDF de los CFDI, los acuses y
+            // los logotipos; se sirven sólo por sus endpoints autenticados y
+            // la aplicación nunca genera URLs temporales de este disco.
+            'serve' => false,
             'throw' => false,
             'report' => false,
         ],

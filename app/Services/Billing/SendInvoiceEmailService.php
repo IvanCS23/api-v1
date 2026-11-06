@@ -14,6 +14,8 @@ use App\Models\InvoicePacEvent;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Support\Billing\InvoiceEmailRecipients;
+use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -24,8 +26,9 @@ use Throwable;
 /**
  * Fase 6.30 — Envía el CFDI (XML y PDF) por correo con Facturapi.
  *
- * - Sólo con CFDI vigente o cancelado (InvoiceBusinessCapabilitiesService::
- *   canSendEmailByState) y de la organización de la empresa.
+ * - Sólo con CFDI vigente (InvoiceBusinessCapabilitiesService::
+ *   canSendEmailByState) y de la organización de la empresa. Uno cancelado
+ *   responde INVOICE_EMAIL_CFDI_CANCELED (ver canSendEmailByState).
  * - Destinatarios: los indicados o, si no hay, los del cliente en nuestra
  *   base (InvoiceEmailRecipients); entre 1 y 5.
  * - Tope diario por empresa contado en la BD (envíos confirmados e
@@ -59,9 +62,16 @@ class SendInvoiceEmailService
         $current = $this->requireCurrentTenantInvoice($invoice);
 
         PacOrganizationAccess::assertAccessible($current);
+        // Fase 6.31: ni una factura de otro ambiente del PAC, y con una
+        // configuración inválida (p. ej. el paro de emergencia) no se
+        // registra ningún intento.
+        PacEnvironmentAccess::assertAccessible($current);
+        PacCredentialGuard::forInvoice($current)->assertConfigured();
 
         if (! $this->capabilities->canSendEmailByState($current)) {
-            throw InvoiceEmailException::notAllowed();
+            throw $current->pac_status === 'canceled'
+                ? InvoiceEmailException::canceled()
+                : InvoiceEmailException::notAllowed();
         }
 
         $final = $this->resolveRecipients($current, $recipients);

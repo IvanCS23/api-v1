@@ -4,7 +4,9 @@ namespace App\Http\Resources;
 
 use App\Models\Company;
 use App\Models\FacturapiOrganization;
+use App\Services\Billing\CompanyBillingReadinessService;
 use App\Services\Sat\SatFiscalValidator;
+use App\Support\Billing\PacEnvironment;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -64,6 +66,10 @@ class CompanyFiscalResource extends JsonResource
                 'legal_tax_id' => $organization->legal_tax_id,
                 'legal_tax_system' => $organization->legal_tax_system,
                 'legal_zip' => $organization->legal_zip,
+                // Fase 6.31: ambiente de la empresa y si el correo de respuesta de
+                // Facturapi es el de contacto (missing | mismatch | null).
+                'pac_environment' => PacEnvironment::display(PacEnvironment::forOrganization($organization)),
+                'contact_email_issue' => CompanyBillingReadinessService::contactEmailIssue($this->resource, $organization),
                 'rfc_matches' => $organization->legal_tax_id === null
                     ? null
                     : SatFiscalValidator::normalizeRfc($this->rfc) === SatFiscalValidator::normalizeRfc($organization->legal_tax_id),

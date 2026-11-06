@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
+use SensitiveParameter;
 
 /**
  * Fase 6.27: organización de Facturapi de una empresa (1:1).
@@ -29,6 +30,7 @@ class FacturapiOrganization extends Model
         'legal_tax_id',
         'legal_tax_system',
         'legal_zip',
+        'legal_support_email',
         'has_certificate',
         'certificate_serial_number',
         'certificate_expires_at',
@@ -39,13 +41,22 @@ class FacturapiOrganization extends Model
         'snapshot_at',
     ];
 
+    /** Fase 6.31: mismo default que la columna, para instancias sin recargar. */
+    protected $attributes = [
+        'pac_environment' => 'test',
+    ];
+
     protected $hidden = [
         'test_secret_key',
+        'live_secret_key',
     ];
 
     protected $casts = [
         'test_secret_key' => 'encrypted',
         'test_key_set_at' => 'immutable_datetime',
+        // Fase 6.31: llave Live, mismo trato que la Test.
+        'live_secret_key' => 'encrypted',
+        'live_key_set_at' => 'immutable_datetime',
         'has_certificate' => 'boolean',
         'certificate_expires_at' => 'immutable_datetime',
         'certificate_updated_at' => 'immutable_datetime',
@@ -55,7 +66,7 @@ class FacturapiOrganization extends Model
         'snapshot_at' => 'immutable_datetime',
     ];
 
-    public function setTestSecretKey(?string $key): static
+    public function setTestSecretKey(#[SensitiveParameter] ?string $key): static
     {
         return $this->forceFill([
             'test_secret_key' => $key,
@@ -64,8 +75,22 @@ class FacturapiOrganization extends Model
         ]);
     }
 
+    /**
+     * Fase 6.31: sólo la usa `billing:facturapi-live-key`, después de
+     * comprobar con GET /organizations/me que la llave es de esta
+     * organización. No es fillable ni sale en ninguna serialización.
+     */
+    public function setLiveSecretKey(#[SensitiveParameter] ?string $key): static
+    {
+        return $this->forceFill([
+            'live_secret_key' => $key,
+            'live_key_hint' => $key === null ? null : self::hint($key),
+            'live_key_set_at' => $key === null ? null : now(),
+        ]);
+    }
+
     /** `sk_test_…a1b2`: prefijo y últimos 4 caracteres, nunca más. */
-    public static function hint(string $key): string
+    public static function hint(#[SensitiveParameter] string $key): string
     {
         $prefix = preg_match('/^(sk_[a-z]+_)/', $key, $matches) === 1 ? $matches[1] : '';
         $tail = mb_strlen($key) - mb_strlen($prefix) >= 12 ? mb_substr($key, -4) : '';

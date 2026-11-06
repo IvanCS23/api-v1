@@ -15,6 +15,7 @@ use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
 use DOMDocument;
@@ -238,6 +239,9 @@ class DownloadInvoiceArtifactsService
                     $locked->id,
                 ));
             }
+
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
 
             $locked->forceFill([
                 'cfdi_artifacts_status' => 'pending',

@@ -8,6 +8,7 @@ use App\Data\Billing\PacInvoiceRequest;
 use App\Enums\InvoicePacEventType;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -145,6 +146,9 @@ class CreatePacDraftInvoiceService
                 ->where('company_id', $invoice->company_id)
                 ->lockForUpdate()
                 ->firstOrFail();
+
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
 
             if ($locked->pac_draft_external_id !== null || $locked->pac_draft_idempotency_key !== null) {
                 return $locked;

@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Company;
 use App\Services\Billing\PacCheckService;
+use App\Support\Billing\PacEnvironment;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 
@@ -53,7 +54,7 @@ class BillingPacCheck extends Command
             $this->line((string) json_encode([
                 'generated_at' => $now->toIso8601String(),
                 'read_only' => true,
-                'pac_mode' => config('billing.pac_mode'),
+                'pac_mode' => PacEnvironment::ceiling(),
                 'companies' => $results,
             ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
         } else {

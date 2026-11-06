@@ -15,6 +15,7 @@ use App\Models\Sale;
 use App\Services\Billing\InvoiceWorkflow;
 use App\Services\Billing\SaleToInvoiceConverter;
 use App\Support\Billing\InvoiceFolio;
+use App\Support\Billing\LegacyPacOperations;
 
 class InvoiceController extends Controller
 {
@@ -183,6 +184,11 @@ class InvoiceController extends Controller
 
         $this->authorize('update', $invoice);
 
+        // Fase 6.31: ERP sin CFDI; no se ofrece a una factura en producción.
+        if (($rejected = LegacyPacOperations::rejectsInLive($invoice)) !== null) {
+            return $rejected;
+        }
+
         try {
             $invoice = $this->workflow->issue($invoice);
         } catch (WorkflowTransitionException $e) {
@@ -197,6 +203,11 @@ class InvoiceController extends Controller
         $invoice = Invoice::findOrFail($id);
 
         $this->authorize('update', $invoice);
+
+        // Fase 6.31: cancelaría el ERP con el CFDI vigente; no en producción.
+        if (($rejected = LegacyPacOperations::rejectsInLive($invoice)) !== null) {
+            return $rejected;
+        }
 
         try {
             $invoice = $this->workflow->cancel($invoice);

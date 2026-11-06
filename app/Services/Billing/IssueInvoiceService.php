@@ -10,6 +10,7 @@ use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Events\Billing\InvoiceIssued;
 use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
+use App\Exceptions\Billing\LegacyOperationUnavailableException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacException;
 use App\Exceptions\Billing\PacRateLimitException;
@@ -19,6 +20,8 @@ use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -88,6 +91,12 @@ class IssueInvoiceService
 
     public function issue(Invoice $invoice): Invoice
     {
+        // Fase 6.31: la emisión directa sin borrador (InvoiceWorkflow::issueToPac)
+        // no se ofrece en Live; se rechaza antes de reservar o contactar al PAC.
+        if (PacEnvironment::forInvoice($invoice) === PacEnvironment::LIVE) {
+            throw new LegacyOperationUnavailableException((int) $invoice->id, 'IssueInvoiceService::issue');
+        }
+
         $reserved = $this->reserve($invoice);
 
         $this->audit->appendSafely($reserved, InvoicePacEventType::IssueAttempted, [
@@ -234,6 +243,9 @@ class IssueInvoiceService
             if (in_array($locked->pac_issue_status, [self::STATUS_PENDING, self::STATUS_RECONCILIATION_REQUIRED], true)) {
                 throw new InvoiceIssuanceInProgressException($locked);
             }
+
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
 
             $idempotencyKey = $locked->pac_idempotency_key
                 ?? PacIdentifiers::idempotencyKey($locked->company_id, $locked->id);

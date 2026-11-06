@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\FacturapiOrganization;
 use App\Services\Sat\SatFiscalValidator;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\SalePaymentRules;
 
 /**
@@ -123,11 +124,49 @@ class CompanyBillingReadinessService
             );
         }
 
-        if (config('billing.pac_mode') !== PacCredentialGuard::MODE_TEST && ! ($organization?->has_certificate ?? false)) {
+        if (PacEnvironment::forOrganization($organization) === PacEnvironment::TEST) {
+            return $errors;
+        }
+
+        // Fase 6.31: en Live, CSD vigente, organización lista para producción
+        // y el correo de contacto, que es el "Responder" de los correos al
+        // cliente, igual al support_email de Facturapi. Todo con la copia
+        // local de la organización; el cambio a Live la refresca.
+        if (! ($organization?->has_certificate ?? false)) {
             $errors[] = $this->error('COMPANY_CSD_MISSING', 'company.csd', 'La organización de la empresa no tiene CSD cargado.');
+        } elseif ($organization->certificate_expires_at !== null && $organization->certificate_expires_at->lte(now())) {
+            $errors[] = $this->error('COMPANY_CSD_EXPIRED', 'company.csd', 'El CSD de la organización está vencido. Sube uno vigente en Configuración > Sellos.');
+        }
+
+        if (! ($organization?->is_production_ready ?? false) || ($organization?->pending_steps ?? []) !== []) {
+            $errors[] = $this->error('COMPANY_NOT_PRODUCTION_READY', 'company', 'Facturapi todavía reporta pasos pendientes para producción en la organización de la empresa.');
+        }
+
+        if (($emailIssue = self::contactEmailIssue($company, $organization)) !== null) {
+            $errors[] = $emailIssue === 'missing'
+                ? $this->error('COMPANY_CONTACT_EMAIL_MISSING', 'company.email', 'Captura el correo de contacto de la empresa en Configuración > Datos fiscales: es la dirección a la que responden tus clientes.')
+                : $this->error('COMPANY_SUPPORT_EMAIL_MISMATCH', 'company.email', 'El correo de contacto de Facturapi no coincide con el de la empresa. Guarda de nuevo los Datos fiscales para sincronizarlo.');
         }
 
         return $errors;
+    }
+
+    /**
+     * Fase 6.31: `missing` sin correo de contacto, `mismatch` si el
+     * support_email de Facturapi (copia local) es otro, o null. En Test es
+     * sólo un aviso; en Live bloquea la emisión.
+     */
+    public static function contactEmailIssue(Company $company, ?FacturapiOrganization $organization): ?string
+    {
+        $email = is_string($company->email) ? trim($company->email) : '';
+
+        if ($email === '') {
+            return 'missing';
+        }
+
+        $remote = $organization?->legal_support_email;
+
+        return is_string($remote) && strcasecmp(trim($remote), $email) === 0 ? null : 'mismatch';
     }
 
     /**

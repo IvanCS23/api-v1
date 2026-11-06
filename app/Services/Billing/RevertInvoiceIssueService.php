@@ -7,6 +7,7 @@ use App\Enums\InvoiceStatus;
 use App\Exceptions\InvoiceCannotBeRevertedException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -42,6 +43,8 @@ class RevertInvoiceIssueService
         if ($current->pac_draft_external_id !== null) {
             // Fase 6.27: una factura de otra organización no consulta al PAC.
             PacOrganizationAccess::assertAccessible($current);
+            // Fase 6.31: ni una factura de otro ambiente del PAC.
+            PacEnvironmentAccess::assertAccessible($current);
             $current = $this->syncDraft->sync($current);
             $this->assertRevertible($current);
         }

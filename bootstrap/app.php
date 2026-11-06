@@ -34,7 +34,10 @@ return Application::configure(basePath: dirname(__DIR__))
             TenantMiddleware::class,
         ]);
 
-        // Fase 6.27b (0b): siempre justo después de autenticar.
+        // Fase 6.27b (0b): EnsureUserIsActive corre después de autenticar y
+        // antes del controlador. No queda inmediatamente después: el orden
+        // real es Authenticate > Throttle > SubstituteBindings > grupo
+        // (TenantMiddleware...) > EnsureUserIsActive (verificado en la 6.31).
         $middleware->alias(['active' => EnsureUserIsActive::class]);
         $middleware->appendToPriorityList(Authenticate::class, EnsureUserIsActive::class);
     })

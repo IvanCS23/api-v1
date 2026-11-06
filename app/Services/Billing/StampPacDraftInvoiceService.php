@@ -18,6 +18,7 @@ use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
@@ -204,6 +205,9 @@ class StampPacDraftInvoiceService
             if ($locked->pac_issue_status === 'pending') {
                 throw new InvoiceIssuanceInProgressException($locked);
             }
+
+            // Fase 6.31: fija el ambiente con esta reserva (o rechaza uno ajeno).
+            PacEnvironmentAccess::bind($locked);
 
             $locked->forceFill([
                 'pac_provider' => $providerSlug,

@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\InvoicePacEvent;
 use App\Support\Billing\InvoiceHealthFinding;
 use App\Support\Billing\InvoiceHealthReport;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
@@ -37,6 +38,8 @@ class BillingHealthReportService
         'cancellation_receipt_last_error', 'cancellation_receipt_started_at',
         // Fase 6.27: identidad de organización por factura.
         'pac_organization_id', 'pac_organization_archived_at',
+        // Fase 6.31: ambiente fijado de la factura.
+        'pac_environment',
     ];
 
     public function __construct(
@@ -89,7 +92,8 @@ class BillingHealthReportService
             ],
             'thresholds' => [
                 'issue_pending_minutes' => (int) config('billing.health.issue_pending_minutes'),
-                'cancellation_pending_hours' => (int) config('billing.health.cancellation_pending_hours'),
+                'cancellation_receiver_business_days' => (int) config('billing.health.cancellation_receiver_business_days'),
+                'cancellation_margin_hours' => (int) config('billing.health.cancellation_margin_hours'),
                 'draft_date_warning_hours' => (int) config('billing.health.draft_date_warning_hours'),
                 'draft_date_limit_hours' => (int) config('billing.health.draft_date_limit_hours'),
                 'cancel_in_flight_minutes' => (int) config('billing.cancel_in_flight_minutes'),
@@ -117,15 +121,16 @@ class BillingHealthReportService
     {
         $readyLimit = $now->subHours((int) config('billing.health.draft_date_limit_hours'));
         $companyOrganization = PacOrganizationAccess::companyOrganizationId((int) $this->tenant->id());
+        $companyEnvironment = PacEnvironment::forCompany((int) $this->tenant->id());
 
         Invoice::query()
             ->select(self::COLUMNS)
             ->when($invoiceId !== null, fn ($query) => $query->whereKey($invoiceId))
-            ->chunkById(max(1, (int) config('billing.health.chunk_size')), function (Collection $invoices) use (&$state, $now, $listStatuses, $limit, $readyLimit, $companyOrganization): void {
+            ->chunkById(max(1, (int) config('billing.health.chunk_size')), function (Collection $invoices) use (&$state, $now, $listStatuses, $limit, $readyLimit, $companyOrganization, $companyEnvironment): void {
                 $requestedAt = $this->cancellationRequestedAt($invoices);
 
                 foreach ($invoices as $invoice) {
-                    $report = $this->evaluator->evaluate($invoice, $now, $requestedAt[$invoice->id] ?? null, $companyOrganization);
+                    $report = $this->evaluator->evaluate($invoice, $now, $requestedAt[$invoice->id] ?? null, $companyOrganization, $companyEnvironment);
                     $this->accumulate($state, $invoice, $report, $listStatuses, $limit);
 
                     if ($invoice->status === InvoiceStatus::Ready

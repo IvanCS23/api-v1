@@ -183,7 +183,7 @@ FASE 6.16:
 
 FASE 6.17 (reportada, **no presente en el código**):
 - Se reportó la deprecación de endpoints ERP legacy (headers `Deprecation: true`, successor links, pruebas que prohíben su consumo).
-- Verificado al cierre de la 6.22: no existen esos headers, links ni pruebas, y `POST /api/invoices/{id}/issue` y `/cancel` siguen sin marcar. Se rehace en la FASE 6.26.
+- Verificado al cierre de la 6.22: no existen esos headers, links ni pruebas, y `POST /api/invoices/{id}/issue` y `/cancel` siguen sin marcar. Pasó a "Después del lanzamiento" en la hoja de ruta del 2026-10-30 (sección 10); la 6.26 fue la validación SAT. Desde la 6.31 esos endpoints responden 409 para facturas Live.
 
 FASE 6.18 — Observabilidad y salud del ciclo de facturación:
 - `InvoiceHealthEvaluator` y comando read-only `php artisan billing:health` (clasificación `valid`/`transient`/`recoverable`/`invalid`, `--company`, `--invoice`, `--status` repetible, `--format`, `--fail-on`).
@@ -191,7 +191,7 @@ FASE 6.18 — Observabilidad y salud del ciclo de facturación:
 - Commit api-v1: `75f51a7`.
 
 FASE 6.19 — Seguridad de escrituras PAC:
-- Guard de modo/llave (`billing.pac_mode=test` exige `sk_test_`; `live` rechazado) antes de cualquier HTTP.
+- Guard de modo/llave (`billing.pac_mode=test` exige `sk_test_`; `live` rechazado hasta la 6.31, que lo habilita por empresa) antes de cualquier HTTP.
 - Política de reintentos por operación (solo errores de conexión en lecturas e idempotentes).
 - Reserva de la cancelación bajo lock (`pac_cancel_request_status`, migración `add_pac_cancel_control`).
 - `pac_external_id` enmascarado en logs; códigos explícitos en `/operations/cancel` con reserva abierta.
@@ -302,11 +302,28 @@ FASE 6.29 — Infraestructura pre-producción:
 FASE 6.30 — Envío de facturas por correo:
 - Clientes: `email_optional_1` y `email_optional_2` (el formulario ya los mostraba pero no se guardaban), validados y sin unicidad.
 - `PacProvider::sendInvoiceEmail` (`POST /invoices/{id}/email`, siempre con la lista explícita, máximo 10, sin reintentos).
-- `POST /api/invoices/{id}/operations/email`: CFDI vigente o cancelado; Admin, Contador y Ventas envían, sólo Admin y Contador cambian la lista (Ventas: `403 INVOICE_EMAIL_RECIPIENTS_LOCKED`); máximo 5 destinatarios; eventos `email_sent`/`email_failed`/`email_uncertain`/`email_skipped` con destinatarios en el contexto cifrado; limitador `invoice-email` y tope diario por empresa (100) contado en la BD.
+- `POST /api/invoices/{id}/operations/email`: sólo CFDI vigente (ver abajo la cancelada); Admin, Contador y Ventas envían, sólo Admin y Contador cambian la lista (Ventas: `403 INVOICE_EMAIL_RECIPIENTS_LOCKED`); máximo 5 destinatarios; eventos `email_sent`/`email_failed`/`email_uncertain`/`email_skipped` con destinatarios en el contexto cifrado; limitador `invoice-email` y tope diario por empresa (100) contado en la BD.
 - Envío automático opcional por empresa (`companies.auto_email_invoices`, `SendInvoiceEmailJob` de un intento, nunca afecta la emisión) y pantalla real Configuración > Correo.
 - Correo de contacto de la empresa → `legal.support_email` (aparece en PDF y correos), con aviso en Datos fiscales.
+- Verificado con dos envíos reales en TEST (2026-11-04, a un correo del usuario): llegan a la bandeja principal desde `"Mi Empresa" <facturacion@mg.facturapi.io>` con XML, PDF, logotipo y nombre comercial; "Responder" va al `support_email` de la organización (no documentado: funciona como reply-to). Un CFDI cancelado se enviaba sin ninguna marca de cancelación, así que se bloqueó: `can_send_email=false` y `409 INVOICE_EMAIL_CFDI_CANCELED`, con aviso en el panel.
 - Panel fiscal: "Enviar/Reenviar por correo" con destinatarios editables según el rol y avisos de modo test y de CFDI cancelado.
-- Commits api-v1: `d5a1a3e`, `fb79f0b`, `a7a2d6c`, `c3c1082`, `0acda6b` y el de documentación. app-front: `01488ba`, `5577bd0`, `46cb890`.
+- Commits api-v1: `d5a1a3e`, `fb79f0b`, `a7a2d6c`, `c3c1082`, `0acda6b`, `46780cd` (documentación), `d5f60e8` (cancelada no se envía) y el de documentación del cierre. app-front: `01488ba`, `5577bd0`, `46cb890`, `3f45607`.
+
+FASE 6.31 — Modo Live con una empresa piloto (código y R0 completos; P1 a P7 pendientes):
+- Ambiente por empresa (`facturapi_organizations.pac_environment`) y `BILLING_PAC_MODE` como techo: `test` es el paro de emergencia (una empresa Live no opera ni usa su llave Test); Live sólo con `APP_ENV=production` (`billing.live_allowed_app_envs`). `PacEnvironment` es la única clase que lee `billing.pac_mode` (una prueba lo exige).
+- Ambiente de cada factura (`invoices.pac_environment`) fijado con su primera reserva bajo lock; `409 PAC_ENVIRONMENT_MISMATCH` para facturas de otro ambiente o con operaciones sin ambiente; jobs que revalidan y fallan sin reintentar; `billing:backfill-pac-environment` (`--assume-test` con aborto ante rastros de Live).
+- `livemode` exigido según el ambiente, en ambos sentidos. Llave Live cifrada, capturada con prompt oculto (`billing:facturapi-live-key`), en `security:reencrypt`; `#[SensitiveParameter]` en todo parámetro con llave.
+- Live: endpoints legacy `/issue`, `/cancel`, `/pac/issue`, `/pac/cancel` con `409 LEGACY_OPERATION_UNAVAILABLE`; motivos 02 y 03 (el 04 se retiró en ambos ambientes, el 01 sólo en Test); readiness del emisor (CSD vigente, lista para producción, correo de contacto igual al `support_email`).
+- Acuse: además del UUID, `EstatusUUID` 201 o 202 (`CANCELLATION_RECEIPT_STATUS_REJECTED`); diagnóstico de solo lectura `billing:cancellation-receipt-inspect` en cualquier ambiente.
+- `billing:pac-environment` (sólo consola, RFC escrito, datos remotos frescos, lista exacta de "factura Test sin terminar", cola vacía, sin vuelta a Test con facturas Live). `billing:pac-check` para Live (pasos pendientes, `support_email`, logotipo heredado, facturas de otro ambiente). `billing:health`: plazo del receptor en días hábiles + 24 h.
+- Frontend: etiqueta Pruebas/Producción, advertencias en Live al emitir y cancelar, motivos por ambiente, avisos de ambiente y de correo de contacto, Datos fiscales con el ambiente.
+- Hallazgos corregidos: un acuse con el UUID correcto y cualquier `EstatusUUID` se guardaba; con una configuración inválida `/pac/reconcile` marcaba la factura en revisión y `/pac/artifacts` la dejaba `failed` sin haber contactado al PAC.
+- Desviaciones: sólo en Test, en la emisión legacy y en las búsquedas por `external_id` y folio se tolera la ausencia de `livemode` (55 respuestas simuladas anteriores no lo traen); en Live se rechaza siempre (commit 13). El comando de importación de la llave quedó en el commit 3 porque necesita el guard por ambiente.
+- Commits api-v1: `a859f97`, `6a83b91`, `48f7e9c`, `9905fdd`, `f356172`, `53c4712`, `e45ccb8`, `d513714`, `2c77c44`, `15531c7`, `d93ebde`, `d088776` (documentación), `ee74271` (livemode estricto en Live y emisión legacy cerrada en Live) y el de documentación de R0. app-front: `de1a40c`.
+- Regresión R0 en Test (2026-11-05): ver el estado de la BD local en la sección 8.
+- Seguridad (commit `6477cce`): se retiraron las cinco rutas de `legacy-invoices` (tabla sin `company_id` ni Policy, accesible entre empresas).
+- Auditoría de aislamiento por empresa (2026-11-05, solo lectura, 95 rutas autenticadas): sin otros problemas. Todos los modelos de negocio usan `BelongsToCompany` (`CompanyScope`, que sin tenant no devuelve nada) y `TenantMiddleware` fija el tenant desde el usuario en el grupo `api`; no hay binding implícito de modelos. Las reglas `exists` sobre `clients`, `products` y `sales` filtran por `company_id`. De 83 `withoutGlobalScope`, 68 vuelven a filtrar por empresa en la misma consulta, 7 están en comandos del operador (sin HTTP) y 8, en servicios de ventas y facturación, buscan por `sale_id`/`quote_id` de una venta o cotización ya bloqueada con su `company_id`, o por sus `client_id`/`product_id`, que sólo se guardan validados por empresa. Sin Policy, a propósito: `AuthController@user`/`logout` y Settings (el propio usuario), catálogos globales (`SatCatalogController`, `TaxRateController`) y `UserController@index`/`show`, que filtran por la empresa del usuario (`UserController.php:36-38` y `:174-177`): cualquier rol ve a los usuarios de su propia empresa.
+- Pendiente del piloto (ver `DEPLOYMENT.md`, sección 10): empresa con CSD vigente, contador, servidor con `APP_ENV=production` y cuenta de Facturapi con suscripción activa.
 
 Documentación principal:
 
@@ -314,10 +331,10 @@ Documentación principal:
 
 ## 8. Estado de pruebas y línea base
 
-Línea base al cierre de la FASE 6.30 (verificada el 2026-11-03 sobre
-`changes-ivan` e `integracion-ivan`):
-- Backend: 1679 pruebas aprobadas, 7046 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
-- Frontend: 269 pruebas aprobadas en 28 archivos, 0 fallidas.
+Línea base de la FASE 6.31 (verificada el 2026-11-05 sobre `changes-ivan` e
+`integracion-ivan`, después de R0 y del retiro de `legacy-invoices`):
+- Backend: 1840 pruebas aprobadas, 7754 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
+- Frontend: 280 pruebas aprobadas en 28 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js: aprobado, 33 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
@@ -335,20 +352,28 @@ Estado de la BD local de desarrollo:
 - 6.27b, aplicado con autorización el 2026-10-29: migración `create_facturapi_organization_audits_table` (lote 36) y `PUT /legal` real de la empresa 1 como el usuario 2 (razón social XENON INDUSTRIAL ARTICLES, RFC XIA190128J61, régimen 601, C.P. 06010; nombre comercial "Mi Empresa"; auditoría #1). `billing:pac-check --company=1`: WARN, sólo por el CSD ausente (en TEST no bloquea); la cuenta de la User Key es dueña de la organización. La empresa 1 vuelve a emitir: venta #29 (VTA-00000021) → factura #20 (FAC-00000019), `issued`/`valid` en TEST. CSD sin cargar por decisión del usuario.
 - 6.28, aplicado con autorización el 2026-10-30: migración `add_cfdi_folio_to_invoices_table` y `billing:backfill-cfdi-folio --apply` (13 facturas con la serie `F`: #1–#3 de la organización anterior y #8–#13, #16, #17, #19 y #20 de la actual, F-1 a F-10). No había ventas ni facturas PPD. Venta de prueba #30 (VTA-00000022, cliente 7, producto 14, 03/PUE, IVA 16 %, total 116.00) creada en borrador para emitirse desde la interfaz; el usuario la emitió: factura #21 (`FAC-00000020`), XML con `Serie="FAC" Folio="20"`, sin `cfdi_folio_mismatch`.
 - 6.29, aplicado con autorización el 2026-10-30: respaldo `backups/facturapro-2026-10-30-pre-6.29-timezone.sql` (fuera de los repos) y migración `normalize_timestamps_to_utc` (236 filas en 20 tablas; huella y 23 fechas de muestra idénticas antes y después; `db:timezone-check` OK). `GET /organizations/{id}` de la empresa 1: `legal.name` "Mi Empresa", `has_logo` true (imagen "Tecnologias S.A"). Migración `add_logo_to_facturapi_organizations_and_companies` aplicada después (2026-10-30); el logotipo lo sube el usuario desde Datos fiscales.
-- 6.30 (2026-11-03): migraciones `add_optional_emails_to_clients_table` y `add_auto_email_invoices_to_companies_table` pendientes de autorizar. Clientes locales: 1 y 2 usan `prueba.com` (dominio real), 7 usa `example.com`; no enviar correos reales a los dos primeros.
+- 6.30, aplicado con autorización el 2026-11-04: migraciones `add_optional_emails_to_clients_table` y `add_auto_email_invoices_to_companies_table` (envío automático de la empresa 1 apagado). Dos envíos reales en TEST, sólo a un correo del usuario: #22 (`FAC-00000021`, vigente) y #19 (`FAC-00000018`, cancelada), ambos `email_sent`. Los clientes 1 "prueba" y 2 "MOM" pasaron de `prueba.com` (dominio real) a `prueba@example.com` y `prueba2@example.com` (cambio de datos de desarrollo autorizado); los tres clientes locales usan `example.com`. La organización de desarrollo conserva un `support_email` heredado (del usuario) mientras la empresa 1 no capture su correo de contacto.
+- 6.31, aplicado con autorización el 2026-11-05 (regresión R0, sólo Facturapi Test y la llave Test de la empresa 1): respaldo `backups/facturapro-2026-11-05-pre-6.31-r0.sql` (28 tablas, iguales a la BD); migraciones `add_live_environment_to_facturapi_organizations_table`, `add_pac_environment_to_invoices_table` y `add_legal_support_email_to_facturapi_organizations_table`; `billing:backfill-pac-environment --apply` (15 facturas en `test` por su respuesta guardada, 0 asumidas, 0 en conflicto; las demás nunca llegaron al PAC). La empresa 1 quedó en `pac_environment=test`, sin llave Live.
+  - Venta #32 (`VTA-00000024`, cliente 7, producto 14, 03/PUE, $116.00) → factura #23 (`FAC-00000022`) → CFDI `FAC22` (serie `FAC`, folio 22), `pac_environment=test`. Emisión en 6 llamadas: consulta de folio, crear, sincronizar, actualizar, sincronizar y timbrar (el borrador nació con `is_ready_to_stamp=false`, igual que en #20–#22; causa no verificada). XML guardado comparado con la factura: serie, folio, receptor, concepto, forma, método, subtotal, IVA y total coinciden.
+  - Cola: el job viejo de XML/PDF de la #22 no hizo nada (ya guardados); el de la #23 los descargó. `pac-check` empresa 1: WARN por CSD ausente y sin correo de contacto; Facturapi reportó `is_production_ready=false` y `pending_steps` `certificate` y `manifiesto`.
+  - Cancelación con motivo 02: `canceled`/`accepted`; no hizo falta reconciliar. Acuse: `CANCELLATION_RECEIPT_UUID_MISMATCH`, como se esperaba en TEST. Estructura real del acuse de TEST: raíz `Acuse` sin namespace, `Acuse/Folios` con `UUID` y `EstatusUUID` hermanos (`EstatusUUID=205`, UUID ajeno `CF5138A2...2E90`) y `Acuse/Signature`.
+  - `billing:health`: 21 facturas activas `valid`, sin `pac_environment_mismatch`. 0 coincidencias de `sk_test_`, `sk_live_` o `sk_user_` en los logs de R0. 13 llamadas reales a Facturapi Test, todas 200. El envío por correo se omitió (no se indicó dirección).
+  - Conteo: 22 facturas en total, 1 borrada (#14), 21 activas, 3 archivadas (#1–#3). El backfill cuenta las borradas; `billing:health`, no.
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
+- Sin uso desde que se retiraron las rutas de `legacy-invoices` (6.31), conservados a propósito: `App\Http\Controllers\Api\LegacyInvoiceController`, el modelo `App\Models\LegacyInvoice` (sólo lo referencia la relación siguiente) y `Company::legacyInvoices()` (`app/Models/Company.php:142`), que nunca resolvió nada porque `legacy_invoices` no tiene `company_id`. Decidir si se eliminan junto con la tabla, después de respaldar su registro.
 - Lint global frontend: 31 errores / 51 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
 - `CompanyBillingReadinessService::evaluate()` (forma de pago de la empresa) no tiene consumidores desde la 6.25: decidir si se elimina.
 - Vulnerabilidades de dependencias reportadas, pendientes de nueva auditoría.
 - Búsqueda parcial `LIKE`.
 - Índices de consulta pendientes de evaluación con datos reales.
-- No existe endpoint real de envío por correo.
 - Debe revisarse el diff del lockfile.
 - Los endpoints legacy siguen disponibles por compatibilidad.
 
 Hallazgos de producto pendientes (verificados en el código):
+- `billing:pac-check` no compara el `support_email` de Facturapi con el correo de contacto local ni avisa si la organización trae un logotipo que no se subió desde el sistema (en desarrollo, ambos heredados).
+- Correo propio del sistema (fuera de Facturapi): necesario para notificar cancelaciones con su acuse; Facturapi no envía el acuse y un CFDI cancelado ya no se envía.
 - 17 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
 - Complemento de pago (REP): requisito para reactivar PPD (bloqueado en la 6.28). Al construirlo, quitar PPD de `SalePaymentRules::UNAVAILABLE_METHODS`; la regla PPD ↔ 99 ya está lista.
 - `companies.default_cfdi_series` no tiene uso: la serie del CFDI sale del folio interno (`FAC`). Decidir si se elimina o si se permite configurar el prefijo del folio interno.
@@ -377,7 +402,12 @@ Riesgos pendientes:
 - Respaldos: una copia de la BD junto con el `.env` (`APP_KEY`) expone las llaves de Facturapi; ver `BILLING_LIFECYCLE.md` (rotación con `APP_PREVIOUS_KEYS`, `security:reencrypt` y `billing:facturapi-link --replace-key`).
 - User Key: abre todas las organizaciones de la cuenta y vive en el proceso web (datos fiscales y CSD). Mitigado con la lista cerrada del cliente, sólo Admin, límites de intentos, auditoría y redacción; si el `.env` se filtra, reemplazarla en Facturapi.
 - Sin verificar contra Facturapi real: la forma exacta de los errores del CSD, si `PUT /legal` borra los campos de dirección omitidos (se envían todos los que tiene la empresa), si una organización nueva sin `tax_id` timbra en TEST y qué responde `GET /organizations/{id}` con una organización de otra cuenta.
-- Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación.
+- Acuse de cancelación solo verificable en Live: en TEST siempre trae un UUID ajeno (EstatusUUID 205) y se bloquea por diseño. Verificación obligatoria con la primera cancelación real en Live; no relajar la validación. Desde la 6.31 también se exige `EstatusUUID` 201 o 202; la estructura `Folios/UUID` + `Folios/EstatusUUID` viene de fuentes secundarias y se confirma con ese primer acuse.
+- Llaves Live (6.31): una llave Live puede cambiar los datos fiscales y borrar o reemplazar el CSD de su organización; una User Key filtrada puede crear llaves Live en cualquier organización de la cuenta; los timbres de la suscripción se comparten entre organizaciones, así que una llave comprometida consume los de todas. Respuesta a incidentes en `DEPLOYMENT.md`, sección 10.
+- Rotación de llaves Live sin verificar: la documentación dice que `PUT /apikeys/live` no invalida las anteriores; un comentario del SDK dice lo contrario. Crear la nueva, importarla y comprobarla antes de revocar la anterior.
+- Sin verificar contra Facturapi Live: que `GET /organizations/me` acepte una llave Live (si no, la importación no guarda nada y la alternativa por `first_12` requiere aprobación), los tipos de `pending_steps`, que las facturas Test y Live estén aisladas entre sí y cómo reporta Facturapi el silencio del receptor tras un rechazo.
+- `billing:health` no modela los días festivos oficiales en el plazo del receptor: puede escalar antes de tiempo.
+- Resuelto en la 6.31: `legacy_invoices` no tiene `company_id` ni Policy (sistema de tickets anterior) y cualquier usuario activo de cualquier empresa podía listar, ver, crear, modificar y borrar todos sus registros. Se retiraron sus cinco rutas (`/api/legacy-invoices`); la tabla, el modelo, la migración y el registro existente se conservan. `LegacyInvoiceRoutesRemovedTest` falla si reaparecen.
 - Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 - Folio del CFDI (6.28), sin verificar contra Facturapi: si rechaza folios duplicados (no lo documenta; lo cubre la consulta previa salvo emisiones simultáneas desde fuera), si el `PUT` del borrador respeta `series`/`folio_number` y cómo imprime el PDF la serie y el folio. Se confirma con la primera emisión real posterior a la 6.28.
 
@@ -417,7 +447,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.30 — Envío de facturas por correo (ver sección 7). Falta, con autorización del usuario: aplicar sus dos migraciones en la BD local y dos envíos reales en TEST (una factura válida y una cancelada) a un correo del usuario, para confirmar entrega, remitente, contenido y el comportamiento con un CFDI cancelado.
+La última fase completada es la FASE 6.31 — Modo Live con una empresa piloto (ver sección 7): código y R0 completos; P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi.
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -425,7 +455,7 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.28 — Folio del CFDI y bloqueo de PPD. Completa.
 - FASE 6.29 — Infraestructura pre-producción (zona horaria de MySQL, logs del guard, login de inactivos, checklist de despliegue en `DEPLOYMENT.md`, borrador validado antes de la transición y "Regresar a lista", logotipo del PDF). Completa.
 - FASE 6.30 — Envío del CFDI por correo. Completa.
-- FASE 6.31 — Modo Live con una empresa piloto (incluye la verificación obligatoria del acuse de cancelación con la primera cancelación real).
+- FASE 6.31 — Modo Live con una empresa piloto. Código y R0 completos; P1 a P7 pendientes (incluye la verificación obligatoria del acuse en la primera cancelación real; ver `DEPLOYMENT.md`, sección 10).
 
 Hito 2 — Lanzamiento general:
 - Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
@@ -442,18 +472,14 @@ Hito 3 — Contabilidad y estadísticas:
 - Contabilidad electrónica.
 
 Después del lanzamiento:
-- Deprecación de endpoints legacy (`/api/invoices/{id}/issue`, `/cancel`, `/pac/issue`, `/pac/cancel`, `legacy-invoices`): headers `Deprecation`, successor links y pruebas.
+- Deprecación de endpoints legacy (`/api/invoices/{id}/issue`, `/cancel`, `/pac/issue`, `/pac/cancel`): headers `Deprecation`, successor links y pruebas. `legacy-invoices` ya no está: sus rutas se retiraron en la 6.31.
 - Lint y Pint globales.
 - Aprobación de ventas por rol.
 - Sesiones múltiples por usuario (hoy `POST /api/login` reemplaza el `api_token`).
 
 ## 11. Siguiente tarea
 
-Prepara la FASE 6.31 — Modo Live con una empresa piloto antes de modificar archivos:
-
-1. Confirma el estado real de ambos repositorios y la línea base de la sección 8.
-2. Revisa qué cambia con `BILLING_PAC_MODE=live` (llave Live, CSD obligatorio, `pending_steps` de la organización, verificación del acuse de cancelación) y `DEPLOYMENT.md`.
-3. Propón alcance, archivos, pruebas, riesgos y orden de commits.
+No avanzar al piloto (P1 a P7) hasta que existan la empresa piloto con CSD vigente, su contador, un servidor con `APP_ENV=production` y la suscripción activa de Facturapi. Cada paso del piloto requiere autorización explícita.
 
 No inventes el estado actual del workspace. Si falta información, inspecciona el código y explica qué no pudo verificarse.
 La meta es continuar desde el trabajo real existente, preservar las decisiones anteriores y avanzar de forma incremental y verificable.

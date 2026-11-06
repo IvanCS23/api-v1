@@ -67,7 +67,7 @@ function phase610Pdf(): string
 function phase610ReceiptXml(string $uuid): string
 {
     return '<?xml version="1.0" encoding="UTF-8"?>'
-        .'<Acuse xmlns="http://cancelacfd.sat.gob.mx"><Folios><UUID>'.$uuid.'</UUID></Folios></Acuse>';
+        .'<Acuse xmlns="http://cancelacfd.sat.gob.mx"><Folios><UUID>'.$uuid.'</UUID><EstatusUUID>201</EstatusUUID></Folios></Acuse>';
 }
 
 function phase610ReceiptPdf(): string
@@ -378,7 +378,7 @@ test('cancel soporta motivos y estados remotos definidos por el Service', functi
 })->with([
     '02 accepted' => ['02', 'canceled', 'accepted'],
     '03 pending' => ['03', 'valid', 'pending'],
-    '04 verifying' => ['04', 'valid', 'verifying'],
+    '02 verifying' => ['02', 'valid', 'verifying'],
     '02 rejected' => ['02', 'valid', 'rejected'],
     '03 expired' => ['03', 'valid', 'expired'],
 ]);

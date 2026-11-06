@@ -3,10 +3,15 @@
 namespace App\Http\Resources\Billing;
 
 use App\Enums\InvoicePacEventType;
+use App\Models\Company;
+use App\Models\FacturapiOrganization;
+use App\Services\Billing\CompanyBillingReadinessService;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
 use App\Services\Billing\SendInvoiceEmailService;
 use App\Support\Billing\InvoiceEmailRecipients;
 use App\Support\Billing\InvoiceFolio;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacErrorCode;
 use App\Support\Billing\PacOrganizationAccess;
 use Carbon\CarbonImmutable;
@@ -26,6 +31,7 @@ class InvoiceBillingResource extends JsonResource
         $receiptStored = $this->cancellation_receipt_status === 'stored';
 
         $actions = app(InvoiceBusinessCapabilitiesService::class)->for($this->resource, $request->user());
+        $company = Company::query()->find($this->company_id);
 
         return [
             'id' => $this->id,
@@ -35,7 +41,7 @@ class InvoiceBillingResource extends JsonResource
             'pac' => [
                 // Fase 6.22: modo configurado (test|live), nunca la llave ni
                 // un fragmento de ella. Permite explicar los acuses de TEST.
-                'mode' => in_array(config('billing.pac_mode'), ['test', 'live'], true) ? config('billing.pac_mode') : null,
+                'mode' => PacEnvironment::display(PacEnvironment::forInvoice($this->resource)),
                 'provider' => $this->pac_provider,
                 'status' => $this->pac_status,
                 'cancellation_status' => $this->cancellation_status,
@@ -46,6 +52,17 @@ class InvoiceBillingResource extends JsonResource
                 // factura nunca llegó al PAC). Nunca el ID de la organización.
                 'organization_status' => PacOrganizationAccess::status($this->resource, PacOrganizationAccess::companyOrganizationId((int) $this->company_id)),
                 'organization_archived_at' => $this->pac_organization_archived_at?->toIso8601String(),
+                // Fase 6.31: bound | mismatch | unbound (null si la factura
+                // todavía no tiene ambiente ni operaciones del PAC).
+                'environment_status' => PacEnvironmentAccess::statusFor($this->resource),
+            ],
+            // Fase 6.31: aviso del correo de contacto (missing | mismatch | null).
+            // En Test no bloquea; en Live lo bloquea la readiness de emisión.
+            'issuer' => [
+                'contact_email_issue' => $company === null ? null : CompanyBillingReadinessService::contactEmailIssue(
+                    $company,
+                    FacturapiOrganization::query()->where('company_id', $this->company_id)->first(),
+                ),
             ],
             'cfdi' => [
                 'uuid' => $this->cfdi_uuid,

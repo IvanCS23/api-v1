@@ -32,6 +32,8 @@ final class FacturapiOrganizationSnapshot
         // Fase 6.29: nombre comercial (legal.name) y logotipo, lo que imprime el PDF.
         public readonly ?string $tradeName = null,
         public readonly ?bool $hasLogo = null,
+        // Fase 6.31: el "Responder" de los correos al cliente.
+        public readonly ?string $supportEmail = null,
     ) {}
 
     /**
@@ -66,6 +68,7 @@ final class FacturapiOrganizationSnapshot
             ], array_filter($steps, 'is_array'))),
             tradeName: self::string($legal['name'] ?? null),
             hasLogo: is_bool($customization['has_logo'] ?? null) ? $customization['has_logo'] : null,
+            supportEmail: self::string($legal['support_email'] ?? null),
         );
     }
 
@@ -83,6 +86,7 @@ final class FacturapiOrganizationSnapshot
             'legal_tax_id' => $this->taxId,
             'legal_tax_system' => $this->taxSystem,
             'legal_zip' => $this->zip,
+            'legal_support_email' => $this->supportEmail,
             'has_certificate' => $this->hasCertificate,
             'certificate_serial_number' => $this->certificateSerialNumber,
             'certificate_expires_at' => $this->certificateExpiresAt,

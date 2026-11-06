@@ -13,6 +13,7 @@ use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacIdentifiers;
 use App\Support\Billing\PacSecretRedactor;
 use App\Support\Tenant\CurrentTenant;
@@ -404,12 +405,16 @@ class ReconcileInvoiceWithPacService
             ));
         }
 
+        // Fase 6.31: el livemode debe ser el del ambiente fijado en la factura.
+        $expectedLivemode = PacEnvironment::expectsLivemode($invoice->pac_environment);
+
         if ($invoice->cfdi_uuid === null
             && $result->status === 'valid'
-            && ($result->rawResponse['livemode'] ?? null) !== false) {
+            && ($result->rawResponse['livemode'] ?? null) !== $expectedLivemode) {
             return new PacUnexpectedResponseException(sprintf(
-                'No se puede recuperar cfdi_uuid para la factura [%d] sin confirmar livemode=false.',
+                'No se puede recuperar cfdi_uuid para la factura [%d] sin confirmar livemode=%s.',
                 $invoice->id,
+                $expectedLivemode ? 'true' : 'false',
             ));
         }
 

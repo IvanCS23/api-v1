@@ -2,11 +2,13 @@
 
 namespace App\Services\Billing;
 
+use App\Enums\CfdiCancellationMotive;
 use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\User;
-use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 
 /**
@@ -22,12 +24,15 @@ class InvoiceBusinessCapabilitiesService
      */
     public const ARTIFACT_PAC_STATUSES = ['valid', 'canceled'];
 
-    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, can_revert_issue: bool, can_send_email: bool, can_edit_email_recipients: bool} */
+    /** @return array{can_issue: bool, can_cancel: bool, can_reconcile: bool, can_fetch_artifacts: bool, can_fetch_cancellation_receipt: bool, cancellation_mode: ?string, cancellation_motives: list<string>, can_revert_issue: bool, can_send_email: bool, can_edit_email_recipients: bool} */
     public function for(Invoice $invoice, ?User $user): array
     {
         // Fase 6.27: una factura de otra organización (o archivada) no ofrece
         // ninguna acción PAC; la llave de la empresa no tiene acceso a ella.
-        if (PacOrganizationAccess::isBlocked(PacOrganizationAccess::status($invoice, PacOrganizationAccess::companyOrganizationId((int) $invoice->company_id)))) {
+        // Fase 6.31: tampoco una factura de otro ambiente del PAC (o con
+        // operaciones previas sin ambiente).
+        if (PacOrganizationAccess::isBlocked(PacOrganizationAccess::status($invoice, PacOrganizationAccess::companyOrganizationId((int) $invoice->company_id)))
+            || PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::statusFor($invoice))) {
             return [
                 'can_issue' => false,
                 'can_cancel' => false,
@@ -35,6 +40,7 @@ class InvoiceBusinessCapabilitiesService
                 'can_fetch_artifacts' => false,
                 'can_fetch_cancellation_receipt' => false,
                 'cancellation_mode' => null,
+                'cancellation_motives' => [],
                 'can_revert_issue' => false,
                 'can_send_email' => false,
                 'can_edit_email_recipients' => false,
@@ -63,6 +69,11 @@ class InvoiceBusinessCapabilitiesService
             'can_fetch_artifacts' => $canFetchArtifacts,
             'can_fetch_cancellation_receipt' => $canFetchReceipt,
             'cancellation_mode' => $canCancel ? $mode : null,
+            // Fase 6.31: motivos SAT que acepta la cancelación fiscal en el
+            // ambiente de la factura (Live: 02 y 03).
+            'cancellation_motives' => $canCancel && $mode === 'pac'
+                ? array_map(fn (CfdiCancellationMotive $motive): string => $motive->value, CfdiCancellationMotive::availableIn(PacEnvironment::forInvoice($invoice)))
+                : [],
             // Fase 6.29: mismo permiso que emitir.
             'can_revert_issue' => $this->canRevertIssueByState($invoice)
                 && $user?->can('issueBusiness', $invoice) === true,
@@ -94,12 +105,12 @@ class InvoiceBusinessCapabilitiesService
             return false;
         }
 
-        return $this->identityMismatchCount($invoice) < $this->identityMismatchLimit();
+        return $this->identityMismatchCount($invoice) < $this->identityMismatchLimit($invoice);
     }
 
-    public function identityMismatchLimit(): int
+    public function identityMismatchLimit(Invoice $invoice): int
     {
-        return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+        return PacEnvironment::forInvoice($invoice) !== PacEnvironment::LIVE
             ? 1
             : max(1, (int) config('billing.cancellation_receipt.live_identity_mismatch_limit'));
     }
@@ -112,7 +123,8 @@ class InvoiceBusinessCapabilitiesService
         }
 
         return $invoice->pacEvents()
-            ->where('event_type', InvoicePacEventType::CancellationReceiptIdentityMismatch->value)
+            // Fase 6.31: un EstatusUUID rechazado cuenta igual que un acuse ajeno.
+            ->whereIn('event_type', [InvoicePacEventType::CancellationReceiptIdentityMismatch->value, InvoicePacEventType::CancellationReceiptStatusRejected->value])
             ->count();
     }
 
@@ -282,6 +294,19 @@ class InvoiceBusinessCapabilitiesService
     }
 
     /**
+     * Fase 6.30: sólo un CFDI vigente se puede enviar por correo; Facturapi
+     * adjunta su XML y su PDF. Uno cancelado no: verificado en TEST el
+     * 2026-11-04, Facturapi lo envía sin ninguna marca de cancelación (ni en
+     * el correo ni en el PDF) y el correo dice que se emitió un comprobante.
+     * El bloqueo por organización ajena ya lo aplica for().
+     */
+    public function canSendEmailByState(Invoice $invoice): bool
+    {
+        return $this->hasCompleteFiscalIdentity($invoice)
+            && $invoice->pac_status === 'valid';
+    }
+
+    /**
      * Fase 6.29: "Regresar a lista". Una factura `issued` cuyo timbrado no
      * ocurrió (rechazado o nunca intentado) y que no tiene nada en curso ni
      * en revisión puede volver a `ready`, para corregirla (eliminarla y
@@ -289,17 +314,6 @@ class InvoiceBusinessCapabilitiesService
      * existe, se vuelve a consultar al ejecutar la acción: aquí sólo se
      * evalúa el estado local.
      */
-    /**
-     * Fase 6.30: sólo un CFDI timbrado (vigente o cancelado) se puede enviar
-     * por correo; Facturapi adjunta su XML y su PDF. El bloqueo por
-     * organización ajena ya lo aplica for().
-     */
-    public function canSendEmailByState(Invoice $invoice): bool
-    {
-        return $this->hasCompleteFiscalIdentity($invoice)
-            && in_array($invoice->pac_status, ['valid', 'canceled'], true);
-    }
-
     public function canRevertIssueByState(Invoice $invoice): bool
     {
         return $invoice->status === InvoiceStatus::Issued

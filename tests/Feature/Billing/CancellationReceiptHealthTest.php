@@ -65,12 +65,17 @@ test('PacErrorCode lee sólo el prefijo estable del error persistido', function 
     'null' => [null, null],
 ]);
 
-test('el bloqueo de identidad del acuse depende del modo PAC', function (string $mode, InvoiceHealthStatus $status) {
-    config(['billing.pac_mode' => $mode]);
-    $finding = phase622ReceiptFinding(phase622CanceledInvoice([
+test('el bloqueo de identidad del acuse depende del ambiente de la factura', function (string $mode, InvoiceHealthStatus $status) {
+    $invoice = phase622CanceledInvoice([
         'cancellation_receipt_status' => 'reconciliation_required',
         'cancellation_receipt_last_error' => PHASE_622_MISMATCH,
-    ]));
+    ]);
+
+    if ($mode === 'live') {
+        phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
+    }
+
+    $finding = phase622ReceiptFinding($invoice);
 
     expect($finding->code)->toBe('cancellation_receipt_identity_mismatch')
         ->and($finding->status)->toBe($status)
@@ -81,11 +86,16 @@ test('el bloqueo de identidad del acuse depende del modo PAC', function (string 
 ]);
 
 test('un acuse no disponible es informativo en ambos modos', function (string $mode) {
-    config(['billing.pac_mode' => $mode]);
-    $finding = phase622ReceiptFinding(phase622CanceledInvoice([
+    $invoice = phase622CanceledInvoice([
         'cancellation_receipt_status' => 'reconciliation_required',
         'cancellation_receipt_last_error' => 'El acuse todavía no está disponible.',
-    ]));
+    ]);
+
+    if ($mode === 'live') {
+        phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
+    }
+
+    $finding = phase622ReceiptFinding($invoice);
 
     expect($finding->code)->toBe('cancellation_receipt_retry_pending')
         ->and($finding->status)->toBe(InvoiceHealthStatus::Valid)
@@ -97,7 +107,7 @@ test('sin intento de acuse ni con acuse almacenado no hay hallazgo de acuse', fu
 })->with([null, 'stored']);
 
 test('billing:health: el bloqueo no dispara --fail-on=recoverable en test y sí en live', function () {
-    phase622CanceledInvoice([
+    $invoice = phase622CanceledInvoice([
         'cancellation_receipt_status' => 'reconciliation_required',
         'cancellation_receipt_last_error' => PHASE_622_MISMATCH,
     ]);
@@ -106,7 +116,7 @@ test('billing:health: el bloqueo no dispara --fail-on=recoverable en test y sí 
     config(['billing.pac_mode' => 'test']);
     expect(Artisan::call('billing:health', ['--fail-on' => 'recoverable']))->toBe(0);
 
-    config(['billing.pac_mode' => 'live']);
+    phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
     expect(Artisan::call('billing:health', ['--fail-on' => 'recoverable', '--format' => 'json']))->toBe(1);
 
     $output = Artisan::output();

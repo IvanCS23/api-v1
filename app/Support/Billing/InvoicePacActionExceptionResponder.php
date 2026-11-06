@@ -2,8 +2,10 @@
 
 namespace App\Support\Billing;
 
+use App\Exceptions\Billing\CancellationMotiveUnavailableException;
 use App\Exceptions\Billing\CancellationReceiptArtifactMissingException;
 use App\Exceptions\Billing\CancellationReceiptIdentityMismatchException;
+use App\Exceptions\Billing\CancellationReceiptStatusRejectedException;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\CfdiArtifactMismatchException;
 use App\Exceptions\Billing\CfdiArtifactMissingException;
@@ -11,11 +13,13 @@ use App\Exceptions\Billing\InvoiceBusinessCancellationIncompleteException;
 use App\Exceptions\Billing\InvoiceEmailException;
 use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
 use App\Exceptions\Billing\InvoiceNotReadyForPacException;
+use App\Exceptions\Billing\LegacyOperationUnavailableException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
 use App\Exceptions\Billing\PacAuthenticationException;
 use App\Exceptions\Billing\PacConfigurationException;
 use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacEmailNotSentException;
+use App\Exceptions\Billing\PacEnvironmentMismatchException;
 use App\Exceptions\Billing\PacFolioAlreadyUsedException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
@@ -84,6 +88,11 @@ class InvoicePacActionExceptionResponder
                 'INVOICE_LIFECYCLE_INCONSISTENT',
                 'Los estados ERP y fiscal requieren revisión antes de continuar.',
             ],
+            $error instanceof CancellationReceiptStatusRejectedException => [
+                409,
+                CancellationReceiptStatusRejectedException::ERROR_CODE,
+                'El acuse corresponde al CFDI, pero el SAT no reporta la solicitud como procesada (EstatusUUID distinto de 201 y 202). Requiere revisión.',
+            ],
             $error instanceof CancellationReceiptIdentityMismatchException => [
                 409,
                 CancellationReceiptIdentityMismatchException::ERROR_CODE,
@@ -104,6 +113,14 @@ class InvoicePacActionExceptionResponder
                 409,
                 'CFDI_ARTIFACT_INTEGRITY_FAILURE',
                 'Los artifacts CFDI no superan la validación de integridad.',
+            ],
+            // Fase 6.31.
+            $error instanceof CancellationMotiveUnavailableException => [
+                422,
+                'CANCELLATION_MOTIVE_UNAVAILABLE',
+                $error->environment === 'live'
+                    ? 'En producción sólo se puede cancelar con los motivos 02 y 03.'
+                    : 'El motivo 04 no está disponible: el sistema no emite facturas globales.',
             ],
             $error instanceof InvoiceCannotBeCancelledException => [
                 409,
@@ -176,6 +193,18 @@ class InvoicePacActionExceptionResponder
                 409,
                 'PAC_ORGANIZATION_MISMATCH',
                 'La factura pertenece a otra organización de Facturapi y la llave de esta empresa no tiene acceso a ella. No se contactó al proveedor fiscal.',
+            ],
+            // Fase 6.31.
+            $error instanceof LegacyOperationUnavailableException => [
+                409,
+                LegacyPacOperations::CODE,
+                'Esta operación histórica no está disponible para facturas en producción. Usa Emitir factura o Cancelar factura.',
+            ],
+            // Fase 6.31: también antes de PacConfigurationException.
+            $error instanceof PacEnvironmentMismatchException => [
+                409,
+                'PAC_ENVIRONMENT_MISMATCH',
+                'La factura se operó en otro ambiente del proveedor fiscal (pruebas o producción) que el de esta empresa. No se contactó al proveedor fiscal.',
             ],
             $error instanceof PacConfigurationException => [
                 503,

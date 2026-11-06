@@ -16,7 +16,6 @@ use App\Exceptions\Billing\PacConflictException;
 use App\Exceptions\Billing\PacEmailNotSentException;
 use App\Exceptions\Billing\PacInvoiceNotFoundException;
 use App\Exceptions\Billing\PacOperationInProgressException;
-use App\Exceptions\Billing\PacOrganizationMismatchException;
 use App\Exceptions\Billing\PacRateLimitException;
 use App\Exceptions\Billing\PacUnavailableException;
 use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
@@ -25,11 +24,13 @@ use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
 use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\PendingRequest;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Http;
 use InvalidArgumentException;
+use SensitiveParameter;
 
 /**
  * Adaptador HTTP hacia Facturapi. Fase 6.1: infraestructura de
@@ -66,14 +67,16 @@ class FacturapiProvider implements PacProvider
 
     public function __construct(
         private readonly string $baseUrl,
-        private readonly ?string $apiKey,
+        #[SensitiveParameter] private readonly ?string $apiKey,
         private readonly int $timeout,
         private readonly int $connectTimeout,
-        private readonly ?string $mode = PacCredentialGuard::MODE_TEST,
+        // Fase 6.31: ambiente con el que se opera (antes, el modo global).
+        private readonly ?string $environment = PacEnvironment::TEST,
         private readonly ?string $stampTimezone = FacturapiDates::DEFAULT_STAMP_TIMEZONE,
         private readonly ?string $organizationId = null,
         private readonly bool $organizationRequired = false,
-        private readonly ?PacOrganizationMismatchException $blockedBy = null,
+        // Fase 6.31: también un ambiente que no corresponde (PacEnvironmentMismatchException).
+        private readonly ?PacConfigurationException $blockedBy = null,
     ) {}
 
     public function name(): string
@@ -145,6 +148,9 @@ class FacturapiProvider implements PacProvider
             );
         }
 
+        // Fase 6.31: la reconciliación usa este resultado; debe ser del ambiente.
+        $this->assertLivemode($only, 'findInvoiceByExternalId', $response->status(), toleratedMissingInTest: true);
+
         return $this->mapInvoiceArray($only);
     }
 
@@ -182,6 +188,8 @@ class FacturapiProvider implements PacProvider
             }
 
             $this->assertSameOrganization($invoice, $response->status());
+            // Fase 6.31: un comprobante de otro ambiente no cuenta para el folio.
+            $this->assertLivemode($invoice, 'findInvoicesBySeriesFolio', $response->status(), toleratedMissingInTest: true);
 
             $found[] = [
                 'id' => (string) $invoice['id'],
@@ -284,16 +292,7 @@ class FacturapiProvider implements PacProvider
             );
         }
 
-        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
-            throw new PacUnexpectedResponseException(
-                'La respuesta del PAC (stampDraftInvoice) no contiene el campo livemode.',
-                $response->status(),
-            );
-        }
-
-        if ($data['livemode'] === true) {
-            throw new PacUnexpectedEnvironmentException('stampDraftInvoice', (string) $data['id']);
-        }
+        $this->assertLivemode($data, 'stampDraftInvoice', $response->status());
 
         return $this->mapInvoiceArray($data);
     }
@@ -610,7 +609,7 @@ class FacturapiProvider implements PacProvider
         // aborta antes de construir el request — el PAC nunca recibe nada.
         // Fase 6.27: construido por FacturapiProviderResolver exige además
         // la organización de la empresa (pac_organization_missing).
-        (new PacCredentialGuard($this->mode, $this->apiKey, $this->organizationRequired, $this->organizationId))->assertConfigured();
+        (new PacCredentialGuard($this->environment, $this->apiKey, $this->organizationRequired, $this->organizationId))->assertConfigured();
 
         // Fase 6.27: una factura de otra organización (o archivada) se rechaza
         // con un error claro en vez del 404 ambiguo que daría Facturapi.
@@ -667,6 +666,9 @@ class FacturapiProvider implements PacProvider
             );
         }
 
+        // Fase 6.31: también la emisión directa (legacy) verifica el ambiente.
+        $this->assertLivemode($data, 'createInvoice', $response->status(), toleratedMissingInTest: true);
+
         return $this->mapInvoiceArray($data);
     }
 
@@ -688,16 +690,7 @@ class FacturapiProvider implements PacProvider
             );
         }
 
-        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
-            throw new PacUnexpectedResponseException(
-                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
-                $response->status(),
-            );
-        }
-
-        if ($data['livemode'] === true) {
-            throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
-        }
+        $this->assertLivemode($data, $context, $response->status());
 
         return $this->mapInvoiceArray($data);
     }
@@ -765,16 +758,7 @@ class FacturapiProvider implements PacProvider
             );
         }
 
-        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
-            throw new PacUnexpectedResponseException(
-                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
-                $response->status(),
-            );
-        }
-
-        if ($data['livemode'] === true) {
-            throw new PacUnexpectedEnvironmentException($context, (string) $data['id']);
-        }
+        $this->assertLivemode($data, $context, $response->status());
 
         $this->assertSameOrganization($data, $response->status());
 
@@ -878,6 +862,40 @@ class FacturapiProvider implements PacProvider
      *
      * @param  array<string, mixed>  $data
      */
+    /**
+     * Fase 6.31: `livemode` es obligatorio en el objeto Invoice y debe ser
+     * el del ambiente con el que se opera (Test → false, Live → true).
+     * Nunca se asume cuando falta o tiene otro tipo.
+     *
+     * `toleratedMissingInTest` sólo en los tres mapeos que hasta la 6.31 no
+     * lo revisaban (emisión legacy y búsquedas por external_id y folio), y
+     * sólo en el ambiente Test: ahí se tolera su AUSENCIA porque 55
+     * respuestas simuladas anteriores a la 6.31 no lo traen. Un livemode
+     * presente de otro ambiente se rechaza siempre, y en Live su ausencia
+     * también.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertLivemode(array $data, string $context, int $httpStatus, bool $toleratedMissingInTest = false): void
+    {
+        if ($toleratedMissingInTest && $this->environment === PacEnvironment::TEST && ! array_key_exists('livemode', $data)) {
+            return;
+        }
+
+        if (! array_key_exists('livemode', $data) || ! is_bool($data['livemode'])) {
+            throw new PacUnexpectedResponseException(
+                "La respuesta del PAC ({$context}) no contiene el campo livemode.",
+                $httpStatus,
+            );
+        }
+
+        $expected = PacEnvironment::expectsLivemode($this->environment);
+
+        if ($data['livemode'] !== $expected) {
+            throw new PacUnexpectedEnvironmentException($context, (string) ($data['id'] ?? ''), $expected);
+        }
+    }
+
     private function assertSameOrganization(array $data, int $httpStatus = 200): void
     {
         $received = $data['organization'] ?? null;

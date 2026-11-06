@@ -2,9 +2,13 @@
 
 namespace App\Jobs\Billing;
 
+use App\Exceptions\Billing\PacConfigurationException;
 use App\Models\Invoice;
 use App\Services\Billing\DownloadInvoiceArtifactsService;
 use App\Services\Billing\InvoiceBusinessCapabilitiesService;
+use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacGuardRejectionLog;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
@@ -48,6 +52,19 @@ class DownloadInvoiceArtifactsJob implements ShouldBeUnique, ShouldQueue
         return "{$this->companyId}:{$this->invoiceId}";
     }
 
+    private function configurationRejection(Invoice $invoice): ?PacConfigurationException
+    {
+        $companyEnvironment = PacEnvironment::forCompany($this->companyId);
+
+        if (PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment))) {
+            return PacEnvironmentAccess::exceptionFor($invoice, $companyEnvironment);
+        }
+
+        $violation = PacCredentialGuard::forInvoice($invoice)->violation();
+
+        return $violation === null ? null : new PacConfigurationException($violation);
+    }
+
     public function handle(
         DownloadInvoiceArtifactsService $artifacts,
         InvoiceBusinessCapabilitiesService $capabilities,
@@ -62,6 +79,23 @@ class DownloadInvoiceArtifactsJob implements ShouldBeUnique, ShouldQueue
             // Ya almacenados, otra descarga vigente, o la factura dejó de
             // ser descargable: no hay nada que hacer.
             if ($invoice === null || ! $capabilities->artifactsFetchable($invoice)) {
+                return;
+            }
+
+            // Fase 6.31: el ambiente y el guard se revalidan al ejecutar. Si
+            // no corresponden (otro ambiente o paro de emergencia), el job
+            // falla sin reintentar y sin reservar nada: "Obtener XML/PDF"
+            // sigue disponible cuando se resuelva.
+            $rejection = $this->configurationRejection($invoice);
+
+            if ($rejection !== null) {
+                PacGuardRejectionLog::record($rejection, [
+                    'company_id' => $this->companyId,
+                    'invoice_id' => $this->invoiceId,
+                    'action' => 'artifacts_auto_download',
+                ]);
+                $this->fail($rejection);
+
                 return;
             }
 

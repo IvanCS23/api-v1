@@ -12,7 +12,8 @@ use Illuminate\Support\Facades\DB;
  * todavía están cifrados con una llave de APP_PREVIOUS_KEYS, para poder
  * retirarla después de una rotación (ver BILLING_LIFECYCLE.md).
  *
- * Columnas: facturapi_organizations.test_secret_key,
+ * Columnas: facturapi_organizations.test_secret_key y live_secret_key
+ * (Fase 6.31),
  * invoices.pac_response, invoices.pac_draft_response e
  * invoice_pac_events.context. Todas usan el mismo formato (cast
  * `encrypted` / `encrypted:array` = encryptString).
@@ -35,7 +36,7 @@ class ReencryptSecrets extends Command
 {
     /** @var array<string, list<string>> */
     public const COLUMNS = [
-        'facturapi_organizations' => ['test_secret_key'],
+        'facturapi_organizations' => ['test_secret_key', 'live_secret_key'],
         'invoices' => ['pac_response', 'pac_draft_response'],
         'invoice_pac_events' => ['context'],
     ];

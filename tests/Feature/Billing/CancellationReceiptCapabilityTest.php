@@ -107,8 +107,8 @@ test('modo test: el primer bloqueo de identidad apaga el botón', function () {
 });
 
 test('modo live: se permite reintentar hasta 3 bloqueos de identidad', function (int $mismatches, bool $expected) {
-    config(['billing.pac_mode' => 'live']);
     [$invoice, $user] = phase622ReceiptCapabilityInvoice(mismatches: $mismatches);
+    phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
 
     expect(phase622CanFetchReceipt($invoice, $user))->toBe($expected);
 })->with([
@@ -119,8 +119,8 @@ test('modo live: se permite reintentar hasta 3 bloqueos de identidad', function 
 ]);
 
 test('modo live: al llegar al límite billing:health sugiere revisión manual', function () {
-    config(['billing.pac_mode' => 'live']);
     [$invoice] = phase622ReceiptCapabilityInvoice(mismatches: 3);
+    phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
 
     $finding = app(InvoiceHealthEvaluator::class)
         ->evaluate($invoice, CarbonImmutable::now())
@@ -131,8 +131,12 @@ test('modo live: al llegar al límite billing:health sugiere revisión manual', 
 });
 
 test('GET /billing publica pac.mode y la capability, nunca la llave', function (string $mode) {
-    config(['billing.pac_mode' => $mode]);
     [$invoice, $user] = phase622ReceiptCapabilityInvoice();
+
+    if ($mode === 'live') {
+        phase631MakeLive((int) $invoice->company_id, 'sk_live_PHASE_631_SECRET_KEY_0001', $invoice);
+    }
+
     app(CurrentTenant::class)->clear();
 
     $response = $this->actingAs($user, 'api')
@@ -142,10 +146,12 @@ test('GET /billing publica pac.mode y la capability, nunca la llave', function (
         ->assertJsonPath('actions.can_fetch_cancellation_receipt', true);
 
     expect($response->getContent())->not->toContain('sk_test_PHASE_622_CAPABILITY')
-        ->not->toContain('sk_test_');
+        ->not->toContain('sk_test_')
+        ->not->toContain('sk_live_');
 })->with(['test', 'live']);
 
-test('pac.mode es null con un modo no reconocido', function () {
+// Fase 6.31: pac.mode es el ambiente de la factura, no el techo del sistema.
+test('pac.mode muestra el ambiente de la factura aunque el techo no sea válido', function () {
     config(['billing.pac_mode' => 'staging']);
     [$invoice, $user] = phase622ReceiptCapabilityInvoice();
     app(CurrentTenant::class)->clear();
@@ -153,5 +159,5 @@ test('pac.mode es null con un modo no reconocido', function () {
     $this->actingAs($user, 'api')
         ->getJson("/api/invoices/{$invoice->id}/billing")
         ->assertOk()
-        ->assertJsonPath('pac.mode', null);
+        ->assertJsonPath('pac.mode', 'test');
 });

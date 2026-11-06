@@ -86,6 +86,11 @@ class InvoicePacEventResource extends JsonResource
                 'pac_external_id_masked', 'elapsed_ms',
                 'cancellation_receipt_status',
             ],
+            InvoicePacEventType::CancellationReceiptStatusRejected => [
+                'receipt_status', 'expected_uuid_masked',
+                'pac_external_id_masked', 'elapsed_ms',
+                'cancellation_receipt_status',
+            ],
             InvoicePacEventType::OrganizationArchived => ['reason'],
             InvoicePacEventType::CfdiFolioMismatch => ['expected_folio', 'received_folio'],
             InvoicePacEventType::IssueReverted => ['previous_issue_status', 'pac_draft_status'],
@@ -152,8 +157,6 @@ class InvoicePacEventResource extends JsonResource
 
         $value = PacSecretRedactor::redact($value);
 
-        $value = preg_replace('/\bBearer\s+[^\s]+/i', '[redacted]', $value) ?? '[redacted]';
-        $value = preg_replace('/\bsk_(?:live|test)_[A-Za-z0-9._-]+\b/i', '[redacted]', $value) ?? '[redacted]';
         $value = preg_replace_callback(
             '/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i',
             fn (array $match): string => mb_substr($match[0], 0, 8).'...'.mb_substr($match[0], -4),

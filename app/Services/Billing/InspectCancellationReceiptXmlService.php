@@ -6,6 +6,7 @@ use App\Contracts\Billing\PacProvider;
 use App\Contracts\Billing\PacProviderResolver;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\Billing\CancellationReceiptFolios;
 use App\Support\Tenant\CurrentTenant;
 use DOMAttr;
 use DOMDocument;
@@ -157,6 +158,13 @@ class InspectCancellationReceiptXmlService
             'elements' => $elements,
             'uuid_fields' => array_slice($uuidFields, 0, self::MAX_STRUCTURAL_ITEMS),
             'uuid_candidates' => array_slice($uuidCandidates, 0, self::MAX_STRUCTURAL_ITEMS),
+            // Fase 6.31: Acuse/Folios con su EstatusUUID, lo que decide la descarga.
+            'folios' => array_slice(array_map(fn (array $folio): array => [
+                'uuid' => $this->isUuid($folio['uuid']) ? $this->maskUuid($folio['uuid']) : '[no es UUID]',
+                'matches_invoice' => strcasecmp($folio['uuid'], (string) $invoice->cfdi_uuid) === 0,
+                'estatus_uuid' => CancellationReceiptFolios::displayStatus($folio['status']),
+                'accepted' => CancellationReceiptFolios::isAccepted($folio['status']),
+            ], CancellationReceiptFolios::of($dom)), 0, self::MAX_STRUCTURAL_ITEMS),
         ];
     }
 

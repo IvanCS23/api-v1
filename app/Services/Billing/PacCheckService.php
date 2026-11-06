@@ -11,6 +11,8 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Support\Billing\FacturapiUserKey;
 use App\Support\Billing\PacCredentialGuard;
+use App\Support\Billing\PacEnvironment;
+use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
@@ -89,7 +91,14 @@ class PacCheckService
             return [...$checks, ...$this->invoiceChecks(null)];
         }
 
-        $checks[] = $this->result('organization', self::OK, "Organización {$organization->organization_id}, llave {$organization->test_key_hint}.");
+        $environment = PacEnvironment::forOrganization($organization);
+        $checks[] = $this->result('organization', self::OK, sprintf(
+            'Organización %s, ambiente %s, llave Test %s, llave Live %s.',
+            $organization->organization_id,
+            $environment,
+            $organization->test_key_hint ?? '(sin llave)',
+            $organization->live_key_hint ?? '(sin llave)',
+        ));
 
         $violation = PacCredentialGuard::forCompany($company->id)->violation();
 
@@ -99,7 +108,7 @@ class PacCheckService
             return [...$checks, ...$this->invoiceChecks($organization->organization_id)];
         }
 
-        $checks[] = $this->result('credentials', self::OK, 'La llave corresponde al modo '.config('billing.pac_mode').'.');
+        $checks[] = $this->result('credentials', self::OK, 'La llave corresponde al ambiente '.PacEnvironment::forCompany($company->id).'.');
 
         try {
             $snapshot = $this->providers->forCompany($company->id)->currentOrganization();
@@ -120,10 +129,10 @@ class PacCheckService
         return [
             ...$checks,
             ...$this->fiscalChecks($company, $snapshot),
-            $this->certificateCheck($snapshot, $now),
-            $this->result('pending_steps', self::INFO, $snapshot->pendingSteps === []
-                ? 'Sin pasos pendientes para Live.'
-                : 'Pendiente para Live (fuera de alcance): '.implode(', ', array_column($snapshot->pendingSteps, 'type')).'.'),
+            $this->certificateCheck($snapshot, $now, PacEnvironment::forCompany($company->id)),
+            $this->productionReadyCheck($snapshot, $environment),
+            $this->supportEmailCheck($company, $snapshot, $environment),
+            $this->logoCheck($company, $snapshot),
             $this->accountCheck($organization->organization_id),
             ...$this->invoiceChecks($organization->organization_id),
         ];
@@ -192,15 +201,15 @@ class PacCheckService
 
     /**
      * Facturapi timbra en modo test sin CSD, así que ahí su ausencia es un
-     * aviso. En cualquier otro modo (live) es un fallo. Pública para poder
-     * probar la regla de live, que hoy el guard rechaza antes de llegar aquí.
+     * aviso. En Live es un fallo. Pública para poder probarla con cualquier
+     * ambiente sin pasar por el guard.
      *
      * @return array{code: string, status: string, detail: string}
      */
-    public function certificateCheck(FacturapiOrganizationSnapshot $snapshot, CarbonImmutable $now): array
+    public function certificateCheck(FacturapiOrganizationSnapshot $snapshot, CarbonImmutable $now, ?string $environment = PacEnvironment::TEST): array
     {
         if (! $snapshot->hasCertificate) {
-            return config('billing.pac_mode') === PacCredentialGuard::MODE_TEST
+            return $environment === PacEnvironment::TEST
                 ? $this->result('certificate', self::WARN, 'La organización no tiene CSD cargado. En modo test Facturapi timbra sin él; en live es obligatorio.')
                 : $this->result('certificate', self::FAIL, 'La organización no tiene CSD cargado.');
         }
@@ -229,13 +238,19 @@ class PacCheckService
      */
     private function invoiceChecks(?string $companyOrganization): array
     {
-        $counts = [PacOrganizationAccess::OTHER => [], PacOrganizationAccess::ARCHIVED => [], 'missing' => []];
+        $counts = [PacOrganizationAccess::OTHER => [], PacOrganizationAccess::ARCHIVED => [], 'missing' => [], 'environment' => []];
+        $companyEnvironment = PacEnvironment::forCompany((int) app(CurrentTenant::class)->id());
 
         Invoice::query()
-            ->select(['id', 'company_id', 'pac_external_id', 'pac_draft_external_id', 'pac_organization_id', 'pac_organization_archived_at'])
+            ->select(['id', 'company_id', 'pac_external_id', 'pac_draft_external_id', 'pac_organization_id', 'pac_organization_archived_at', ...PacEnvironmentAccess::PAC_STATE_COLUMNS, 'pac_environment'])
             ->where(fn ($query) => $query->whereNotNull('pac_external_id')->orWhereNotNull('pac_draft_external_id'))
             ->orderBy('id')
-            ->each(function (Invoice $invoice) use ($companyOrganization, &$counts): void {
+            ->each(function (Invoice $invoice) use ($companyOrganization, $companyEnvironment, &$counts): void {
+                // Fase 6.31: de otro ambiente, o con operaciones y sin ambiente.
+                if (PacEnvironmentAccess::isBlocked(PacEnvironmentAccess::status($invoice, $companyEnvironment))) {
+                    $counts['environment'][] = $invoice->id;
+                }
+
                 if ($invoice->pac_organization_archived_at === null && blank($invoice->pac_organization_id)) {
                     $counts['missing'][] = $invoice->id;
 
@@ -258,10 +273,68 @@ class PacCheckService
             $counts[PacOrganizationAccess::OTHER] === []
                 ? $this->result('invoices_other_organization', self::OK, 'Ninguna factura sin archivar pertenece a otra organización.')
                 : $this->result('invoices_other_organization', self::FAIL, 'Facturas de otra organización sin archivar (billing:archive-inaccessible-invoices): '.$list($counts[PacOrganizationAccess::OTHER]).'.'),
+            $counts['environment'] === []
+                ? $this->result('invoices_other_environment', self::OK, 'Ninguna factura enviada al PAC es de otro ambiente.')
+                : $this->result('invoices_other_environment', self::FAIL, 'Facturas de otro ambiente o sin ambiente (billing:backfill-pac-environment): '.$list($counts['environment']).'.'),
             $this->result('invoices_archived', self::INFO, $counts[PacOrganizationAccess::ARCHIVED] === []
                 ? 'Sin facturas archivadas.'
                 : 'Archivadas: '.$list($counts[PacOrganizationAccess::ARCHIVED]).'.'),
         ];
+    }
+
+    /**
+     * Fase 6.31: en Live exige is_production_ready y ningún paso pendiente;
+     * en Test es informativo.
+     *
+     * @return array{code: string, status: string, detail: string}
+     */
+    private function productionReadyCheck(FacturapiOrganizationSnapshot $snapshot, ?string $environment): array
+    {
+        if ($snapshot->isProductionReady && $snapshot->pendingSteps === []) {
+            return $this->result('pending_steps', self::OK, 'Facturapi da la organización por lista para producción, sin pasos pendientes.');
+        }
+
+        $detail = sprintf(
+            'Facturapi: is_production_ready=%s; pasos pendientes: %s.',
+            $snapshot->isProductionReady ? 'true' : 'false',
+            $snapshot->pendingSteps === [] ? 'ninguno' : implode(', ', array_column($snapshot->pendingSteps, 'type')),
+        );
+
+        return $this->result('pending_steps', $environment === PacEnvironment::LIVE ? self::FAIL : self::INFO, $detail);
+    }
+
+    /**
+     * Fase 6.31: el support_email de Facturapi es el "Responder" de los
+     * correos al cliente y debe ser el correo de contacto de la empresa.
+     *
+     * @return array{code: string, status: string, detail: string}
+     */
+    private function supportEmailCheck(Company $company, FacturapiOrganizationSnapshot $snapshot, ?string $environment): array
+    {
+        $email = trim((string) $company->email);
+
+        if ($email !== '' && $snapshot->supportEmail !== null && strcasecmp($snapshot->supportEmail, $email) === 0) {
+            return $this->result('support_email', self::OK, 'El correo de respuesta de Facturapi es el de contacto de la empresa.');
+        }
+
+        $detail = $email === ''
+            ? 'La empresa no tiene correo de contacto; los clientes responderían a otro.'
+            : 'El correo de respuesta de Facturapi no es el de contacto de la empresa (guarda de nuevo los Datos fiscales).';
+
+        return $this->result('support_email', $environment === PacEnvironment::LIVE ? self::FAIL : self::WARN, $detail);
+    }
+
+    /**
+     * Fase 6.31: Facturapi tiene un logotipo que no se subió desde el sistema
+     * (en desarrollo, uno heredado). Sólo aviso.
+     *
+     * @return array{code: string, status: string, detail: string}
+     */
+    private function logoCheck(Company $company, FacturapiOrganizationSnapshot $snapshot): array
+    {
+        return $snapshot->hasLogo === true && blank($company->logo)
+            ? $this->result('logo', self::WARN, 'La organización tiene un logotipo que no se subió desde Datos fiscales: el PDF lo imprime.')
+            : $this->result('logo', self::OK, $snapshot->hasLogo === true ? 'Logotipo subido desde el sistema.' : 'Sin logotipo.');
     }
 
     /** @param list<array{code: string, status: string, detail: string}> $checks */
