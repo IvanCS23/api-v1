@@ -9,4 +9,6 @@ enum AuditAction: string
     case SessionsRevoked = 'sessions_revoked';
     case Activated = 'activated';
     case Deactivated = 'deactivated';
+    // Fase 6.31: cambio del propio nombre desde la web.
+    case ProfileUpdated = 'profile_updated';
 }

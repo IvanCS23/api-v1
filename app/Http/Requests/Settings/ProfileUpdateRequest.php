@@ -17,6 +17,9 @@ class ProfileUpdateRequest extends FormRequest
      */
     public function rules(): array
     {
-        return $this->profileRules($this->user()->id);
+        // Fase 6.31: desde la web sólo se edita el nombre. El correo es el
+        // usuario de acceso y lo cambia un Admin por la API, como el resto
+        // de los datos del usuario.
+        return ['name' => $this->nameRules()];
     }
 }

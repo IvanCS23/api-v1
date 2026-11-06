@@ -5,6 +5,7 @@ use App\Enums\UserStatus;
 use App\Http\Controllers\Settings\ProfileController;
 use App\Models\Company;
 use App\Models\User;
+use Illuminate\Support\Facades\DB;
 
 test('profile page is displayed', function () {
     $user = User::factory()->create();
@@ -16,42 +17,36 @@ test('profile page is displayed', function () {
     $response->assertOk();
 });
 
-test('profile information can be updated', function () {
-    $user = User::factory()->create();
+/**
+ * Fase 6.31: desde la web sólo se edita el nombre; el correo de acceso lo
+ * cambia un Admin por la API. El cambio de nombre queda auditado.
+ */
+test('el perfil web cambia sólo el nombre y lo audita; el correo enviado se ignora', function () {
+    $user = User::factory()->create(['name' => 'Nombre anterior']);
+    $email = $user->email;
 
-    $response = $this
-        ->actingAs($user)
-        ->patch(route('profile.update'), [
-            'name' => 'Test User',
-            'email' => 'test@example.com',
-        ]);
-
-    $response
+    $this->actingAs($user)
+        ->patch(route('profile.update'), ['name' => 'Nombre nuevo', 'email' => 'otro@example.com'])
         ->assertSessionHasNoErrors()
         ->assertRedirect(route('profile.edit'));
 
     $user->refresh();
+    $audit = DB::table('audit_logs')->where('user_id', $user->id)->latest('id')->first();
 
-    expect($user->name)->toBe('Test User');
-    expect($user->email)->toBe('test@example.com');
-    expect($user->email_verified_at)->toBeNull();
+    expect($user->name)->toBe('Nombre nuevo')
+        ->and($user->email)->toBe($email)
+        ->and($user->email_verified_at)->not->toBeNull()
+        ->and($audit->action)->toBe('profile_updated')
+        ->and((int) $audit->actor_id)->toBe($user->id)
+        ->and(json_decode($audit->metadata, true))->toBe(['fields' => ['name'], 'previous_name' => 'Nombre anterior']);
 });
 
-test('email verification status is unchanged when the email address is unchanged', function () {
-    $user = User::factory()->create();
+test('guardar el mismo nombre no audita nada', function () {
+    $user = User::factory()->create(['name' => 'Igual']);
 
-    $response = $this
-        ->actingAs($user)
-        ->patch(route('profile.update'), [
-            'name' => 'Test User',
-            'email' => $user->email,
-        ]);
+    $this->actingAs($user)->patch(route('profile.update'), ['name' => 'Igual'])->assertSessionHasNoErrors();
 
-    $response
-        ->assertSessionHasNoErrors()
-        ->assertRedirect(route('profile.edit'));
-
-    expect($user->refresh()->email_verified_at)->not->toBeNull();
+    expect(DB::table('audit_logs')->where('user_id', $user->id)->count())->toBe(0);
 });
 
 /**
