@@ -3,6 +3,7 @@
 namespace App\Http\Requests;
 
 use App\Concerns\PasswordValidationRules;
+use App\Http\Controllers\Api\PasswordRecoveryController;
 use Illuminate\Foundation\Http\FormRequest;
 
 /** Fase 6.32: POST /api/password/reset, con las mismas reglas de contraseña. */
@@ -28,6 +29,14 @@ class ResetPasswordRequest extends FormRequest
     /** @return array<string, string> */
     public function messages(): array
     {
-        return $this->passwordMessages();
+        // Sin token o correo, el enlace está incompleto: mismo mensaje que
+        // uno inválido.
+        $invalidLink = PasswordRecoveryController::INVALID_MESSAGE;
+
+        return [
+            ...$this->passwordMessages(),
+            'token.*' => $invalidLink,
+            'email.*' => $invalidLink,
+        ];
     }
 }

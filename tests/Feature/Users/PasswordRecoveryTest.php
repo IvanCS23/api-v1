@@ -184,3 +184,16 @@ test('las reglas de la contraseña nueva se aplican al restablecer', function ()
 
     expect(Password::broker()->tokenExists($user, $token))->toBeTrue();
 });
+
+test('los errores de validación llegan en español', function () {
+    $this->postJson('/api/password/forgot', ['email' => 'no-es-correo'])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.email.0', 'Escribe un correo válido.');
+
+    $this->postJson('/api/password/reset', ['email' => '', 'token' => '', 'password' => 'Nueva-Segura-2026', 'password_confirmation' => 'Nueva-Segura-2026'])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.token.0', PasswordRecoveryController::INVALID_MESSAGE)
+        ->assertJsonPath('errors.email.0', PasswordRecoveryController::INVALID_MESSAGE);
+
+    Notification::assertNothingSent();
+});
