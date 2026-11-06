@@ -40,7 +40,7 @@ export default function Profile({
                     <Heading
                         variant="small"
                         title="Profile information"
-                        description="Update your name and email address"
+                        description="Update your name"
                     />
 
                     <Form
@@ -71,6 +71,9 @@ export default function Profile({
                                     />
                                 </div>
 
+                                {/* Fase 6.31: el correo es el usuario de acceso y
+                                    sólo lo cambia un administrador; aquí se
+                                    muestra sin enviarse. */}
                                 <div className="grid gap-2">
                                     <Label htmlFor="email">Email address</Label>
 
@@ -78,17 +81,20 @@ export default function Profile({
                                         id="email"
                                         type="email"
                                         className="mt-1 block w-full"
-                                        defaultValue={auth.user.email}
-                                        name="email"
-                                        required
-                                        autoComplete="username"
-                                        placeholder="Email address"
+                                        value={auth.user.email}
+                                        readOnly
+                                        disabled
+                                        aria-describedby="email-help"
                                     />
 
-                                    <InputError
-                                        className="mt-2"
-                                        message={errors.email}
-                                    />
+                                    <p
+                                        id="email-help"
+                                        className="text-sm text-muted-foreground"
+                                    >
+                                        Para cambiar tu correo de acceso, pide a
+                                        un administrador de tu empresa que lo
+                                        actualice.
+                                    </p>
                                 </div>
 
                                 {mustVerifyEmail &&

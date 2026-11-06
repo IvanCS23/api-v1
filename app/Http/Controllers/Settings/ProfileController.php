@@ -2,8 +2,10 @@
 
 namespace App\Http\Controllers\Settings;
 
+use App\Enums\AuditAction;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Settings\ProfileUpdateRequest;
+use App\Services\AuditLogger;
 use Illuminate\Contracts\Auth\MustVerifyEmail;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\RedirectResponse;
@@ -29,13 +31,15 @@ class ProfileController extends Controller
      */
     public function update(ProfileUpdateRequest $request): RedirectResponse
     {
-        $request->user()->fill($request->validated());
+        // Fase 6.31: sólo el nombre; el correo lo cambia un Admin por la API.
+        $user = $request->user();
+        $previous = $user->name;
+        $user->forceFill(['name' => $request->validated('name')]);
 
-        if ($request->user()->isDirty('email')) {
-            $request->user()->email_verified_at = null;
+        if ($user->isDirty('name')) {
+            $user->save();
+            AuditLogger::record($user, AuditAction::ProfileUpdated, $request, ['fields' => ['name'], 'previous_name' => $previous], $user);
         }
-
-        $request->user()->save();
 
         return to_route('profile.edit');
     }
