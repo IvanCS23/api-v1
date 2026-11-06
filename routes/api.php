@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\InvoiceBusinessActionController;
 use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\InvoiceItemController;
 use App\Http\Controllers\Api\InvoicePacActionController;
+use App\Http\Controllers\Api\MyPasswordController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
@@ -36,6 +37,8 @@ Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10
 Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
     Route::get('/user', [AuthController::class, 'user']);
     Route::post('/logout', [AuthController::class, 'logout']);
+    // Fase 6.32: la propia contraseña, con la actual (cualquier rol).
+    Route::put('/me/password', [MyPasswordController::class, 'update'])->middleware('throttle:my-password');
 
     // Clients
     Route::get('/clients', [ClientController::class, 'index']);

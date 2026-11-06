@@ -61,7 +61,13 @@ final class CompanyAdminGuard
      */
     public function passwordViolation(User $actor, User $target): ?array
     {
-        if ($actor->id !== $target->id && $target->role === UserRole::Admin) {
+        // Fase 6.32: la propia contraseña sólo se cambia con la actual, en
+        // PUT /api/me/password. Cambiarla o restablecerla aquí no la pide.
+        if ($actor->id === $target->id) {
+            return $this->error('USE_OWN_PASSWORD_ENDPOINT', 'Para cambiar tu propia contraseña usa Cambiar contraseña, con tu contraseña actual.');
+        }
+
+        if ($target->role === UserRole::Admin) {
             return $this->error('USER_ADMIN_PASSWORD_LOCKED', 'No puedes cambiar ni restablecer la contraseña de otro administrador.');
         }
 

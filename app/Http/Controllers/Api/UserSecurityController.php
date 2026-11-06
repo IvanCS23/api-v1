@@ -38,7 +38,7 @@ class UserSecurityController extends Controller
         ]);
 
         // Fase 6.31: también se cierran sus sesiones web.
-        PasswordChangeSecurity::terminateWebSessions($user);
+        PasswordChangeSecurity::afterChange($user);
         AuditLogger::record($user, AuditAction::PasswordChanged, $request);
 
         return response()->json(['user' => new UserResource($user->load('company'))]);
@@ -66,7 +66,7 @@ class UserSecurityController extends Controller
             'api_token' => null,
         ]);
 
-        PasswordChangeSecurity::terminateWebSessions($user);
+        PasswordChangeSecurity::afterChange($user);
         AuditLogger::record($user, AuditAction::PasswordReset, $request);
 
         return response()->json([

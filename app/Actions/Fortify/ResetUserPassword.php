@@ -34,7 +34,7 @@ class ResetUserPassword implements ResetsUserPasswords
             ...PasswordChangeSecurity::fields(),
         ])->save();
 
-        PasswordChangeSecurity::terminateWebSessions($user);
+        PasswordChangeSecurity::afterChange($user);
         AuditLogger::record($user, AuditAction::PasswordChanged, request(), ['source' => 'web_password_reset']);
     }
 }

@@ -101,6 +101,15 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Fase 6.32: cambio de la propia contraseña. Comprueba la actual, así
+        // que también frena intentos de adivinarla: por usuario y por IP.
+        RateLimiter::for('my-password', function (Request $request): array {
+            return [
+                Limit::perMinutes(15, 5)->by('my-password|user|'.($request->user()?->getAuthIdentifier() ?? 'guest')),
+                Limit::perMinutes(15, 20)->by('my-password|ip|'.$request->ip()),
+            ];
+        });
+
         // Fase 6.27b: cada guardado de datos fiscales llama a Facturapi.
         RateLimiter::for('company-fiscal', function (Request $request): Limit {
             return Limit::perMinute(10)->by('company-fiscal|'.($request->user()?->getAuthIdentifier() ?? $request->ip()));
