@@ -7,6 +7,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Password;
+use Illuminate\Validation\Rules\Password as PasswordRule;
 
 /**
  * Fase 6.32 (1): PUT /api/me/password. Cualquier rol cambia su propia
@@ -146,4 +147,28 @@ test('un Admin sigue cambiando la contraseña de otro usuario, con las mismas re
 
     expect(Hash::check('Otra-Nueva-2026', $sales->fresh()->password))->toBeTrue()
         ->and(Password::broker()->tokenExists($sales->fresh(), $resetToken))->toBeFalse();
+});
+
+test('los errores de la contraseña nueva llegan en español con las reglas de producción', function (string $password, string $message) {
+    [, $token] = phase632LoggedUser();
+    // Las reglas de producción, sin uncompromised() (consultaría un servicio externo).
+    PasswordRule::defaults(fn () => PasswordRule::min(12)->mixedCase()->letters()->numbers()->symbols());
+
+    phase632ChangeOwn($token, ['current_password' => 'password', 'password' => $password, 'password_confirmation' => $password])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.password.0', $message);
+})->with([
+    'corta' => ['Ab1-', 'La contraseña debe tener al menos 12 caracteres.'],
+    'sin mayúsculas' => ['minusculas-2026-x', 'La contraseña debe tener mayúsculas y minúsculas.'],
+    'sin números' => ['Sin-Numeros-Aqui', 'La contraseña debe tener al menos un número.'],
+    'sin símbolos' => ['SinSimbolos2026x', 'La contraseña debe tener al menos un símbolo.'],
+]);
+
+test('la contraseña actual vacía o una confirmación distinta se explican en español', function () {
+    [, $token] = phase632LoggedUser();
+
+    phase632ChangeOwn($token, ['current_password' => '', 'password' => PHASE_632_NEW_PASSWORD, 'password_confirmation' => 'otra'])
+        ->assertUnprocessable()
+        ->assertJsonPath('errors.current_password.0', 'Escribe tu contraseña actual.')
+        ->assertJsonPath('errors.password.0', 'La confirmación no coincide con la contraseña nueva.');
 });

@@ -33,6 +33,8 @@ class UpdateMyPasswordRequest extends FormRequest
     public function messages(): array
     {
         return [
+            ...$this->passwordMessages(),
+            'current_password.required' => 'Escribe tu contraseña actual.',
             'current_password.current_password' => 'La contraseña actual no es correcta.',
             'password.different' => 'La contraseña nueva debe ser distinta de la actual.',
         ];
