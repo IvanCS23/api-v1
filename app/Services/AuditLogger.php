@@ -12,9 +12,11 @@ class AuditLogger
     /**
      * @param  array<string, mixed>  $metadata
      */
-    public static function record(User $user, AuditAction $action, Request $request, array $metadata = []): AuditLog
+    public static function record(User $user, AuditAction $action, Request $request, array $metadata = [], ?User $actor = null): AuditLog
     {
-        $actor = $request->user('api');
+        // Fase 6.31: la web pasa el actor de su guard (o null en el
+        // restablecimiento por correo, sin sesión).
+        $actor ??= $request->user('api');
 
         return AuditLog::create([
             'company_id' => $user->company_id,

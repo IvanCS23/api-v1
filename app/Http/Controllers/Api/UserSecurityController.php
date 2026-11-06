@@ -9,6 +9,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Users\CompanyAdminGuard;
+use App\Services\Users\PasswordChangeSecurity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -36,6 +37,8 @@ class UserSecurityController extends Controller
             'api_token' => null,
         ]);
 
+        // Fase 6.31: también se cierran sus sesiones web.
+        PasswordChangeSecurity::terminateWebSessions($user);
         AuditLogger::record($user, AuditAction::PasswordChanged, $request);
 
         return response()->json(['user' => new UserResource($user->load('company'))]);
@@ -63,6 +66,7 @@ class UserSecurityController extends Controller
             'api_token' => null,
         ]);
 
+        PasswordChangeSecurity::terminateWebSessions($user);
         AuditLogger::record($user, AuditAction::PasswordReset, $request);
 
         return response()->json([
@@ -83,6 +87,7 @@ class UserSecurityController extends Controller
         }
 
         $user->update(['api_token' => null]);
+        PasswordChangeSecurity::terminateWebSessions($user);
 
         AuditLogger::record($user, AuditAction::SessionsRevoked, $request);
 
