@@ -45,6 +45,14 @@ final class PasswordChangeSecurity
         Password::broker()->deleteToken($user);
     }
 
+    /** Fase 6.32: lo mismo, por correo (el anterior, cuando un Admin lo cambia). */
+    public static function forgetResetTokensFor(string $email): void
+    {
+        DB::table((string) config('auth.passwords.'.config('auth.defaults.passwords').'.table'))
+            ->where('email', $email)
+            ->delete();
+    }
+
     /**
      * Borra las sesiones web del usuario. Sólo funciona con el driver
      * `database` (el de desarrollo y el recomendado en DEPLOYMENT.md); con

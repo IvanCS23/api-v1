@@ -1,7 +1,8 @@
 <?php
 
 use App\Models\User;
-use Illuminate\Auth\Notifications\ResetPassword;
+// Fase 6.32: el enlace lo envía la notificación propia (hacia Next.js).
+use App\Notifications\ResetPasswordNotification as ResetPassword;
 use Illuminate\Support\Facades\Notification;
 use Laravel\Fortify\Features;
 

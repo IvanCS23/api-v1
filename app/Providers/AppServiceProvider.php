@@ -110,6 +110,26 @@ class AppServiceProvider extends ServiceProvider
             ];
         });
 
+        // Fase 6.32 (D3): solicitar un enlace de recuperación. 5 por IP cada 15
+        // minutos, 1 por correo por minuto y 5 por correo por hora. La clave
+        // por correo vale exista o no la cuenta: el 429 no revela nada.
+        RateLimiter::for('password-forgot', function (Request $request): array {
+            $email = 'password-forgot|email|'.mb_strtolower(trim((string) $request->input('email')));
+            $tooMany = fn () => response()->json(['message' => 'Demasiadas solicitudes. Espera un momento antes de intentar de nuevo.'], 429);
+
+            return [
+                Limit::perMinutes(15, 5)->by('password-forgot|ip|'.$request->ip())->response($tooMany),
+                Limit::perMinute(1)->by($email.'|minute')->response($tooMany),
+                Limit::perHour(5)->by($email.'|hour')->response($tooMany),
+            ];
+        });
+
+        // Fase 6.32: usar un enlace. Los tokens son de 64 caracteres al azar;
+        // el límite frena el ruido, no la fuerza bruta (inviable).
+        RateLimiter::for('password-reset', function (Request $request): Limit {
+            return Limit::perMinutes(15, 10)->by('password-reset|ip|'.$request->ip());
+        });
+
         // Fase 6.27b: cada guardado de datos fiscales llama a Facturapi.
         RateLimiter::for('company-fiscal', function (Request $request): Limit {
             return Limit::perMinute(10)->by('company-fiscal|'.($request->user()?->getAuthIdentifier() ?? $request->ip()));

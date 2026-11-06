@@ -14,6 +14,7 @@ use App\Http\Controllers\Api\InvoiceController;
 use App\Http\Controllers\Api\InvoiceItemController;
 use App\Http\Controllers\Api\InvoicePacActionController;
 use App\Http\Controllers\Api\MyPasswordController;
+use App\Http\Controllers\Api\PasswordRecoveryController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
@@ -32,6 +33,10 @@ Route::get('/login', function () {
     return redirect()->away($frontendUrl.'/login');
 });
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+
+// Fase 6.32: recuperación de contraseña por correo, sin sesión.
+Route::post('/password/forgot', [PasswordRecoveryController::class, 'forgot'])->middleware('throttle:password-forgot');
+Route::post('/password/reset', [PasswordRecoveryController::class, 'reset'])->middleware('throttle:password-reset');
 
 // Protected routes (require valid API token and an active user)
 // Fase 6.32: `password.current` bloquea todo mientras el usuario deba cambiar
