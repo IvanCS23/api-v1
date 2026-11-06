@@ -34,11 +34,15 @@ Route::get('/login', function () {
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
 
 // Protected routes (require valid API token and an active user)
-Route::middleware(['auth:api', 'active', 'throttle:60,1'])->group(function () {
-    Route::get('/user', [AuthController::class, 'user']);
-    Route::post('/logout', [AuthController::class, 'logout']);
+// Fase 6.32: `password.current` bloquea todo mientras el usuario deba cambiar
+// su contraseña, salvo las tres rutas que lo quitan explícitamente.
+Route::middleware(['auth:api', 'active', 'password.current', 'throttle:60,1'])->group(function () {
+    Route::get('/user', [AuthController::class, 'user'])->withoutMiddleware('password.current');
+    Route::post('/logout', [AuthController::class, 'logout'])->withoutMiddleware('password.current');
     // Fase 6.32: la propia contraseña, con la actual (cualquier rol).
-    Route::put('/me/password', [MyPasswordController::class, 'update'])->middleware('throttle:my-password');
+    Route::put('/me/password', [MyPasswordController::class, 'update'])
+        ->middleware('throttle:my-password')
+        ->withoutMiddleware('password.current');
 
     // Clients
     Route::get('/clients', [ClientController::class, 'index']);
