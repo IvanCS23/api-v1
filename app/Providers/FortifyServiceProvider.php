@@ -3,6 +3,8 @@
 namespace App\Providers;
 
 use App\Actions\Fortify\CreateNewUser;
+use App\Actions\Fortify\RejectNewTwoFactorAuthentication;
+use App\Actions\Fortify\RejectTwoFactorConfirmation;
 use App\Actions\Fortify\ResetUserPassword;
 use App\Enums\UserStatus;
 use App\Http\Middleware\EnsureUserIsActive;
@@ -15,6 +17,8 @@ use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Inertia\Inertia;
+use Laravel\Fortify\Actions\ConfirmTwoFactorAuthentication;
+use Laravel\Fortify\Actions\EnableTwoFactorAuthentication;
 use Laravel\Fortify\Features;
 use Laravel\Fortify\Fortify;
 
@@ -25,7 +29,11 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        // Fase 6.31: la 2FA web no se puede activar de nuevo (POST /api/login
+        // todavía no la exige). Desactivarla y el reto al iniciar sesión no
+        // cambian.
+        $this->app->bind(EnableTwoFactorAuthentication::class, RejectNewTwoFactorAuthentication::class);
+        $this->app->bind(ConfirmTwoFactorAuthentication::class, RejectTwoFactorConfirmation::class);
     }
 
     /**

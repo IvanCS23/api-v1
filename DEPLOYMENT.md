@@ -45,7 +45,8 @@ Parte de `.env.example`. Las que no deben quedarse con el valor de desarrollo:
 | `DB_CONNECTION` | `mysql` o `mariadb` | |
 | `DB_TIMEZONE` | **`+00:00`** | ver la sección 4 |
 | `QUEUE_CONNECTION` | `database` (o `redis`) | nunca `sync` en producción |
-| `SESSION_DRIVER`, `CACHE_STORE` | `database` (o `redis`) | |
+| `SESSION_DRIVER` | **`database`** (requisito) | al cambiar o restablecer una contraseña se cierran las demás sesiones web borrando sus filas de `sessions` (Fase 6.31); con otro driver (`redis`, `file`, `cookie`) eso **no ocurre**: sólo se revoca el `api_token` |
+| `CACHE_STORE` | `database` (o `redis`) | |
 | `FACTURAPI_BASE_URL` | `https://www.facturapi.io/v2` | |
 | `FACTURAPI_USER_KEY` | User Key de la cuenta (`sk_user_…`) | ver la sección 7 |
 | `FACTURAPI_TEST_KEY` | vacía | sólo la usa `billing:facturapi-link` al vincular |
@@ -181,6 +182,7 @@ con datos reales.
 ```bash
 php artisan migrate:status          # sin migraciones pendientes
 php artisan db:timezone-check       # OK
+php artisan tinker --execute="echo config('session.driver');"   # database
 php artisan billing:health          # sin hallazgos invalid nuevos
 php artisan billing:pac-check --company=<id>
 php artisan queue:restart
@@ -188,6 +190,10 @@ php artisan queue:restart
 
 Y en `laravel.log`, revisar `billing.pac.guard_rejected` (configuración del
 PAC rechazada: código interno, empresa y factura).
+
+Si `session.driver` no es `database`, corregir `SESSION_DRIVER` en `.env`,
+`php artisan config:cache` y repetir la verificación: con otro driver un
+cambio de contraseña no cierra las demás sesiones web.
 
 ## 10. Modo Live con una empresa piloto (Fase 6.31)
 
