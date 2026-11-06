@@ -45,6 +45,11 @@ Parte de `.env.example`. Las que no deben quedarse con el valor de desarrollo:
 | `DB_CONNECTION` | `mysql` o `mariadb` | |
 | `DB_TIMEZONE` | **`+00:00`** | ver la sección 4 |
 | `QUEUE_CONNECTION` | `database` (o `redis`) | nunca `sync` en producción |
+| `MAIL_MAILER` | `smtp` | Fase 6.32: correo transaccional (enlaces de recuperación de contraseña). **Nunca `log`**: escribiría el enlace con su token en `laravel.log`; `mail:check` falla en producción con `log` o `array` |
+| `MAIL_HOST`, `MAIL_PORT`, `MAIL_SCHEME` | los del proveedor | el proveedor se elige en P1; SMTP genérico, sin paquetes de proveedor |
+| `MAIL_USERNAME`, `MAIL_PASSWORD` | credenciales SMTP del proveedor | secreto: sólo en `.env`; `mail:check` nunca las imprime |
+| `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | remitente propio verificado (SPF/DKIM) | no el de ejemplo |
+| `FRONTEND_URL` | URL pública https de Next.js | además de CORS, base de los enlaces de recuperación (`/restablecer-contrasena#…`) |
 | `SESSION_DRIVER` | **`database`** (requisito) | al cambiar o restablecer una contraseña se cierran las demás sesiones web borrando sus filas de `sessions` (Fase 6.31); con otro driver (`redis`, `file`, `cookie`) eso **no ocurre**: sólo se revoca el `api_token` |
 | `CACHE_STORE` | `database` (o `redis`) | |
 | `FACTURAPI_BASE_URL` | `https://www.facturapi.io/v2` | |
@@ -67,6 +72,19 @@ Frontend (`app-front/.env`):
 |---|---|
 | `NEXT_PUBLIC_API_URL` | URL pública de la API |
 | `NEXT_PUBLIC_SHOW_DEMO_SCREENS` | `false` (default): oculta las pantallas de maqueta |
+
+### Correo en desarrollo (Fase 6.32)
+
+Mailpit captura los correos sin entregarlos a nadie. Por ejemplo, con Docker y
+sólo en la interfaz local:
+
+```bash
+docker run -d --name mailpit -p 127.0.0.1:1025:1025 -p 127.0.0.1:8025:8025 axllent/mailpit
+php artisan mail:check --connect     # MAIL_MAILER=smtp, 127.0.0.1:1025
+```
+
+Los correos se ven en http://127.0.0.1:8025. El envío va en cola: necesita el
+worker (`php artisan queue:work`).
 
 ## 3. Primer despliegue
 
@@ -183,6 +201,7 @@ con datos reales.
 php artisan migrate:status          # sin migraciones pendientes
 php artisan db:timezone-check       # OK
 php artisan tinker --execute="echo config('session.driver');"   # database
+php artisan mail:check --connect     # correo transaccional OK, sin enviar nada
 php artisan billing:health          # sin hallazgos invalid nuevos
 php artisan billing:pac-check --company=<id>
 php artisan queue:restart
