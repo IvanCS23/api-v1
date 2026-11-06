@@ -1,6 +1,5 @@
 import { Transition } from '@headlessui/react';
 import { Form, Head } from '@inertiajs/react';
-import { ShieldCheck } from 'lucide-react';
 import { useRef, useState } from 'react';
 import SecurityController from '@/actions/App/Http/Controllers/Settings/SecurityController';
 import Heading from '@/components/heading';
@@ -14,7 +13,7 @@ import { useTwoFactorAuth } from '@/hooks/use-two-factor-auth';
 import AppLayout from '@/layouts/app-layout';
 import SettingsLayout from '@/layouts/settings/layout';
 import { edit } from '@/routes/security';
-import { disable, enable } from '@/routes/two-factor';
+import { disable } from '@/routes/two-factor';
 import type { BreadcrumbItem } from '@/types';
 
 type Props = {
@@ -40,7 +39,6 @@ export default function Security({
 
     const {
         qrCodeSvg,
-        hasSetupData,
         manualSetupKey,
         clearSetupData,
         fetchSetupData,
@@ -204,42 +202,20 @@ export default function Security({
                                 />
                             </div>
                         ) : (
-                            <div className="flex flex-col items-start justify-start space-y-4">
+                            // Fase 6.31: no se ofrece activarla. La 2FA sólo
+                            // protegería esta web; el inicio de sesión de la
+                            // aplicación (POST /api/login) todavía no la exige.
+                            // Quien ya la tiene la sigue viendo y puede
+                            // desactivarla (rama anterior).
+                            <div
+                                className="flex flex-col items-start justify-start space-y-4"
+                                data-test="two-factor-unavailable"
+                            >
                                 <p className="text-sm text-muted-foreground">
-                                    When you enable two-factor authentication,
-                                    you will be prompted for a secure pin during
-                                    login. This pin can be retrieved from a
-                                    TOTP-supported application on your phone.
+                                    La autenticación en dos pasos todavía no
+                                    está disponible: por ahora no protegería el
+                                    inicio de sesión de la aplicación.
                                 </p>
-
-                                <div>
-                                    {hasSetupData ? (
-                                        <Button
-                                            onClick={() =>
-                                                setShowSetupModal(true)
-                                            }
-                                        >
-                                            <ShieldCheck />
-                                            Continue setup
-                                        </Button>
-                                    ) : (
-                                        <Form
-                                            {...enable.form()}
-                                            onSuccess={() =>
-                                                setShowSetupModal(true)
-                                            }
-                                        >
-                                            {({ processing }) => (
-                                                <Button
-                                                    type="submit"
-                                                    disabled={processing}
-                                                >
-                                                    Enable 2FA
-                                                </Button>
-                                            )}
-                                        </Form>
-                                    )}
-                                </div>
                             </div>
                         )}
 
