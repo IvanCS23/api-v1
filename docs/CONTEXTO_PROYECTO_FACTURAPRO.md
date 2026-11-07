@@ -466,6 +466,8 @@ Hito 1 — Piloto (ventas de contado):
 
 Hito 2 — Lanzamiento general:
 - 2FA del producto: exigirla en `POST /api/login` y en Next.js (hoy sólo existía en la web de Laravel, que dejó de ofrecerla en la 6.31).
+- Token del API en `localStorage` (6.32): Next.js guarda el `api_token` en `localStorage` (`api_token` y `auth_user`), al alcance de cualquier script de la página; un XSS lo robaría. Pendiente antes del lanzamiento general: llevarlo a una cookie `HttpOnly` y `Secure` (o a otro mecanismo que el JavaScript no pueda leer), con su protección CSRF.
+- Token del API sin caducidad (6.32): el `api_token` no vence por tiempo; sólo cambia al iniciar sesión, cerrarla o cambiar o restablecer la contraseña. Pendiente antes del lanzamiento general: caducidad por inactividad y un máximo absoluto, con renovación.
 - Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
 - Complemento de pago (REP) y reactivación de PPD.
 - Notas de crédito.
