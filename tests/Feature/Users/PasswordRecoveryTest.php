@@ -252,3 +252,26 @@ test('5 por IP cada 15 minutos: la sexta da 429 igual exista o no el correo, y a
     $fromIp('otra@example.com')->assertStatus(202);
     Notification::assertCount(2);
 });
+
+test('cuando un Admin cambia el correo, el enlace pendiente deja de servir; otros cambios y otros usuarios no se tocan', function () {
+    $user = phase632RecoveryUser();
+    $other = phase632RecoveryUser(['email' => 'otra@example.com']);
+    $admin = User::factory()->create(['company_id' => $user->company_id, 'role' => UserRole::Admin]);
+    $token = Password::broker()->createToken($user);
+    $otherToken = Password::broker()->createToken($other);
+
+    // Editar otro campo no borra el enlace.
+    $this->actingAs($admin, 'api')->putJson("/api/users/{$user->id}", ['name' => 'Otro nombre'])->assertOk();
+    expect(Password::broker()->tokenExists($user->fresh(), $token))->toBeTrue();
+
+    $this->actingAs($admin, 'api')->putJson("/api/users/{$user->id}", ['email' => 'nueva-direccion@example.com'])->assertOk();
+    app('auth')->forgetGuards();
+
+    expect(DB::table('password_reset_tokens')->where('email', 'persona@example.com')->exists())->toBeFalse();
+    phase632Reset('persona@example.com', $token)->assertUnprocessable()->assertJsonPath('code', PasswordRecoveryController::INVALID_CODE);
+    phase632Reset('nueva-direccion@example.com', $token)->assertUnprocessable()->assertJsonPath('code', PasswordRecoveryController::INVALID_CODE);
+    expect(Hash::check('password', $user->fresh()->password))->toBeTrue();
+
+    // El enlace de otro usuario sigue sirviendo.
+    phase632Reset('otra@example.com', $otherToken)->assertOk();
+});
