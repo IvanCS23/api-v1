@@ -10,10 +10,10 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Users\CompanyAdminGuard;
 use App\Services\Users\PasswordChangeSecurity;
+use App\Services\Users\TemporaryPassword;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 class UserSecurityController extends Controller
 {
@@ -57,7 +57,8 @@ class UserSecurityController extends Controller
             'must_change_password' => ['nullable', 'boolean'],
         ]);
 
-        $temporaryPassword = Str::password(12);
+        // Fase 6.32: cumple las mismas reglas que una contraseña elegida a mano.
+        $temporaryPassword = TemporaryPassword::generate();
 
         $user->update([
             'password' => Hash::make($temporaryPassword),
