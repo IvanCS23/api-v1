@@ -197,3 +197,58 @@ test('los errores de validación llegan en español', function () {
 
     Notification::assertNothingSent();
 });
+
+/** Fase 6.32 (D3): N solicitudes del mismo correo, cada una 2 minutos después y desde otra IP. */
+function phase632ForgotSpaced(string $email, int $times, string $ipPrefix): array
+{
+    $statuses = [];
+
+    foreach (range(1, $times) as $i) {
+        $statuses[] = test()->withServerVariables(['REMOTE_ADDR' => $ipPrefix.$i])
+            ->postJson('/api/password/forgot', ['email' => $email])->status();
+        test()->travel(2)->minutes();
+    }
+
+    return $statuses;
+}
+
+test('5 por correo por hora: la sexta da 429 igual exista o no el correo, y la hora siguiente vuelve a servir', function () {
+    $user = phase632RecoveryUser();
+
+    expect(phase632ForgotSpaced('persona@example.com', 5, '10.1.0.'))->toBe([202, 202, 202, 202, 202])
+        ->and(phase632ForgotSpaced('nadie@example.com', 5, '10.2.0.'))->toBe([202, 202, 202, 202, 202]);
+
+    $existing = $this->withServerVariables(['REMOTE_ADDR' => '10.1.1.1'])->postJson('/api/password/forgot', ['email' => 'persona@example.com']);
+    $missing = $this->withServerVariables(['REMOTE_ADDR' => '10.2.1.1'])->postJson('/api/password/forgot', ['email' => 'nadie@example.com']);
+
+    $existing->assertStatus(429);
+    $missing->assertStatus(429);
+    expect($existing->getContent())->toBe($missing->getContent())
+        ->and($existing->json('message'))->toBe('Demasiadas solicitudes. Espera un momento antes de intentar de nuevo.')
+        ->and($existing->headers->get('X-RateLimit-Limit'))->toBe($missing->headers->get('X-RateLimit-Limit'));
+    Notification::assertSentToTimes($user, ResetPasswordNotification::class, 5);
+
+    $this->travel(61)->minutes();
+    $this->withServerVariables(['REMOTE_ADDR' => '10.1.2.1'])->postJson('/api/password/forgot', ['email' => 'persona@example.com'])->assertStatus(202);
+    Notification::assertSentToTimes($user, ResetPasswordNotification::class, 6);
+});
+
+test('5 por IP cada 15 minutos: la sexta da 429 igual exista o no el correo, y a los 15 minutos vuelve a servir', function () {
+    phase632RecoveryUser();
+    phase632RecoveryUser(['email' => 'otra@example.com']);
+    $fromIp = fn (string $email) => $this->withServerVariables(['REMOTE_ADDR' => '10.3.3.3'])->postJson('/api/password/forgot', ['email' => $email]);
+
+    foreach (['persona@example.com', 'nadie1@example.com', 'nadie2@example.com', 'nadie3@example.com', 'nadie4@example.com'] as $email) {
+        $fromIp($email)->assertStatus(202);
+    }
+
+    $existing = $fromIp('otra@example.com')->assertStatus(429);
+    $missing = $fromIp('nadie5@example.com')->assertStatus(429);
+    expect($existing->getContent())->toBe($missing->getContent())
+        ->and($existing->headers->get('X-RateLimit-Limit'))->toBe($missing->headers->get('X-RateLimit-Limit'));
+    Notification::assertCount(1);
+
+    $this->travel(16)->minutes();
+    $fromIp('otra@example.com')->assertStatus(202);
+    Notification::assertCount(2);
+});
