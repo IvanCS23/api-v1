@@ -12,6 +12,7 @@ use App\Http\Resources\UserResource;
 use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Users\CompanyAdminGuard;
+use App\Services\Users\PasswordChangeSecurity;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -118,7 +119,14 @@ class UserController extends Controller
             isset($validated['role']) ? UserRole::from($validated['role']) : null,
             isset($validated['status']) ? UserStatus::from($validated['status']) : null,
             function () use ($request, $user, $validated): void {
+                $previousEmail = $user->email;
                 $user->fill(collect($validated)->except('avatar')->toArray());
+
+                // Fase 6.32: un enlace de recuperación enviado al correo
+                // anterior deja de servir.
+                if ($user->isDirty('email')) {
+                    PasswordChangeSecurity::forgetResetTokensFor($previousEmail);
+                }
 
                 if ($request->hasFile('avatar')) {
                     if ($user->avatar) {

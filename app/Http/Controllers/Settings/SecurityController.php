@@ -63,7 +63,7 @@ class SecurityController extends Controller implements HasMiddleware
             ...PasswordChangeSecurity::fields(),
         ])->save();
 
-        PasswordChangeSecurity::terminateWebSessions($user, $request->session()->getId());
+        PasswordChangeSecurity::afterChange($user, $request->session()->getId());
         AuditLogger::record($user, AuditAction::PasswordChanged, $request, ['source' => 'web'], $user);
 
         return back();

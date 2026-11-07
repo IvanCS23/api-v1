@@ -54,6 +54,10 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // Fase 6.32: Next.js. Base de los enlaces que se envían por correo
+    // (recuperación de contraseña); también es el origen permitido de CORS.
+    'frontend_url' => env('FRONTEND_URL', 'http://localhost:3000'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

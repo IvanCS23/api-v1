@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsurePasswordIsCurrent;
 use App\Http\Middleware\EnsureUserIsActive;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
@@ -38,7 +39,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // antes del controlador. No queda inmediatamente después: el orden
         // real es Authenticate > Throttle > SubstituteBindings > grupo
         // (TenantMiddleware...) > EnsureUserIsActive (verificado en la 6.31).
-        $middleware->alias(['active' => EnsureUserIsActive::class]);
+        $middleware->alias([
+            'active' => EnsureUserIsActive::class,
+            // Fase 6.32: must_change_password.
+            'password.current' => EnsurePasswordIsCurrent::class,
+        ]);
         $middleware->appendToPriorityList(Authenticate::class, EnsureUserIsActive::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

@@ -230,7 +230,8 @@ test('un Admin no cambia ni restablece la contraseña de otro Admin', function (
     expect($other->fresh()->password)->toBe($passwordBefore);
 });
 
-test('un Admin restablece la contraseña de quien no es Admin y cambia la suya', function () {
+// Fase 6.32: la propia contraseña ya no se cambia aquí, sino en PUT /api/me/password.
+test('un Admin restablece la contraseña de quien no es Admin, pero la suya no por este endpoint', function () {
     $company = Company::factory()->create();
     $admin = userAdminMember($company);
     $employee = userAdminMember($company, UserRole::Employee);
@@ -238,10 +239,12 @@ test('un Admin restablece la contraseña de quien no es Admin y cambia la suya',
     $this->actingAs($admin, 'api');
 
     $temporary = $this->postJson("/api/users/{$employee->id}/password/reset")->assertOk()->json('temporary_password');
-    $this->patchJson("/api/users/{$admin->id}/password", ['password' => 'mi-nueva-contraseña', 'password_confirmation' => 'mi-nueva-contraseña'])->assertOk();
+    $this->patchJson("/api/users/{$admin->id}/password", ['password' => 'mi-nueva-contraseña', 'password_confirmation' => 'mi-nueva-contraseña'])
+        ->assertStatus(422)
+        ->assertJsonPath('code', 'USE_OWN_PASSWORD_ENDPOINT');
 
     expect(Hash::check($temporary, $employee->fresh()->password))->toBeTrue()
-        ->and(Hash::check('mi-nueva-contraseña', $admin->fresh()->password))->toBeTrue();
+        ->and(Hash::check('mi-nueva-contraseña', $admin->fresh()->password))->toBeFalse();
 });
 
 test('un Admin no administra usuarios de otra empresa', function () {

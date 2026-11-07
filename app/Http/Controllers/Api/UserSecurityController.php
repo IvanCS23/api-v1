@@ -10,10 +10,10 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use App\Services\Users\CompanyAdminGuard;
 use App\Services\Users\PasswordChangeSecurity;
+use App\Services\Users\TemporaryPassword;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 
 class UserSecurityController extends Controller
 {
@@ -38,7 +38,7 @@ class UserSecurityController extends Controller
         ]);
 
         // Fase 6.31: también se cierran sus sesiones web.
-        PasswordChangeSecurity::terminateWebSessions($user);
+        PasswordChangeSecurity::afterChange($user);
         AuditLogger::record($user, AuditAction::PasswordChanged, $request);
 
         return response()->json(['user' => new UserResource($user->load('company'))]);
@@ -57,7 +57,8 @@ class UserSecurityController extends Controller
             'must_change_password' => ['nullable', 'boolean'],
         ]);
 
-        $temporaryPassword = Str::password(12);
+        // Fase 6.32: cumple las mismas reglas que una contraseña elegida a mano.
+        $temporaryPassword = TemporaryPassword::generate();
 
         $user->update([
             'password' => Hash::make($temporaryPassword),
@@ -66,7 +67,7 @@ class UserSecurityController extends Controller
             'api_token' => null,
         ]);
 
-        PasswordChangeSecurity::terminateWebSessions($user);
+        PasswordChangeSecurity::afterChange($user);
         AuditLogger::record($user, AuditAction::PasswordReset, $request);
 
         return response()->json([
