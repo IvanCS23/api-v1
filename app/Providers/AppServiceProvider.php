@@ -24,9 +24,12 @@ use App\Policies\QuotePolicy;
 use App\Policies\SaleItemPolicy;
 use App\Policies\SalePolicy;
 use App\Policies\UserPolicy;
+use App\Services\Security\PwnedPasswordVerifier;
 use App\Support\Tenant\CurrentTenant;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Contracts\Validation\UncompromisedVerifier;
+use Illuminate\Http\Client\Factory as HttpFactory;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Date;
@@ -44,6 +47,11 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(CurrentTenant::class);
+
+        // Fase 6.32 (decisión B): uncompromised() espera 3 s y falla abierto con
+        // un evento propio en el log. Es extend y no singleton porque el
+        // proveedor de validación es diferido y registraría el suyo después.
+        $this->app->extend(UncompromisedVerifier::class, fn ($verifier, $app) => new PwnedPasswordVerifier($app[HttpFactory::class]));
     }
 
     /**

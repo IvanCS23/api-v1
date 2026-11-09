@@ -9,12 +9,12 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Password;
 
 /**
- * Fase 6.31: todo cambio real de contraseña (web, restablecimiento por
- * correo y API) revoca el api_token, fija password_changed_at, cierra las
- * sesiones web y queda auditado. Un re-hash al iniciar sesión no.
+ * Fase 6.31: todo cambio real de contraseña revoca el api_token, fija
+ * password_changed_at, cierra las sesiones web y queda auditado. Un re-hash
+ * al iniciar sesión no. (Fase 6.32: sin web; los caminos que quedan son los
+ * de la API, que también cubre tests/Feature/Users.)
  */
 function phase631SessionRows(User $user, array $ids): void
 {
@@ -37,62 +37,6 @@ beforeEach(function () {
 
 afterEach(function () {
     Carbon::setTestNow();
-});
-
-test('el cambio de contraseña web revoca el token, fija la fecha, cierra las demás sesiones y audita', function () {
-    config(['session.driver' => 'database']);
-    $user = phase631UserWithToken(['must_change_password' => true]);
-    $other = User::factory()->create();
-    phase631SessionRows($user, ['sesion-otro-dispositivo-1', 'sesion-otro-dispositivo-2']);
-    phase631SessionRows($other, ['sesion-de-otro-usuario']);
-
-    $this->actingAs($user)
-        ->from(route('security.edit'))
-        ->put(route('user-password.update'), [
-            'current_password' => 'password',
-            'password' => 'nueva-Contrasena-2026',
-            'password_confirmation' => 'nueva-Contrasena-2026',
-        ])
-        ->assertSessionHasNoErrors();
-
-    $fresh = $user->fresh();
-    $audit = DB::table('audit_logs')->where('user_id', $user->id)->latest('id')->first();
-
-    expect(Hash::check('nueva-Contrasena-2026', $fresh->password))->toBeTrue()
-        ->and($fresh->api_token)->toBeNull()
-        ->and($fresh->password_changed_at->toDateTimeString())->toBe('2026-11-06 12:00:00')
-        ->and($fresh->must_change_password)->toBeFalse()
-        ->and(DB::table('sessions')->whereIn('id', ['sesion-otro-dispositivo-1', 'sesion-otro-dispositivo-2'])->count())->toBe(0)
-        ->and(DB::table('sessions')->where('id', 'sesion-de-otro-usuario')->exists())->toBeTrue()
-        ->and($audit->action)->toBe('password_changed')
-        ->and((int) $audit->actor_id)->toBe($user->id)
-        ->and(json_decode($audit->metadata, true))->toBe(['source' => 'web']);
-    $this->assertAuthenticatedAs($user);
-});
-
-test('el restablecimiento por correo revoca el token, fija la fecha, cierra todas las sesiones y audita', function () {
-    config(['session.driver' => 'database']);
-    $user = phase631UserWithToken();
-    phase631SessionRows($user, ['sesion-a', 'sesion-b']);
-    $token = Password::broker()->createToken($user);
-
-    $this->post(route('password.update'), [
-        'token' => $token,
-        'email' => $user->email,
-        'password' => 'restablecida-2026',
-        'password_confirmation' => 'restablecida-2026',
-    ])->assertSessionHasNoErrors();
-
-    $fresh = $user->fresh();
-    $audit = DB::table('audit_logs')->where('user_id', $user->id)->latest('id')->first();
-
-    expect(Hash::check('restablecida-2026', $fresh->password))->toBeTrue()
-        ->and($fresh->api_token)->toBeNull()
-        ->and($fresh->password_changed_at->toDateTimeString())->toBe('2026-11-06 12:00:00')
-        ->and(DB::table('sessions')->where('user_id', $user->id)->count())->toBe(0)
-        ->and($audit->action)->toBe('password_changed')
-        ->and($audit->actor_id)->toBeNull()
-        ->and(json_decode($audit->metadata, true))->toBe(['source' => 'web_password_reset']);
 });
 
 test('un re-hash de la contraseña no revoca el token ni cambia password_changed_at', function () {

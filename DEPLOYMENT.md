@@ -11,7 +11,7 @@ existe. Fase 6.29; el modo Live (sección 10) es de la Fase 6.31.
 | PHP | 8.2 o superior, con `pdo_mysql`, `openssl`, `mbstring`, `fileinfo`; **`zend.exception_ignore_args=On`** en `php.ini` |
 | Laravel | 12 (lo fija `composer.json`) |
 | Base de datos | **MySQL 8.0 o MariaDB 10.6 o superior** (recomendado) |
-| Node.js | el que pida `app-front/package.json` (Next.js) |
+| Node.js | el que pida `app-front/package.json` (Next.js). api-v1 ya no usa Node (Fase 6.32) |
 
 Sobre PHP: con `zend.exception_ignore_args=Off` las trazas de `laravel.log`
 incluyen los argumentos de cada llamada. Los parámetros que reciben llaves
@@ -50,7 +50,7 @@ Parte de `.env.example`. Las que no deben quedarse con el valor de desarrollo:
 | `MAIL_USERNAME`, `MAIL_PASSWORD` | credenciales SMTP del proveedor | secreto: sólo en `.env`; `mail:check` nunca las imprime |
 | `MAIL_FROM_ADDRESS`, `MAIL_FROM_NAME` | remitente propio verificado (SPF/DKIM) | no el de ejemplo |
 | `FRONTEND_URL` | URL pública https de Next.js | además de CORS, base de los enlaces de recuperación (`/restablecer-contrasena#…`) |
-| `SESSION_DRIVER` | **`database`** (requisito) | al cambiar o restablecer una contraseña se cierran las demás sesiones web borrando sus filas de `sessions` (Fase 6.31); con otro driver (`redis`, `file`, `cookie`) eso **no ocurre**: sólo se revoca el `api_token` |
+| `SESSION_DRIVER` | `array` (recomendado; ya no es requisito) | Fase 6.32: sin la web de Laravel ninguna ruta abre una sesión. `POST /api/login` valida con el guard `web`, pero no guarda nada y la sesión se pierde con la petición. El requisito de `database` (Fase 6.31) existía para cerrar las sesiones web al cambiar una contraseña; esas sesiones ya no existen y basta con revocar el `api_token`. Con `database` todo sigue funcionando (la tabla `sessions` se queda, sin filas nuevas) |
 | `CACHE_STORE` | `database` (o `redis`) | |
 | `FACTURAPI_BASE_URL` | `https://www.facturapi.io/v2` | |
 | `FACTURAPI_USER_KEY` | User Key de la cuenta (`sk_user_…`) | ver la sección 7 |
@@ -84,12 +84,45 @@ php artisan mail:check --connect     # MAIL_MAILER=smtp, 127.0.0.1:1025
 ```
 
 Los correos se ven en http://127.0.0.1:8025. El envío va en cola: necesita el
-worker (`php artisan queue:work`).
+worker (`php artisan queue:work`). En desarrollo, `composer dev` (o
+`php artisan dev`) levanta el servidor y el worker juntos, sin Node.
+
+### Reglas de contraseña y contraseñas filtradas (Fase 6.32)
+
+Con `APP_ENV=production` toda contraseña nueva (cambio propio, recuperación,
+contraseña temporal y cambio por un Admin) exige al menos 12 caracteres,
+mayúsculas y minúsculas, números, símbolos y que **no aparezca en
+filtraciones conocidas**. Fuera de producción sólo se piden 8 caracteres.
+
+La última regla consulta `https://api.pwnedpasswords.com` (`PwnedPasswordVerifier`):
+
+- **Qué sale del servidor:** sólo los 5 primeros caracteres del SHA-1 de la
+  contraseña (k-anonimato); nunca la contraseña ni su hash completo.
+- **Cuándo:** sólo si la contraseña ya cumplió las demás reglas.
+- **Espera máxima:** 3 s para conectar y 3 s en total.
+- **Si el servicio no responde, tarda más o responde un error:** la
+  contraseña **se acepta** (falla abierto) y queda en `laravel.log` el evento
+  `password_breach_check.unavailable` (warning) con `reason` (`connection` o
+  `http_status`), `status` o la clase de la excepción, `timeout_seconds` y
+  `outcome=accepted_fail_open`. No lleva la contraseña, el hash, el prefijo
+  ni la URL.
+
+El servidor necesita salida HTTPS hacia `api.pwnedpasswords.com`. Si ese
+evento aparece seguido, revisar la red: mientras tanto se aceptan
+contraseñas sin esa comprobación.
+
+La contraseña temporal que genera el sistema al restablecer la de un usuario
+cumple las mismas reglas; se intenta hasta 5 veces y, si ninguna cumple,
+la API responde `503 TEMPORARY_PASSWORD_UNAVAILABLE` sin cambiar nada.
 
 ## 3. Primer despliegue
 
+Desde la Fase 6.32 api-v1 es sólo API: la web de Laravel (Inertia, Fortify y
+Vite) se retiró, así que no hay `npm install` ni `npm run build` en el
+backend. El único build de JavaScript es el de `app-front` (Next.js).
+
 ```bash
-composer install --no-dev --optimize-autoloader
+composer install --no-dev --optimize-autoloader   # api-v1 no tiene assets que compilar: sin npm
 php artisan key:generate            # sólo la primera vez; ver la sección 6
 php artisan migrate --force
 php artisan sat:import-catalogs     # catálogos SAT (c_ClaveProdServ, c_ClaveUnidad); en cada ambiente nuevo
@@ -200,7 +233,6 @@ con datos reales.
 ```bash
 php artisan migrate:status          # sin migraciones pendientes
 php artisan db:timezone-check       # OK
-php artisan tinker --execute="echo config('session.driver');"   # database
 php artisan mail:check --connect     # correo transaccional OK, sin enviar nada
 php artisan billing:health          # sin hallazgos invalid nuevos
 php artisan billing:pac-check --company=<id>
@@ -208,11 +240,9 @@ php artisan queue:restart
 ```
 
 Y en `laravel.log`, revisar `billing.pac.guard_rejected` (configuración del
-PAC rechazada: código interno, empresa y factura).
-
-Si `session.driver` no es `database`, corregir `SESSION_DRIVER` en `.env`,
-`php artisan config:cache` y repetir la verificación: con otro driver un
-cambio de contraseña no cierra las demás sesiones web.
+PAC rechazada: código interno, empresa y factura) y
+`password_breach_check.unavailable` (la comprobación de contraseñas filtradas
+no respondió y se aceptó la contraseña; ver la sección 2).
 
 ## 10. Modo Live con una empresa piloto (Fase 6.31)
 

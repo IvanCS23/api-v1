@@ -131,14 +131,3 @@ test('el modelo revoca el token sólo cuando el estado deja de ser activo', func
     $user->update(['status' => UserStatus::Inactive]);
     expect($user->fresh()->api_token)->toBeNull();
 });
-
-test('un usuario desactivado con sesión web abierta recibe 403 y la sesión se cierra', function (string $uri) {
-    $user = User::factory()->create(['status' => UserStatus::Inactive]);
-
-    $this->actingAs($user)->get($uri)->assertForbidden();
-
-    $this->assertGuest('web');
-})->with([
-    'configuración' => ['/settings/profile'],
-    'ruta de Fortify' => ['/user/confirm-password'],
-]);

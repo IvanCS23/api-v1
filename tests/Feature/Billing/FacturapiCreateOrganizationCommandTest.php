@@ -190,7 +190,7 @@ test('sin User Key, o con la empresa ya vinculada, no contacta a Facturapi', fun
 });
 
 test('ninguna ruta ni controlador de la API crea organizaciones', function () {
-    $files = collect(File::allFiles(app_path('Http')))->merge([base_path('routes/api.php'), base_path('routes/web.php')]);
+    $files = collect(File::allFiles(app_path('Http')))->merge(File::allFiles(base_path('routes')));
 
     foreach ($files as $file) {
         expect(file_get_contents((string) $file))->not->toContain('createOrganization');
