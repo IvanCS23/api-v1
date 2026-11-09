@@ -1,0 +1,4 @@
+{
+    "_doc": "Fase 6.33: avisos de seguridad aceptados (composer audit). Cada entrada: id (CVE o id del aviso), package, severity, reason, accepted_on y review_by (AAAA-MM-DD). CI (scripts/ci/audit-gate.php) falla con avisos altos o críticos de producción que no estén aquí y con aceptaciones vencidas. Ver docs/CONTEXTO_PROYECTO_FACTURAPRO.md (sección de dependencias).",
+    "composer": []
+}

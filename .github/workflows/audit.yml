@@ -1,0 +1,50 @@
+name: audit
+
+# Fase 6.33: avisos de seguridad de las dependencias de producción. Falla
+# sólo con avisos altos o críticos que no estén en
+# security/accepted-advisories.json, o con aceptaciones vencidas. Corre
+# también cada lunes: los avisos nuevos aparecen sin cambiar el código.
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+      - master
+      - workos
+  pull_request:
+    branches:
+      - develop
+      - main
+      - master
+      - workos
+  schedule:
+    - cron: '0 13 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  composer-audit:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          tools: composer:v2
+          coverage: none
+
+      # composer audit sale con código distinto de 0 si hay avisos de
+      # cualquier severidad; la compuerta decide. Si composer no corre, el
+      # JSON queda vacío y la compuerta falla.
+      - name: composer audit (producción, desde el lock)
+        run: composer audit --locked --no-dev --abandoned=ignore --format=json > composer-audit.json || true
+
+      - name: Compuerta (altos y críticos de producción)
+        run: php scripts/ci/audit-gate.php composer-audit.json security/accepted-advisories.json
