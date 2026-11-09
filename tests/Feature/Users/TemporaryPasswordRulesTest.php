@@ -4,6 +4,8 @@ use App\Enums\UserRole;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\Users\TemporaryPassword;
+use App\Services\Users\TemporaryPasswordUnavailable;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Validator;
@@ -83,4 +85,36 @@ test('fuera de producción crear un usuario usa las mismas reglas que el resto (
     phase632CreateWith(phase632TempAdmin(), 'Ab-1234')
         ->assertUnprocessable()
         ->assertJsonPath('errors.password.0', 'La contraseña debe tener al menos 8 caracteres.');
+});
+
+test('el generador se rinde tras 5 intentos con una excepción controlada, sin ciclo sin fin', function () {
+    $calls = 0;
+    Password::defaults(function () use (&$calls) {
+        $calls++;
+
+        return Password::min(100);
+    });
+
+    expect(fn () => TemporaryPassword::generate())->toThrow(TemporaryPasswordUnavailable::class)
+        ->and($calls)->toBe(TemporaryPassword::MAX_ATTEMPTS)
+        ->and(TemporaryPassword::MAX_ATTEMPTS)->toBe(5);
+});
+
+test('si no logra una temporal válida, el restablecimiento responde 503 controlado y no cambia nada', function () {
+    $admin = phase632TempAdmin();
+    $user = User::factory()->create(['company_id' => $admin->company_id, 'role' => UserRole::Sales, 'must_change_password' => false]);
+    $user->forceFill(['api_token' => hash('sha256', 'token-intacto')])->save();
+    $before = $user->fresh();
+    Password::defaults(fn () => Password::min(100));
+
+    $this->actingAs($admin, 'api')->postJson("/api/users/{$user->id}/password/reset")
+        ->assertStatus(503)
+        ->assertJsonPath('code', 'TEMPORARY_PASSWORD_UNAVAILABLE')
+        ->assertJsonMissingPath('temporary_password');
+
+    $after = $user->fresh();
+    expect($after->password)->toBe($before->password)
+        ->and($after->api_token)->toBe($before->api_token)
+        ->and($after->must_change_password)->toBeFalse()
+        ->and(DB::table('audit_logs')->where('user_id', $user->id)->where('action', 'password_reset')->exists())->toBeFalse();
 });

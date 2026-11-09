@@ -3,24 +3,25 @@
 use App\Enums\UserRole;
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Security\PwnedPasswordVerifier;
 use Illuminate\Contracts\Validation\UncompromisedVerifier;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Exceptions;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Http;
-use Illuminate\Validation\NotPwnedVerifier;
+use Illuminate\Support\Facades\Log;
 
 /**
- * Fase 6.32 (ajuste 5): comportamiento ACTUAL de uncompromised(), que en
- * producción forma parte de Password::defaults(). Estas pruebas no lo
- * cambian; sólo lo fijan para decidir sobre él:
+ * Fase 6.32 (decisión B): uncompromised(), que en producción forma parte de
+ * Password::defaults(), usa PwnedPasswordVerifier:
  * - consulta api.pwnedpasswords.com con k-anonimato (sólo 5 caracteres del
- *   SHA-1) y un tiempo máximo de 30 s (conexión: 10 s);
+ *   SHA-1);
+ * - espera como máximo 3 s, para conectar y para responder;
  * - sólo consulta si la contraseña ya cumplió las demás reglas;
- * - si el servicio no responde, tarda más del límite o responde un error,
- *   Laravel reporta la excepción y ACEPTA la contraseña (falla abierto),
- *   sin 500.
+ * - si no hay conexión, se vence el tiempo o responde un error, ACEPTA la
+ *   contraseña (falla abierto), sin 500, y registra el evento
+ *   password_breach_check.unavailable sin la contraseña ni el prefijo.
  */
 const PHASE_632_STRONG = 'Abcdef-12345';
 
@@ -48,23 +49,49 @@ function phase632ChangeTo(string $token, string $password)
     ]);
 }
 
-test('el verificador es el de Laravel, con 30 segundos de espera máxima', function () {
-    $verifier = app(UncompromisedVerifier::class);
-    $timeout = (new ReflectionProperty(NotPwnedVerifier::class, 'timeout'))->getValue($verifier);
+/** El evento de falla se registró una vez y no contiene la contraseña, su hash ni el prefijo. */
+function phase632AssertUnavailableLogged(array $expected): void
+{
+    $hash = strtoupper(sha1(PHASE_632_STRONG));
 
-    expect($verifier)->toBeInstanceOf(NotPwnedVerifier::class)
-        ->and($timeout)->toBe(30);
+    Log::shouldHaveReceived('warning')->once()->withArgs(function (string $message, array $context) use ($expected, $hash): bool {
+        $dump = $message.json_encode($context);
+
+        return $message === PwnedPasswordVerifier::EVENT
+            && array_intersect_assoc($context, $expected) === $expected
+            && $context['timeout_seconds'] === 3
+            && $context['outcome'] === 'accepted_fail_open'
+            && ! str_contains($dump, PHASE_632_STRONG)
+            && ! str_contains(strtoupper($dump), substr($hash, 0, 5))
+            && ! str_contains($dump, 'pwnedpasswords');
+    });
+}
+
+test('el verificador es el propio, con 3 segundos de espera', function () {
+    $verifier = app(UncompromisedVerifier::class);
+    $timeout = (new ReflectionProperty($verifier, 'timeout'))->getValue($verifier);
+
+    expect($verifier)->toBeInstanceOf(PwnedPasswordVerifier::class)
+        ->and($timeout)->toBe(3)
+        ->and(PwnedPasswordVerifier::TIMEOUT_SECONDS)->toBe(3);
 });
 
-test('sólo envía los 5 primeros caracteres del hash', function () {
-    Http::fake(['api.pwnedpasswords.com/*' => Http::response("0000000000000000000000000000000000A:1\r\n")]);
+test('la consulta lleva 3 s de espera para conectar y para responder, y sólo 5 caracteres del hash', function () {
+    $options = null;
+    Http::fake(function (Request $request, array $sent) use (&$options) {
+        $options = $sent;
+
+        return Http::response("0000000000000000000000000000000000A:1\r\n");
+    });
     [, $token] = phase632PwnedUser();
 
     phase632ChangeTo($token, PHASE_632_STRONG)->assertOk();
 
     $prefix = substr(strtoupper(sha1(PHASE_632_STRONG)), 0, 5);
+    expect($options['timeout'])->toBe(3)
+        ->and($options['connect_timeout'])->toBe(3);
     Http::assertSent(fn (Request $request) => $request->url() === 'https://api.pwnedpasswords.com/range/'.$prefix
-        && ! str_contains($request->url(), PHASE_632_STRONG));
+        && $request->hasHeader('Add-Padding'));
     Http::assertSentCount(1);
 });
 
@@ -80,25 +107,39 @@ test('una contraseña filtrada se rechaza con el mensaje en español', function 
     expect(Hash::check('password', $user->fresh()->password))->toBeTrue();
 });
 
-test('si el servicio no responde, se reporta y la contraseña se acepta (falla abierto, sin 500)', function () {
+test('sin conexión o con el tiempo vencido: falla abierto, evento propio en el log y nada reportado', function () {
     Exceptions::fake();
-    Http::fake(['api.pwnedpasswords.com/*' => Http::failedConnection('cURL error 28: Operation timed out')]);
+    Log::spy();
+    Http::fake(['api.pwnedpasswords.com/*' => Http::failedConnection('cURL error 28: Operation timed out after 3001 milliseconds for https://api.pwnedpasswords.com/range/'.substr(strtoupper(sha1(PHASE_632_STRONG)), 0, 5))]);
     [$user, $token] = phase632PwnedUser();
 
     phase632ChangeTo($token, PHASE_632_STRONG)->assertOk();
 
-    Exceptions::assertReported(ConnectionException::class);
     expect(Hash::check(PHASE_632_STRONG, $user->fresh()->password))->toBeTrue();
+    phase632AssertUnavailableLogged(['reason' => 'connection', 'exception' => ConnectionException::class]);
+    Exceptions::assertNothingReported();
 });
 
-test('si el servicio responde un error, la contraseña también se acepta', function (int $status) {
+test('si el servicio responde un error: falla abierto y evento con el estado', function (int $status) {
+    Log::spy();
     Http::fake(['api.pwnedpasswords.com/*' => Http::response('Service Unavailable', $status)]);
     [$user, $token] = phase632PwnedUser();
 
     phase632ChangeTo($token, PHASE_632_STRONG)->assertOk();
 
     expect(Hash::check(PHASE_632_STRONG, $user->fresh()->password))->toBeTrue();
+    phase632AssertUnavailableLogged(['reason' => 'http_status', 'status' => $status]);
 })->with([429, 500, 503]);
+
+test('si el servicio responde bien no se registra nada', function () {
+    Log::spy();
+    Http::fake(['api.pwnedpasswords.com/*' => Http::response('')]);
+    [, $token] = phase632PwnedUser();
+
+    phase632ChangeTo($token, PHASE_632_STRONG)->assertOk();
+
+    Log::shouldNotHaveReceived('warning');
+});
 
 test('no se consulta el servicio si la contraseña falla otra regla', function () {
     Http::fake();

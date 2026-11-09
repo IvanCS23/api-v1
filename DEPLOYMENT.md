@@ -86,6 +86,34 @@ php artisan mail:check --connect     # MAIL_MAILER=smtp, 127.0.0.1:1025
 Los correos se ven en http://127.0.0.1:8025. El envío va en cola: necesita el
 worker (`php artisan queue:work`).
 
+### Reglas de contraseña y contraseñas filtradas (Fase 6.32)
+
+Con `APP_ENV=production` toda contraseña nueva (cambio propio, recuperación,
+contraseña temporal y cambio por un Admin) exige al menos 12 caracteres,
+mayúsculas y minúsculas, números, símbolos y que **no aparezca en
+filtraciones conocidas**. Fuera de producción sólo se piden 8 caracteres.
+
+La última regla consulta `https://api.pwnedpasswords.com` (`PwnedPasswordVerifier`):
+
+- **Qué sale del servidor:** sólo los 5 primeros caracteres del SHA-1 de la
+  contraseña (k-anonimato); nunca la contraseña ni su hash completo.
+- **Cuándo:** sólo si la contraseña ya cumplió las demás reglas.
+- **Espera máxima:** 3 s para conectar y 3 s en total.
+- **Si el servicio no responde, tarda más o responde un error:** la
+  contraseña **se acepta** (falla abierto) y queda en `laravel.log` el evento
+  `password_breach_check.unavailable` (warning) con `reason` (`connection` o
+  `http_status`), `status` o la clase de la excepción, `timeout_seconds` y
+  `outcome=accepted_fail_open`. No lleva la contraseña, el hash, el prefijo
+  ni la URL.
+
+El servidor necesita salida HTTPS hacia `api.pwnedpasswords.com`. Si ese
+evento aparece seguido, revisar la red: mientras tanto se aceptan
+contraseñas sin esa comprobación.
+
+La contraseña temporal que genera el sistema al restablecer la de un usuario
+cumple las mismas reglas; se intenta hasta 5 veces y, si ninguna cumple,
+la API responde `503 TEMPORARY_PASSWORD_UNAVAILABLE` sin cambiar nada.
+
 ## 3. Primer despliegue
 
 ```bash
@@ -208,7 +236,9 @@ php artisan queue:restart
 ```
 
 Y en `laravel.log`, revisar `billing.pac.guard_rejected` (configuración del
-PAC rechazada: código interno, empresa y factura).
+PAC rechazada: código interno, empresa y factura) y
+`password_breach_check.unavailable` (la comprobación de contraseñas filtradas
+no respondió y se aceptó la contraseña; ver la sección 2).
 
 Si `session.driver` no es `database`, corregir `SESSION_DRIVER` en `.env`,
 `php artisan config:cache` y repetir la verificación: con otro driver un

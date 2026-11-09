@@ -11,6 +11,7 @@ use App\Services\AuditLogger;
 use App\Services\Users\CompanyAdminGuard;
 use App\Services\Users\PasswordChangeSecurity;
 use App\Services\Users\TemporaryPassword;
+use App\Services\Users\TemporaryPasswordUnavailable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -58,7 +59,15 @@ class UserSecurityController extends Controller
         ]);
 
         // Fase 6.32: cumple las mismas reglas que una contraseña elegida a mano.
-        $temporaryPassword = TemporaryPassword::generate();
+        // Si tras 5 intentos ninguna cumple, error controlado y nada cambia.
+        try {
+            $temporaryPassword = TemporaryPassword::generate();
+        } catch (TemporaryPasswordUnavailable) {
+            return response()->json([
+                'code' => 'TEMPORARY_PASSWORD_UNAVAILABLE',
+                'message' => 'No se pudo generar la contraseña temporal. Intenta de nuevo en unos momentos.',
+            ], 503);
+        }
 
         $user->update([
             'password' => Hash::make($temporaryPassword),
