@@ -325,18 +325,31 @@ FASE 6.31 — Modo Live con una empresa piloto (código y R0 completos; P1 a P7 
 - Auditoría de aislamiento por empresa, ampliada (2026-11-05/06, solo lectura). `route:list` completo: 125 rutas (`api` 91, `web` 9 con 3 de Inertia, Fortify 22, otras 3: `storage/{path}` GET/PUT y `up`); 111 con sesión, todas con `active` (las 107 de la 6.27b se midieron en su commit 0b; después +3 en la 6.27b, +3 en la 6.29, +3 en la 6.30 y −5 en la 6.31). La primera pasada (95 de 97) excluyó las de paquetes. Orden real: `Authenticate` > `ThrottleRequests` > `SubstituteBindings` > `TenantMiddleware` > `EnsureUserIsActive` > controlador; 66 rutas con parámetros, ninguno tipado como modelo y sin `Route::model`/`bind` (las `{invoice}` reciben `int` y el controlador hace `findOrFail` con el tenant ya fijado). Fortify: registro público desactivado; `email/verify/{id}/{hash}` exige el id y el hash del propio usuario. Hallazgos corregidos: autoborrado de la cuenta por web (`f00e635`), `/storage/{path}` del disco privado (`31e53fd`), contraseña web sin revocar token ni sesiones (`6b6b128`), correo editable por cualquier rol en la web (`51fd7a0`) y opción de activar una 2FA que la API no exige (`3f39d83`). Primera pasada: Todos los modelos de negocio usan `BelongsToCompany` (`CompanyScope`, que sin tenant no devuelve nada) y `TenantMiddleware` fija el tenant desde el usuario en el grupo `api`; no hay binding implícito de modelos. Las reglas `exists` sobre `clients`, `products` y `sales` filtran por `company_id`. De 83 `withoutGlobalScope`, 68 vuelven a filtrar por empresa en la misma consulta, 7 están en comandos del operador (sin HTTP) y 8, en servicios de ventas y facturación, buscan por `sale_id`/`quote_id` de una venta o cotización ya bloqueada con su `company_id`, o por sus `client_id`/`product_id`, que sólo se guardan validados por empresa. Sin Policy, a propósito: `AuthController@user`/`logout` y Settings (el propio usuario), catálogos globales (`SatCatalogController`, `TaxRateController`) y `UserController@index`/`show`, que filtran por la empresa del usuario (`UserController.php:36-38` y `:174-177`): cualquier rol ve a los usuarios de su propia empresa.
 - Pendiente del piloto (ver `DEPLOYMENT.md`, sección 10): empresa con CSD vigente, contador, servidor con `APP_ENV=production` y cuenta de Facturapi con suscripción activa.
 
+FASE 6.32 — Cuentas de usuario en Next.js (cerrada el 2026-11-09):
+- Cambio de la propia contraseña para cualquier rol: `PUT /api/me/password` (contraseña actual, reglas de `PasswordValidationRules`, `different`); rota el `api_token` y devuelve el nuevo (D1), cierra las demás sesiones, borra los enlaces de recuperación pendientes, limpia `must_change_password` y audita `password_changed` con origen `api_self`; límite `my-password` (5 cada 15 min por usuario, 20 por IP). Un Admin ya no usa los endpoints de administración sobre sí mismo (`422 USE_OWN_PASSWORD_ENDPOINT`).
+- `must_change_password` se hace cumplir: middleware `password.current` en todas las rutas con sesión (`403 PASSWORD_CHANGE_REQUIRED`), salvo `GET /api/user`, `POST /api/logout` y `PUT /api/me/password`.
+- Recuperación por correo: `POST /api/password/forgot` (siempre `202` con el mismo cuerpo; un usuario inactivo no recibe correo ni se reactiva, D6) y `POST /api/password/reset` (`422 PASSWORD_RESET_INVALID`). `ResetPasswordNotification` en cola con el enlace `FRONTEND_URL/restablecer-contrasena#token=…&email=…` (token después de `#`, D2); vence en 30 minutos y sirve una vez. Límites (D3): 5 solicitudes por IP cada 15 minutos, 1 por correo por minuto y 5 por correo por hora; el 429 no revela si el correo existe. Los enlaces pendientes se borran al cambiar o restablecer la contraseña y cuando un Admin cambia el correo.
+- Reglas de contraseña únicas en todos los caminos (cambio propio, recuperación, contraseña temporal al crear un usuario, cambio y restablecimiento por el Admin): en producción 12 caracteres, mayúsculas y minúsculas, números, símbolos y no filtrada; mensajes en español. La temporal que genera el sistema (`TemporaryPassword`) se valida con esas reglas, hasta 5 intentos (`503 TEMPORARY_PASSWORD_UNAVAILABLE`).
+- `uncompromised()` (decisión B): `PwnedPasswordVerifier`, k-anonimato, 3 s de espera y falla abierto con el evento `password_breach_check.unavailable` en el log (sin contraseña ni prefijo).
+- Correo transaccional (D4 pendiente para P1): SMTP genérico, sin paquetes de proveedor; Mailpit en desarrollo; `php artisan mail:check [--connect]` (falla en producción con `log`/`array`, remitente de ejemplo, `FRONTEND_URL` sin https o cola `sync`).
+- Next.js: `/cambiar-contrasena`, `/recuperar-contrasena`, `/restablecer-contrasena` (lee el `#`, lo borra con `history.replaceState`, `Referrer-Policy: no-referrer`, sin scripts de terceros), Configuración > Seguridad > Contraseña real, guardia mínima de sesión en `AppLayout` (D7: sólo experiencia de usuario) y aviso del 403 `PASSWORD_CHANGE_REQUIRED` desde cualquier llamada; un solo texto de ayuda de la contraseña (`src/lib/passwordRules.ts`).
+- Retiro de la web de Laravel (D5, D8): sólo quedan `api/*` (94 rutas) y `up`. Se retiraron las 31 rutas web y de Fortify, Fortify, Inertia, Wayfinder, `resources/js`, `resources/css`, las vistas, los controladores y requests de Settings y todo el soporte de JavaScript de api-v1 (package.json, Vite, ESLint, Prettier, TypeScript). Sin ruta `login`: un invitado recibe `401` en JSON y nunca se redirige; en `api/*` todo error es JSON. CI y `composer` sólo con PHP; `composer dev` usa `php artisan dev` (servidor y worker). Se conservan el guard `web` (lo usa `POST /api/login`), las columnas `two_factor_*`, `password_reset_tokens`, `PasswordValidationRules` y `PasswordChangeSecurity`. `SESSION_DRIVER` deja de ser requisito (recomendado `array`).
+- Verificado de punta a punta en local (2026-11-06 y de nuevo tras el retiro, 2026-11-09) con una instancia aislada (SQLite temporal) y Mailpit: cambio propio, cambio obligatorio y recuperación con el correo capturado; las pantallas de Next.js también en navegador real (Chrome sin interfaz). Sin operaciones contra Facturapi.
+- Desviaciones: los mensajes de validación en español de la recuperación y de las reglas se agregaron fuera del plan (`APP_LOCALE` es `en`); `Cache-Control: no-store` en `next.config.ts` se quitó porque Next.js lo reescribe (el token nunca llega al servidor).
+- Commits api-v1: `9fcaacb`, `b258dd1`, `091b4bd`, `f50d577`, `0344998`, `87286c0`, `8c45f12`, `1151e24`, `6bc8735`, `0d04243`, `5cda5c4`, `a4354f3`, `3ba89a0`, `950a21e` (uncompromised), `731376a` (rutas), `57d4fed` (archivos y paquetes), `1b4d54c` (CI y composer), `d0a8752` (DEPLOYMENT) y el de documentación del cierre. app-front: `ea1ef54`, `7d3477d`, `65e4016`, `ccb5b0e`, `a1a4294`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md` y `api-v1/DEPLOYMENT.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base de la FASE 6.31 (verificada el 2026-11-06 sobre `changes-ivan` e
-`integracion-ivan`, después de R0 y de la auditoría ampliada):
-- Backend: 1863 pruebas aprobadas, 7870 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB).
-- Frontend: 280 pruebas aprobadas en 28 archivos, 0 fallidas.
+Línea base de la FASE 6.32 (verificada el 2026-11-09 sobre `changes-ivan` e
+`integracion-ivan`, después del retiro de la web de Laravel):
+- Backend: 1899 pruebas aprobadas, 8860 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB). `route:list`: 95 rutas (94 `api/*` y `up`). En un clon limpio con `.env.example`, 3 casos de `ProductFiscalValidationTest` fallan por `pac_key_missing` (ver la deuda).
+- Frontend: 306 pruebas aprobadas en 32 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
-- Build Next.js: aprobado, 33 páginas generadas.
+- Build Next.js: aprobado, 37 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
 - Pint de archivos relacionados: aprobado.
 - `git diff --check`: limpio.
@@ -362,12 +375,13 @@ Estado de la BD local de desarrollo:
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
-- Build del frontend de Inertia (web de Laravel, `api-v1/resources/js`) roto desde el primer commit (2026-04-16): `pages/auth/register.tsx` importa `@/routes/register`, que Wayfinder no genera porque el registro está desactivado (`tsc`: 3 errores en `login.tsx`, `register.tsx` y `welcome.tsx`; `vite build` falla). `public/build` no está versionado (`.gitignore`) y el local es del 2026-03-12; `DEPLOYMENT.md` no compila esos assets. En un servidor nuevo las páginas web de Laravel (login de Fortify, restablecer contraseña, 2FA, settings) no cargarían.
-- Cerrar las demás sesiones web al cambiar la contraseña sólo funciona con `SESSION_DRIVER=database` (`PasswordChangeSecurity::terminateWebSessions`); con otro driver no hace nada. `DEPLOYMENT.md` lo exige y lo verifica en la checklist del despliegue.
+- Resuelto en la 6.32: el build roto de Inertia (`api-v1/resources/js`) ya no existe; la web de Laravel se retiró.
+- Resuelto en la 6.32: sin web no hay sesiones que cerrar; `SESSION_DRIVER=database` dejó de ser requisito. `PasswordChangeSecurity::terminateWebSessions` se conserva y sólo actúa con el driver `database`.
 - Sin uso desde que se retiraron las rutas de `legacy-invoices` (6.31), conservados a propósito: `App\Http\Controllers\Api\LegacyInvoiceController`, el modelo `App\Models\LegacyInvoice` (sólo lo referencia la relación siguiente) y `Company::legacyInvoices()` (`app/Models/Company.php:142`), que nunca resolvió nada porque `legacy_invoices` no tiene `company_id`. Decidir si se eliminan junto con la tabla, después de respaldar su registro.
 - Lint global frontend: 31 errores / 51 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
 - `CompanyBillingReadinessService::evaluate()` (forma de pago de la empresa) no tiene consumidores desde la 6.25: decidir si se elimina.
-- Vulnerabilidades de dependencias reportadas, pendientes de nueva auditoría.
+- Vulnerabilidades de dependencias: `composer audit` (2026-11-09) reporta 53 avisos en 12 paquetes (1 crítico, 15 altos, 23 medios, 6 bajos y 8 sin severidad) en `laravel/framework`, Guzzle, Symfony, `league/commonmark` y `league/flysystem`. Previos a la 6.32 (el retiro no cambió ninguna versión). Pendiente de una fase de actualización de dependencias.
+- Pruebas que dependen del `.env` local: 3 casos de `tests/Feature/Sat/ProductFiscalValidationTest.php` necesitan `FACTURAPI_TEST_KEY` (con HTTP simulado; nunca llaman a Facturapi). Con `.env.example` (CI, clon limpio) fallan por `pac_key_missing`. Corrección mínima pendiente: fijar una llave ficticia en esas pruebas o en `phpunit.xml`.
 - Búsqueda parcial `LIKE`.
 - Índices de consulta pendientes de evaluación con datos reales.
 - Debe revisarse el diff del lockfile.
@@ -399,10 +413,12 @@ Hallazgos de producto pendientes (verificados en el código):
 - `default_payment_form` de la empresa no tiene endpoint y `CompanyBillingReadinessService` sólo exige 2 dígitos; uno fuera de catálogo aparece como `SALE_PAYMENT_FORM_INVALID` en el readiness de la venta.
 - Los datos existentes inválidos (ver estado de la BD local) deben corregirse a mano desde las pantallas; `sat:audit-catalog-data` los lista.
 
-Pendientes antes de P1 (de la auditoría ampliada de la 6.31):
-- `must_change_password` no se hace cumplir. Lo activa un Admin al crear un usuario, al cambiarle la contraseña o al restablecerla desde Next.js (`ResetPasswordModal`, marcado por omisión con la contraseña temporal) y lo publica `UserResource`, pero ningún middleware ni pantalla lo exige: en producción un usuario seguiría usando indefinidamente la contraseña temporal que vio el Admin. Además, en Next.js un usuario que no es Admin no puede cambiar su propia contraseña (`PATCH /api/users/{id}/password` exige `manageSecurity`, sólo Admin; la pantalla `/pages/settings/seguridad/password` está como `unavailable`) y "¿Olvidó su contraseña?" del login no hace nada. En la BD local 1 usuario tiene la bandera activa.
-- Web de Laravel e Inertia: Next.js no usa ninguna de sus rutas (sólo `/api/...`). Lo único que dependería de ellas es la recuperación de contraseña de Fortify (el correo apunta a `reset-password/{token}`, una página Inertia), el cambio de contraseña y la 2FA web, todo sobre un build roto. Retirarlas rompería el login web de Fortify, `reset-password`, la verificación de correo, la 2FA web y `settings/*`, que hoy no usa ningún flujo real. Decisión propuesta antes de P1: llevar a la API y a Next.js el cambio de la propia contraseña, la recuperación por correo (con `ResetPassword::createUrlUsing` hacia Next.js) y el cumplimiento de `must_change_password`; después retirar las rutas web de Laravel y dejar Fortify sin vistas. Mientras no se decida, no se retira nada.
-- 2FA del producto: `POST /api/login` todavía no la exige. En la 6.31 la web dejó de ofrecer activarla y el backend rechaza activarla o confirmarla (`RejectNewTwoFactorAuthentication`); quien ya la tiene la puede desactivar y completa el reto. Pendiente antes del lanzamiento general.
+Pendientes antes de P1:
+- Resuelto en la 6.32: `must_change_password` se hace cumplir (API y Next.js), cualquier rol cambia su propia contraseña y "¿Olvidó su contraseña?" envía un enlace a Next.js.
+- Resuelto en la 6.32: la web de Laravel, Inertia y Fortify se retiraron; sólo quedan `api/*` y `up`.
+- Correo transaccional (6.32, D4): elegir el proveedor SMTP, con un remitente propio verificado (SPF/DKIM); `FRONTEND_URL` con la URL https pública de Next.js; `php artisan mail:check --connect` debe pasar en producción; el worker de colas debe estar corriendo (el correo de recuperación va en cola). Probar una recuperación real hacia un correo del responsable antes del piloto.
+- Salida HTTPS del servidor hacia `api.pwnedpasswords.com` (regla de contraseñas filtradas); sin salida se aceptan contraseñas sin esa comprobación y aparece `password_breach_check.unavailable` en el log.
+- 2FA del producto: `POST /api/login` todavía no la exige. Fortify se retiró en la 6.32 y nadie puede activarla ni completar un reto; las columnas `two_factor_*` se conservan como datos. Pendiente antes del lanzamiento general.
 
 Riesgos pendientes:
 - Zona horaria (resuelto en la 6.29): un servidor con datos anteriores debe migrar en mantenimiento y en el mismo servidor donde se escribieron (ver `DEPLOYMENT.md`).
@@ -415,6 +431,7 @@ Riesgos pendientes:
 - Sin verificar contra Facturapi Live: que `GET /organizations/me` acepte una llave Live (si no, la importación no guarda nada y la alternativa por `first_12` requiere aprobación), los tipos de `pending_steps`, que las facturas Test y Live estén aisladas entre sí y cómo reporta Facturapi el silencio del receptor tras un rechazo.
 - `billing:health` no modela los días festivos oficiales en el plazo del receptor: puede escalar antes de tiempo.
 - Resuelto en la 6.31: `legacy_invoices` no tiene `company_id` ni Policy (sistema de tickets anterior) y cualquier usuario activo de cualquier empresa podía listar, ver, crear, modificar y borrar todos sus registros. Se retiraron sus cinco rutas (`/api/legacy-invoices`); la tabla, el modelo, la migración y el registro existente se conservan. `LegacyInvoiceRoutesRemovedTest` falla si reaparecen.
+- Contraseñas filtradas (6.32, decisión B): si `api.pwnedpasswords.com` no responde en 3 s o responde un error, la contraseña se acepta (falla abierto) y queda `password_breach_check.unavailable` en el log.
 - Login con sesión única: `POST /api/login` reemplaza el `api_token` del usuario e invalida cualquier otra sesión abierta.
 - Folio del CFDI (6.28), sin verificar contra Facturapi: si rechaza folios duplicados (no lo documenta; lo cubre la consulta previa salvo emisiones simultáneas desde fuera), si el `PUT` del borrador respeta `series`/`folio_number` y cómo imprime el PDF la serie y el folio. Se confirma con la primera emisión real posterior a la 6.28.
 
@@ -454,7 +471,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.31 — Modo Live con una empresa piloto (ver sección 7): código y R0 completos; P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi.
+La última fase completada es la FASE 6.32 — Cuentas de usuario en Next.js (ver sección 7), cerrada el 2026-11-09. La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -463,9 +480,10 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.29 — Infraestructura pre-producción (zona horaria de MySQL, logs del guard, login de inactivos, checklist de despliegue en `DEPLOYMENT.md`, borrador validado antes de la transición y "Regresar a lista", logotipo del PDF). Completa.
 - FASE 6.30 — Envío del CFDI por correo. Completa.
 - FASE 6.31 — Modo Live con una empresa piloto. Código y R0 completos; P1 a P7 pendientes (incluye la verificación obligatoria del acuse en la primera cancelación real; ver `DEPLOYMENT.md`, sección 10).
+- FASE 6.32 — Cuentas de usuario en Next.js (cambio de contraseña, cambio obligatorio, recuperación por correo) y retiro de la web de Laravel. Completa.
 
 Hito 2 — Lanzamiento general:
-- 2FA del producto: exigirla en `POST /api/login` y en Next.js (hoy sólo existía en la web de Laravel, que dejó de ofrecerla en la 6.31).
+- 2FA del producto: exigirla en `POST /api/login` y en Next.js (la web de Laravel que la ofrecía se retiró en la 6.32; las columnas `two_factor_*` se conservan).
 - Token del API en `localStorage` (6.32): Next.js guarda el `api_token` en `localStorage` (`api_token` y `auth_user`), al alcance de cualquier script de la página; un XSS lo robaría. Pendiente antes del lanzamiento general: llevarlo a una cookie `HttpOnly` y `Secure` (o a otro mecanismo que el JavaScript no pueda leer), con su protección CSRF.
 - Token del API sin caducidad (6.32): el `api_token` no vence por tiempo; sólo cambia al iniciar sesión, cerrarla o cambiar o restablecer la contraseña. Pendiente antes del lanzamiento general: caducidad por inactividad y un máximo absoluto, con renovación.
 - Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
