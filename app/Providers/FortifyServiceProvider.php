@@ -29,6 +29,9 @@ class FortifyServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
+        // Fase 6.32: sin rutas web; Fortify se retira en el siguiente commit.
+        Fortify::ignoreRoutes();
+
         // Fase 6.31: la 2FA web no se puede activar de nuevo (POST /api/login
         // todavía no la exige). Desactivarla y el reto al iniciar sesión no
         // cambian.
