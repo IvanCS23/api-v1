@@ -1,6 +1,7 @@
 <?php
 
 use Illuminate\Routing\Middleware\ThrottleRequests;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
 
 /**
@@ -72,4 +73,16 @@ test('toda ruta autenticada responde 401 sin sesión ni Accept, nunca 500 ni red
     }
 
     expect($checked)->toBeGreaterThan(80);
+});
+
+test('ninguna ruta abre una sesión: SESSION_DRIVER ya no necesita ser database', function () {
+    $router = app('router');
+
+    $withSession = phase632Routes()
+        ->filter(fn ($route) => in_array(StartSession::class, $router->gatherRouteMiddleware($route), true))
+        ->map(fn ($route) => $route->uri())
+        ->values()
+        ->all();
+
+    expect($withSession)->toBe([]);
 });
