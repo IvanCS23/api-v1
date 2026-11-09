@@ -6,6 +6,7 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
 use Tests\Support\SatCatalogFixture;
 use Tests\TestCase;
 
@@ -23,7 +24,11 @@ use Tests\TestCase;
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
     // Fase 6.26: muestra de los catálogos SAT grandes (ver SatCatalogFixture).
-    ->beforeEach(fn () => SatCatalogFixture::seed())
+    ->beforeEach(function () {
+        // Ninguna prueba sale a la red: una petición HTTP sin fake falla.
+        Http::preventStrayRequests();
+        SatCatalogFixture::seed();
+    })
     ->in('Feature');
 
 /*

@@ -33,6 +33,10 @@
         <env name="BILLING_CFDI_FOLIO_CHECK" value="false"/>
         <!-- Fase 6.27b: las pruebas nunca ven la User Key real; cada prueba la fija en config. -->
         <env name="FACTURAPI_USER_KEY" value=""/>
+        <!-- Fase 6.32 (cierre): llave Test ficticia para todas las pruebas. Nunca la real del .env
+             local; con .env.example (CI, clon limpio) ya no falta. Ninguna prueba hace HTTP real:
+             Pest activa Http::preventStrayRequests() en cada prueba Feature. -->
+        <env name="FACTURAPI_TEST_KEY" value="sk_test_phpunit_ficticia_no_es_una_llave_real"/>
         <env name="SESSION_DRIVER" value="array"/>
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
