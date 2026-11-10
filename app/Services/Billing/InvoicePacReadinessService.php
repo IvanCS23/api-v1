@@ -9,6 +9,8 @@ use App\Models\FacturapiOrganization;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\Sat\SatFiscalValidator;
+use App\Services\Taxes\TaxRuleValidator;
+use App\Services\Taxes\TaxSpec;
 use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Collection;
@@ -42,6 +44,7 @@ class InvoicePacReadinessService
     public function __construct(
         private readonly CompanyBillingReadinessService $companyReadiness = new CompanyBillingReadinessService,
         private readonly SatFiscalValidator $satValidator = new SatFiscalValidator,
+        private readonly TaxRuleValidator $taxRules = new TaxRuleValidator,
     ) {}
 
     /**
@@ -194,18 +197,35 @@ class InvoicePacReadinessService
                 $errors[] = $this->error('INVOICE_ITEM_TAX_CODE_UNRECOGNIZED', "{$prefix}.tax_code", "Código SAT c_Impuesto no reconocido: '{$item->tax_code}'.");
             }
 
-            // `InvoiceItem::tax_type` NO está cast al enum TaxType (a
-            // diferencia de TaxRate::tax_type) — es un string plano en
-            // este modelo. Comparar contra la instancia del enum nunca
-            // sería cierto; se compara contra su valor literal. (Bug
-            // preexistente detectado aquí — la misma comparación vivía,
-            // sin ejercitarse por ninguna prueba real, en
-            // FacturapiProvider::assertSnapshotIsComplete() antes de
-            // Fase 6.2.3.)
-            if ($item->tax_type === TaxType::Retencion->value) {
-                $errors[] = $this->error('INVOICE_ITEM_WITHHOLDING_UNSUPPORTED', "{$prefix}.tax_type", 'El objeto Tax documentado de Facturapi no distingue traslado/retención — no soportado todavía.');
+            // Fase 6.34: las retenciones ya se envían (`withholding`); se
+            // validan los impuestos del concepto con las reglas del SAT (el
+            // snapshot invoice_item_taxes, o el de un solo impuesto anterior).
+            foreach ($this->taxRules->issues($this->itemTaxSpecs($item)) as $issue) {
+                $errors[] = $this->error('INVOICE_ITEM_TAX_INVALID', "{$prefix}.{$issue['field']}", $issue['message']);
             }
         }
+    }
+
+    /**
+     * @return list<TaxSpec>
+     */
+    private function itemTaxSpecs(InvoiceItem $item): array
+    {
+        if ($item->taxes->isNotEmpty()) {
+            return TaxSpec::fromModels($item->taxes);
+        }
+
+        if ($item->tax_code === null || $item->tax_type === null || $item->tax_factor_type === null
+            || ! in_array((string) $item->tax_code, self::RECOGNIZED_SAT_TAX_CODES, true)) {
+            return [];
+        }
+
+        return [TaxSpec::fromArray([
+            'tax' => (string) $item->tax_code,
+            'kind' => TaxType::from($item->tax_type),
+            'factor' => (string) $item->tax_factor_type,
+            'rate' => $item->tax_rate_value,
+        ])];
     }
 
     /**

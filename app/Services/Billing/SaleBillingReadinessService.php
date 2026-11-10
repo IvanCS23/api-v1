@@ -9,9 +9,14 @@ use App\Models\Company;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Models\SaleItemTax;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Sat\SatFiscalValidator;
+use App\Services\Taxes\LineTaxWriter;
+use App\Services\Taxes\TaxRuleValidator;
+use App\Services\Taxes\TaxSpec;
 use App\Support\Billing\SalePaymentRules;
+use App\Support\Taxes\LegalTaxRules;
 use Illuminate\Support\Collection;
 
 /**
@@ -45,6 +50,7 @@ class SaleBillingReadinessService
 {
     public function __construct(
         private readonly SatFiscalValidator $satValidator = new SatFiscalValidator,
+        private readonly TaxRuleValidator $taxRules = new TaxRuleValidator,
     ) {}
 
     /**
@@ -63,6 +69,7 @@ class SaleBillingReadinessService
         $this->checkClient($sale, $errors, $warnings);
         $this->checkItems($items, $errors, $warnings, $beforeInvoicing);
         $this->checkTenant($sale, $items, $errors);
+        $this->checkLegalTaxRules($sale, $items, $warnings);
 
         if ($beforeInvoicing) {
             $this->checkPayment($sale, $errors);
@@ -252,11 +259,13 @@ class SaleBillingReadinessService
 
                 if ($taxRate === null || $taxRate->active !== true) {
                     $errors[] = $this->error('ITEM_TAX_RATE_INVALID', "{$prefix}.tax_rate_id", 'La línea referencia una tasa de impuesto inexistente o inactiva.');
-                } elseif ($beforeInvoicing && $taxRate->tax_type === TaxType::Retencion) {
-                    // Fase 6.25: el PAC todavía no admite retenciones
-                    // (INVOICE_ITEM_WITHHOLDING_UNSUPPORTED al emitir).
-                    $errors[] = $this->error('ITEM_TAX_WITHHOLDING_UNSUPPORTED', "{$prefix}.tax_rate_id", 'La línea usa una retención, que todavía no se puede facturar.');
                 }
+            }
+
+            // Fase 6.34: las retenciones ya se facturan; los impuestos de la
+            // línea se validan con las reglas del SAT (TaxRuleValidator).
+            foreach ($this->taxRules->issues($this->itemTaxSpecs($item)) as $issue) {
+                $errors[] = $this->error('ITEM_TAX_INVALID', "{$prefix}.{$issue['field']}", $issue['message']);
             }
 
             if ($product !== null) {
@@ -312,7 +321,8 @@ class SaleBillingReadinessService
     private function checkTaxObject(SaleItem $item, Product $product, string $prefix, array &$errors): void
     {
         $taxObject = (string) $product->objeto_imp;
-        $hasTransfer = $item->tax_rate_id !== null && $item->taxRate?->tax_type === TaxType::Traslado;
+        // Fase 6.34: con los impuestos de la línea (o su tasa anterior).
+        $hasTransfer = collect($this->itemTaxSpecs($item))->contains(fn (TaxSpec $spec): bool => $spec->kind === TaxType::Traslado);
 
         if ($taxObject === SatFiscalValidator::TAX_OBJECT_TAXED && ! $hasTransfer) {
             $errors[] = $this->error('ITEM_TAX_OBJECT_MISMATCH', "{$prefix}.tax_rate_id", 'El producto es objeto de impuesto (02) pero la línea no tiene IVA: elige 16 %, 0 % o exento.');
@@ -401,5 +411,40 @@ class SaleBillingReadinessService
     private function error(string $code, string $field, string $message): array
     {
         return ['code' => $code, 'field' => $field, 'message' => $message];
+    }
+
+    /**
+     * Fase 6.34: los impuestos de la línea (sale_item_taxes) o, si es
+     * anterior a la 6.34 y no tiene filas, su tasa única.
+     *
+     * @return list<TaxSpec>
+     */
+    private function itemTaxSpecs(SaleItem $item): array
+    {
+        return array_map(
+            fn (array $row): TaxSpec => TaxSpec::fromArray($row),
+            (new LineTaxWriter)->rowsToCopy($item, SaleItemTax::class, 'sale_item_id'),
+        );
+    }
+
+    /**
+     * Fase 6.34 (D2): reglas legales de retención como avisos, nunca
+     * errores; marcadas "pendiente de contador" (LegalTaxRules).
+     *
+     * @param  Collection<int, SaleItem>  $items
+     * @param  array<int, array<string, mixed>>  $warnings
+     */
+    private function checkLegalTaxRules(Sale $sale, Collection $items, array &$warnings): void
+    {
+        $specs = [];
+        foreach ($items as $item) {
+            array_push($specs, ...$this->itemTaxSpecs($item));
+        }
+
+        $company = Company::query()->whereKey($sale->company_id)->first(['rfc', 'fiscal_regime']);
+
+        foreach (LegalTaxRules::warnings($company?->rfc, $company?->fiscal_regime, $sale->client?->rfc, $specs) as $warning) {
+            $warnings[] = $warning;
+        }
     }
 }

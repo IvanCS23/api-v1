@@ -16,10 +16,12 @@ use App\Exceptions\Billing\PacValidationException;
 use App\Exceptions\InvoiceAlreadyIssuedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
+use App\Exceptions\InvoicePacTotalMismatchException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacSecretRedactor;
+use App\Support\Billing\PacTotalTolerance;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
@@ -113,6 +115,21 @@ class StampPacDraftInvoiceService
     {
         if ($synced->pac_draft_ready_to_stamp !== true) {
             throw new InvoiceDraftNotReadyToStampException($synced);
+        }
+
+        // Fase 6.34: el total del borrador recién sincronizado debe coincidir
+        // con el local (PacTotalTolerance). Si el PAC no reporta total no hay
+        // qué comparar (igual que UpdatePacDraftInvoiceService).
+        $remoteTotal = $synced->pac_draft_response['total'] ?? null;
+        if (is_numeric($remoteTotal) && ! PacTotalTolerance::matches($synced->total, $remoteTotal)) {
+            Log::warning('billing.invoice.pac_draft_total_mismatch_blocked', [
+                'invoice_id' => $synced->id,
+                'company_id' => $synced->company_id,
+                'local_total' => (string) $synced->total,
+                'remote_total' => (string) $remoteTotal,
+            ]);
+
+            throw new InvoicePacTotalMismatchException($synced, (string) $synced->total, (string) $remoteTotal);
         }
 
         $reserved = $this->reserve($synced);

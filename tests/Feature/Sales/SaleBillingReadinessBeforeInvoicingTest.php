@@ -85,7 +85,8 @@ test('Fase 6.28: una venta PPD guardada antes del bloqueo reporta sólo SALE_PPD
         ->and($errors->firstWhere('code', 'SALE_PPD_NOT_AVAILABLE')['message'])->toContain('complemento de pago');
 });
 
-test('una línea con retención no se puede facturar todavía', function () {
+// Fase 6.34: las retenciones ya se facturan (antes ITEM_TAX_WITHHOLDING_UNSUPPORTED).
+test('una línea con retención ya no se bloquea por ser retención', function () {
     $retention = TaxRate::create([
         'code' => '001',
         'name' => 'ISR Retenido 10%',
@@ -96,7 +97,8 @@ test('una línea con retención no se puede facturar todavía', function () {
     ]);
     [, $user, $sale] = phase625DraftSale(sale: ['payment_form' => '03', 'payment_method' => 'PUE'], taxRate: $retention);
 
-    expect(phase625Codes($user, $sale))->toContain('ITEM_TAX_WITHHOLDING_UNSUPPORTED');
+    expect(phase625Codes($user, $sale))->not->toContain('ITEM_TAX_WITHHOLDING_UNSUPPORTED')
+        ->and(phase625Codes($user, $sale))->not->toContain('ITEM_TAX_INVALID');
 });
 
 test('una venta cancelada reporta SALE_CANCELLED', function () {

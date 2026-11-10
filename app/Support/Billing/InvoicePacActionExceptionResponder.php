@@ -38,6 +38,7 @@ use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceCannotBeRevertedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
+use App\Exceptions\InvoicePacTotalMismatchException;
 use App\Models\Invoice;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Http\JsonResponse;
@@ -151,6 +152,12 @@ class InvoicePacActionExceptionResponder
                 409,
                 'PAC_ISSUANCE_IN_PROGRESS',
                 'La emisión fiscal ya está en curso.',
+            ],
+            // Fase 6.34: no se timbra con importes distintos a los locales.
+            $error instanceof InvoicePacTotalMismatchException => [
+                409,
+                'PAC_TOTAL_MISMATCH',
+                "El total del borrador en el PAC ({$error->remoteTotal}) no coincide con el de la factura ({$error->localTotal}). No se timbró; revisa los impuestos de los conceptos.",
             ],
             $error instanceof InvoiceDraftNotReadyToStampException => [
                 409,

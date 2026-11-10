@@ -7,6 +7,7 @@ use App\Data\Billing\PacInvoiceDraftResult;
 use App\Data\Billing\PacInvoiceRequest;
 use App\Data\Billing\PacInvoiceResult;
 use App\Enums\TaxFactorType;
+use App\Enums\TaxType;
 use App\Exceptions\Billing\CancellationReceiptUnavailableException;
 use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Exceptions\Billing\PacAmbiguousInvoiceMatchException;
@@ -22,6 +23,7 @@ use App\Exceptions\Billing\PacUnexpectedEnvironmentException;
 use App\Exceptions\Billing\PacUnexpectedResponseException;
 use App\Exceptions\Billing\PacValidationException;
 use App\Models\InvoiceItem;
+use App\Models\InvoiceItemTax;
 use App\Support\Billing\InvoiceFolio;
 use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacEnvironment;
@@ -500,6 +502,41 @@ class FacturapiProvider implements PacProvider
     }
 
     /**
+     * Fase 6.34: `product.taxes[]` del concepto, desde invoice_item_taxes.
+     *
+     * - `type`: ISR, IVA o IEPS (c_Impuesto 001, 002, 003).
+     * - `rate`: la tasa o cuota; 0 si es exento (Facturapi exige `rate`).
+     * - `factor`: sólo si no es Tasa (su default). Exento evita que Facturapi
+     *   lo emita como tasa 0 % (Fase 6.26); Cuota para IEPS por cuota.
+     * - `withholding: true` sólo en retenciones (default false).
+     * - `ieps_mode`: en IEPS trasladado (sum_before_taxes, D1).
+     *
+     * Una factura anterior a la 6.34 sin filas usa su snapshot de un solo
+     * impuesto (tax_code, tax_rate_value, tax_factor_type).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function itemTaxes(InvoiceItem $item): array
+    {
+        if ($item->taxes->isEmpty()) {
+            return $item->tax_code !== null ? [array_merge([
+                'type' => self::TAX_CODE_NAMES[$item->tax_code],
+                'rate' => (float) $item->tax_rate_value,
+            ], $item->tax_factor_type === TaxFactorType::Exento->value ? ['factor' => 'Exento'] : [])] : [];
+        }
+
+        return $item->taxes->map(fn (InvoiceItemTax $tax): array => array_merge(
+            [
+                'type' => self::TAX_CODE_NAMES[$tax->tax],
+                'rate' => $tax->rate === null ? 0.0 : (float) $tax->rate,
+            ],
+            $tax->factor !== TaxFactorType::Tasa ? ['factor' => ucfirst($tax->factor->value)] : [],
+            $tax->kind === TaxType::Retencion ? ['withholding' => true] : [],
+            $tax->tax === '003' && $tax->kind === TaxType::Traslado ? ['ieps_mode' => $tax->ieps_mode ?? 'sum_before_taxes'] : [],
+        ))->values()->all();
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function buildBasePayload(PacInvoiceRequest $request): array
@@ -554,13 +591,9 @@ class FacturapiProvider implements PacProvider
                     // `false` explícitamente, nunca se deja el default de
                     // Facturapi ni se recalcula `price` para compensar.
                     'tax_included' => false,
-                    // Fase 6.26: el exento se distingue de la tasa 0 % con
-                    // `factor: 'Exento'` (sin él Facturapi asume Tasa y el CFDI
-                    // saldría como IVA 0 %). Tasa no lo envía: es el default.
-                    'taxes' => $item->tax_code !== null ? [array_merge([
-                        'type' => self::TAX_CODE_NAMES[$item->tax_code],
-                        'rate' => (float) $item->tax_rate_value,
-                    ], $item->tax_factor_type === TaxFactorType::Exento->value ? ['factor' => 'Exento'] : [])] : [],
+                    // Fase 6.34: varios impuestos por concepto, desde el
+                    // snapshot invoice_item_taxes (ver itemTaxes()).
+                    'taxes' => $this->itemTaxes($item),
                 ], fn (mixed $value): bool => $value !== null),
             ])->all(),
             'use' => $invoice->client_uso_cfdi,

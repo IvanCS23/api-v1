@@ -150,16 +150,27 @@ test('un tax_code no reconocido en el catálogo SAT c_Impuesto produce INVOICE_I
         ->and(collect($result['errors'])->pluck('code'))->toContain('INVOICE_ITEM_TAX_CODE_UNRECOGNIZED');
 });
 
-test('una línea con tax_type=retencion produce INVOICE_ITEM_WITHHOLDING_UNSUPPORTED', function () {
-    $invoice = invoiceWithItemForReadinessTest([], [
+// Fase 6.34: las retenciones ya se envían al PAC; se validan con las reglas del SAT.
+test('una retención válida ya no se bloquea; un impuesto que el SAT rechaza da INVOICE_ITEM_TAX_INVALID', function () {
+    $withholding = invoiceWithItemForReadinessTest([], [
         'tax_code' => '001',
         'tax_type' => TaxType::Retencion,
+        'tax_factor_type' => 'tasa',
+        'tax_rate_value' => 0.10,
     ]);
+    $codes = collect(app(InvoicePacReadinessService::class)->evaluate($withholding)['errors'])->pluck('code');
+    expect($codes)->not->toContain('INVOICE_ITEM_WITHHOLDING_UNSUPPORTED')
+        ->and($codes)->not->toContain('INVOICE_ITEM_TAX_INVALID');
 
-    $result = app(InvoicePacReadinessService::class)->evaluate($invoice);
-
+    $transferredIsr = invoiceWithItemForReadinessTest([], [
+        'tax_code' => '001',
+        'tax_type' => TaxType::Traslado,
+        'tax_factor_type' => 'tasa',
+        'tax_rate_value' => 0.10,
+    ]);
+    $result = app(InvoicePacReadinessService::class)->evaluate($transferredIsr);
     expect($result['ready'])->toBeFalse()
-        ->and(collect($result['errors'])->pluck('code'))->toContain('INVOICE_ITEM_WITHHOLDING_UNSUPPORTED');
+        ->and(collect($result['errors'])->pluck('code'))->toContain('INVOICE_ITEM_TAX_INVALID');
 });
 
 test('assertReady() lanza InvoiceFiscalSnapshotIncompleteException cuando no está ready, listando los campos', function () {

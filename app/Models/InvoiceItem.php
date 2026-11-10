@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -93,6 +94,10 @@ class InvoiceItem extends Model
     /** Fase 6.34: impuestos (traslados y retenciones), en orden. */
     public function taxes(): HasMany
     {
-        return $this->hasMany(InvoiceItemTax::class)->orderBy('position')->orderBy('id');
+        return $this->hasMany(InvoiceItemTax::class)
+            // Acotada por la línea (que ya pasó el control de empresa): sin el
+            // scope de empresa, para no quedar vacía sin tenant activo.
+            ->withoutGlobalScope(CompanyScope::class)
+            ->orderBy('position')->orderBy('id');
     }
 }
