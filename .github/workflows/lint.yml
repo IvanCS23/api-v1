@@ -15,7 +15,7 @@ on:
       - workos
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
@@ -31,8 +31,10 @@ jobs:
       - name: Install Dependencies
         run: composer install -q --no-ansi --no-interaction --no-scripts --no-progress --prefer-dist
 
-      - name: Run Pint
-        run: composer lint
+      # Fase 6.33: falla si el formato no cumple (antes `composer lint`, que
+      # corregía en el runner y nunca fallaba).
+      - name: Pint (sólo verificación)
+        run: composer lint:check
 
 
       # - name: Commit Changes
