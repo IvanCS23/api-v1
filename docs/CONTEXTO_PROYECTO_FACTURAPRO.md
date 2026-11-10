@@ -337,6 +337,17 @@ FASE 6.32 — Cuentas de usuario en Next.js (cerrada el 2026-11-09):
 - Verificado de punta a punta en local (2026-11-06 y de nuevo tras el retiro, 2026-11-09) con una instancia aislada (SQLite temporal) y Mailpit: cambio propio, cambio obligatorio y recuperación con el correo capturado; las pantallas de Next.js también en navegador real (Chrome sin interfaz). Sin operaciones contra Facturapi.
 - Desviaciones: los mensajes de validación en español de la recuperación y de las reglas se agregaron fuera del plan (`APP_LOCALE` es `en`); `Cache-Control: no-store` en `next.config.ts` se quitó porque Next.js lo reescribe (el token nunca llega al servidor).
 - Commits api-v1: `9fcaacb`, `b258dd1`, `091b4bd`, `f50d577`, `0344998`, `87286c0`, `8c45f12`, `1151e24`, `6bc8735`, `0d04243`, `5cda5c4`, `a4354f3`, `3ba89a0`, `950a21e` (uncompromised), `731376a` (rutas), `57d4fed` (archivos y paquetes), `1b4d54c` (CI y composer), `d0a8752` (DEPLOYMENT) y el de documentación del cierre. app-front: `ea1ef54`, `7d3477d`, `65e4016`, `ccb5b0e`, `a1a4294`.
+- Cierre (`0584583`): las pruebas usan una llave Test ficticia (`phpunit.xml`) y `Http::preventStrayRequests()` en toda prueba Feature; pasan en un clon limpio con `.env.example`. El retiro de la web quitó 58 pruebas y agregó 9 (1948 → 1899).
+
+FASE 6.33 — Actualización de dependencias (cerrada el 2026-11-09):
+- Mitigación previa (app-front `fcbbaea`): `npm run dev` escucha sólo en `127.0.0.1` y se quitó `allowedDevOrigins` (Tailscale): el servidor de desarrollo no se expone. Next anterior a 16.3.8 tenía avisos de ejecución remota en servidores Windows y de fuga de información por el endpoint MCP del servidor de desarrollo.
+- api-v1 (sólo `composer.lock`; `composer.json` sin cambios): `laravel/framework` 12.54.1 → 12.71.0; Symfony 7.4.x → 7.4.17–7.4.23 y polyfills 1.33 → 1.37–1.43; Guzzle 7.10.0 → 7.16.1 y psr7 2.9.0 → 2.13.2; `league/commonmark` 2.8.1 → 2.10.7; `league/flysystem` 3.32.0 → 3.36.0; herramientas: Pest 3.8.7, PHPUnit 11.5.56, Pint 1.32.1, Sail 1.69.0, Mockery 1.6.15 y `hamcrest/hamcrest-php` 3.0.0 (mayor, sólo desarrollo, vía Mockery; las pruebas no lo usan). `composer audit`: 53 avisos en 12 paquetes (1 crítico, 15 altos) → 0.
+- Cambios de comportamiento de Laravel 12.54 → 12.71, revisados en las notas y comparando el código del framework: TokenGuard rechaza credenciales que no son texto (antes un `api_token` arreglo daba 500 por `TypeError` en `hash()`; con `hash => true` no llegaba a autenticar); la regla `email` rechaza saltos de línea (antes pasaban los plegados que permite el RFC, p. ej. `"persona\r\n @example.com"`); la regla `in` compara estricto (las nuestras usan textos canónicos y `payment_form` ya tenía regex); el escape del Markdown del correo se endureció. Sin cambios en `NotPwnedVerifier`, `Rules\Password`, `Rules\Email`, `redirectGuestsTo`, `shouldRenderJsonWhen`, `Authenticate` ni los brokers de contraseña; `PendingRequest` sólo se refactorizó. El aviso de inclusión de relaciones era de `JsonApiResource` (no se usa) y 12.71.0 sólo corrige `Concurrency\ProcessDriver` (no se usa).
+- app-front: `next` 16.2.1 → 16.4.5 (`^16.4.5`), con postcss 8.5.23 y sharp 0.35.5; `npm audit fix` sin `--force` (vitest 4.1.12 y dependencias anidadas). Notas de 16.2 a 16.4 revisadas: sin cambios incompatibles en lo que se usa. `images.unoptimized: true` (la app no usa `next/image`; los logotipos son `<img>` con URL `blob:`): con `next start`, `/_next/image` responde 404 a imágenes locales, SVG y URL externas (antes procesaba PNG → WebP) y los SVG de `public/` siguen en 200. `npm audit`: 24 avisos (1 crítico, 10 altos) → 8 moderados, todos de desarrollo; producción 5 → 0.
+- `eslint-config-next` sigue en 16.1.6 (pendiente de decisión): la 16.4.5 sube el lint de 31 a 45 errores y de 51 a 54 avisos (`react-hooks/set-state-in-effect` más estricta, +13 en 11 archivos de componentes y hooks; `preserve-manual-memoization` +1; `no-location-assign-relative-destination` +3 avisos) y no corrige ningún aviso de seguridad.
+- Pruebas nuevas: `FrameworkUpgradeRegressionTest` (fallan con 12.54 y pasan con 12.71: un `api_token` que no es texto da 401, la regla `email` y la recuperación rechazan saltos de línea, el correo de recuperación se arma en HTML con el enlace correcto), `HttpTransportSmokeTest` (transporte real contra dos `php -S` locales; fuera de `127.0.0.1` y `localhost` todo sigue bloqueado: credencial con la forma del cliente de Facturapi, una redirección a otro host la quita, espera de 3 s, `PwnedPasswordVerifier` falla abierto en 3 s) y `FilesystemUpgradeTest`. Verificación en navegador con `next start` 16.4.5, API aislada (SQLite) y Mailpit: recuperar, restablecer, cambiar desde Configuración y cambio obligatorio, 23/23.
+- CI: workflow `audit` en ambos repositorios (push, PR, cada lunes y manual) con `composer audit --locked --no-dev` y `npm audit --omit=dev` desde el lock, y una compuerta (`api-v1/scripts/ci/audit-gate.php`, `app-front/scripts/audit-gate.mjs`) que falla sólo con avisos altos o críticos de producción que no estén en `security/accepted-advisories.json`, con aceptaciones vencidas (`review_by`) o si la auditoría no se puede leer. Probadas en local contra los locks anteriores a la fase (fallan con 15 y 25 altos o críticos). app-front no tenía CI.
+- Commits api-v1: `037b677` (Laravel y Symfony), `c95c718` (Guzzle y psr7), `2ac7b28` (CommonMark y Flysystem), `cfcec70` (herramientas), `e46b15c` (CI) y el de documentación. app-front: `fcbbaea` (mitigación), `7e8d44a` (Next), `67e7b21` (audit fix), `e80cf43` (CI).
 
 Documentación principal:
 
@@ -344,14 +355,15 @@ Documentación principal:
 
 ## 8. Estado de pruebas y línea base
 
-Línea base de la FASE 6.32 (verificada el 2026-11-09 sobre `changes-ivan` e
-`integracion-ivan`, después del retiro de la web de Laravel):
-- Backend: 1899 pruebas aprobadas, 8860 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB). `route:list`: 95 rutas (94 `api/*` y `up`). En un clon limpio con `.env.example`, 3 casos de `ProductFiscalValidationTest` fallan por `pac_key_missing` (ver la deuda).
+Línea base de la FASE 6.33 (verificada el 2026-11-09 sobre `changes-ivan` e
+`integracion-ivan`, después de la actualización de dependencias):
+- Backend: 1924 pruebas aprobadas, 8927 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB). Igual en un clon limpio con `.env.example`. `route:list`: 95 rutas (94 `api/*` y `up`). Ninguna prueba sale a la red (`Http::preventStrayRequests()`; la prueba de humo sólo habla con servidores `php -S` locales).
 - Frontend: 306 pruebas aprobadas en 32 archivos, 0 fallidas.
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
-- Build Next.js: aprobado, 37 páginas generadas.
-- ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`.
-- Pint de archivos relacionados: aprobado.
+- Build Next.js 16.4.5: aprobado, 37 páginas generadas.
+- ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`. Con `eslint-config-next` 16.4.5 serían 45 / 54 (ver la 6.33).
+- `composer audit`: 0 avisos. `npm audit`: 8 moderados de desarrollo (aceptados, ver "Dependencias"); producción 0.
+- Pint de archivos relacionados: aprobado. Pint global: 36 archivos fuera de formato desde antes de la 6.33 (Pint 1.29 y 1.32 marcan los mismos; CI corre `pint`, que corrige, no `pint --test`).
 - `git diff --check`: limpio.
 
 Ejecuta las suites de nuevo antes de afirmar que el workspace actual está
@@ -380,12 +392,20 @@ Deuda conocida:
 - Sin uso desde que se retiraron las rutas de `legacy-invoices` (6.31), conservados a propósito: `App\Http\Controllers\Api\LegacyInvoiceController`, el modelo `App\Models\LegacyInvoice` (sólo lo referencia la relación siguiente) y `Company::legacyInvoices()` (`app/Models/Company.php:142`), que nunca resolvió nada porque `legacy_invoices` no tiene `company_id`. Decidir si se eliminan junto con la tabla, después de respaldar su registro.
 - Lint global frontend: 31 errores / 51 avisos previos (sobre todo `no-unused-vars`, `no-explicit-any` y reglas de React Hooks en maquetas).
 - `CompanyBillingReadinessService::evaluate()` (forma de pago de la empresa) no tiene consumidores desde la 6.25: decidir si se elimina.
-- Vulnerabilidades de dependencias: `composer audit` (2026-11-09) reporta 53 avisos en 12 paquetes (1 crítico, 15 altos, 23 medios, 6 bajos y 8 sin severidad) en `laravel/framework`, Guzzle, Symfony, `league/commonmark` y `league/flysystem`. Previos a la 6.32 (el retiro no cambió ninguna versión). Pendiente de una fase de actualización de dependencias.
-- Pruebas que dependen del `.env` local: 3 casos de `tests/Feature/Sat/ProductFiscalValidationTest.php` necesitan `FACTURAPI_TEST_KEY` (con HTTP simulado; nunca llaman a Facturapi). Con `.env.example` (CI, clon limpio) fallan por `pac_key_missing`. Corrección mínima pendiente: fijar una llave ficticia en esas pruebas o en `phpunit.xml`.
+- Resuelto en la 6.33: los 53 avisos de `composer audit` y los 5 de producción de `npm audit` (ver "Dependencias").
+- Resuelto en el cierre de la 6.32 (`0584583`): las pruebas ya no dependen de `FACTURAPI_TEST_KEY` del `.env` local.
 - Búsqueda parcial `LIKE`.
 - Índices de consulta pendientes de evaluación con datos reales.
 - Debe revisarse el diff del lockfile.
 - Los endpoints legacy siguen disponibles por compatibilidad.
+
+Dependencias (6.33):
+- Revisión continua: el workflow `audit` de cada repositorio corre cada lunes y falla con avisos altos o críticos de producción que no estén aceptados o con aceptaciones vencidas. Un aviso nuevo sin corrección se acepta sólo con motivo, mitigación y fecha de revisión en `security/accepted-advisories.json` del repositorio.
+- Avisos aceptados:
+  - `GHSA-g3hv-75wg-m249` (`minimatch` 10.2.x, moderado, sólo desarrollo; arrastra los otros 7 moderados de la cadena `eslint-config-next` → `typescript-eslint`). DoS por amplificación de patrones; la corrección es 11.0.1 y ni la última `typescript-eslint` (8.72.2) la acepta. Sólo corre en ESLint sobre nuestro código; no va en el build ni en producción. No usar `npm audit fix --force` (bajaría `eslint-config-next` a 15.5.29). Revisar el 2027-02-09 o al actualizar `eslint-config-next`. Lista: `app-front/security/accepted-advisories.json`.
+  - api-v1: ninguno (`api-v1/security/accepted-advisories.json` vacía).
+- Mitigaciones vigentes: `next dev` sólo en `127.0.0.1` y sin `allowedDevOrigins` (no exponerlo por Tailscale ni por la red local); `images.unoptimized: true` mientras la app no use `next/image` (si algún día se usa, reevaluar los avisos del optimizador y no habilitar `dangerouslyAllowSVG`).
+- Pendientes: `eslint-config-next` 16.4.5 (decidir si se corrigen los 14 errores nuevos de React Hooks o se mantiene 16.1.6); Next 16.4.6 (publicada el 2026-11-09, no evaluada); versiones mayores fuera de la 6.33: Laravel 13, Pest 4 (con `pest-plugin-laravel` 4) y Tinker 3, cada una en su fase con sus notas de actualización.
 
 Hallazgos de producto pendientes (verificados en el código):
 - `billing:pac-check` no compara el `support_email` de Facturapi con el correo de contacto local ni avisa si la organización trae un logotipo que no se subió desde el sistema (en desarrollo, ambos heredados).
@@ -418,6 +438,7 @@ Pendientes antes de P1:
 - Resuelto en la 6.32: la web de Laravel, Inertia y Fortify se retiraron; sólo quedan `api/*` y `up`.
 - Correo transaccional (6.32, D4): elegir el proveedor SMTP, con un remitente propio verificado (SPF/DKIM); `FRONTEND_URL` con la URL https pública de Next.js; `php artisan mail:check --connect` debe pasar en producción; el worker de colas debe estar corriendo (el correo de recuperación va en cola). Probar una recuperación real hacia un correo del responsable antes del piloto.
 - Salida HTTPS del servidor hacia `api.pwnedpasswords.com` (regla de contraseñas filtradas); sin salida se aceptan contraseñas sin esa comprobación y aparece `password_breach_check.unavailable` en el log.
+- Infraestructura de producción (decidido en la 6.33): el servidor será Linux y Next.js se servirá detrás de un proxy inverso. La forma exacta (proxy, TLS, `next start` o salida `standalone`, puertos y encabezados reenviados) se decide en P1. Con Linux no aplica el aviso de ejecución remota de Next en servidores Windows; `images.unoptimized` se mantiene.
 - 2FA del producto: `POST /api/login` todavía no la exige. Fortify se retiró en la 6.32 y nadie puede activarla ni completar un reto; las columnas `two_factor_*` se conservan como datos. Pendiente antes del lanzamiento general.
 
 Riesgos pendientes:
@@ -471,7 +492,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.32 — Cuentas de usuario en Next.js (ver sección 7), cerrada el 2026-11-09. La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
+La última fase completada es la FASE 6.33 — Actualización de dependencias (ver sección 7), cerrada el 2026-11-09; queda pendiente la decisión sobre `eslint-config-next` 16.4.5 (sección 8, "Dependencias"). La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -481,6 +502,7 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.30 — Envío del CFDI por correo. Completa.
 - FASE 6.31 — Modo Live con una empresa piloto. Código y R0 completos; P1 a P7 pendientes (incluye la verificación obligatoria del acuse en la primera cancelación real; ver `DEPLOYMENT.md`, sección 10).
 - FASE 6.32 — Cuentas de usuario en Next.js (cambio de contraseña, cambio obligatorio, recuperación por correo) y retiro de la web de Laravel. Completa.
+- FASE 6.33 — Actualización de dependencias (Laravel 12.71, Symfony, Guzzle, CommonMark, Flysystem, Next 16.4.5) y auditoría en CI. Completa; `eslint-config-next` 16.4.5 pendiente de decisión.
 
 Hito 2 — Lanzamiento general:
 - 2FA del producto: exigirla en `POST /api/login` y en Next.js (la web de Laravel que la ofrecía se retiró en la 6.32; las columnas `two_factor_*` se conservan).
