@@ -7,10 +7,17 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
+use App\Models\TaxRate;
+use App\Services\Taxes\LineTaxWriter;
+use App\Services\Taxes\TaxSpec;
 use App\Support\Sat\SatCatalog;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\DB;
 
 class ProductController extends Controller
 {
+    public function __construct(private readonly LineTaxWriter $taxWriter) {}
+
     /**
      * Obtener todos los productos
      */
@@ -35,7 +42,14 @@ class ProductController extends Controller
     {
         $this->authorize('create', Product::class);
 
-        $product = Product::create($request->validated());
+        // Fase 6.34: impuestos del producto (product_taxes): `taxes` o, por
+        // compatibilidad, `tax_rate_id`.
+        $product = DB::transaction(function () use ($request): Product {
+            $product = Product::create(Arr::except($request->validated(), ['taxes']));
+            $this->syncTaxes($product, $request);
+
+            return $product;
+        });
 
         return (new ProductResource($product))->response()->setStatusCode(201);
     }
@@ -61,7 +75,10 @@ class ProductController extends Controller
 
         $this->authorize('update', $product);
 
-        $product->update($request->validated());
+        DB::transaction(function () use ($product, $request): void {
+            $product->update(Arr::except($request->validated(), ['taxes']));
+            $this->syncTaxes($product, $request);
+        });
 
         return new ProductResource($product);
     }
@@ -80,5 +97,25 @@ class ProductController extends Controller
         return response()->json([
             'message' => 'Producto eliminado correctamente',
         ]);
+    }
+
+    /**
+     * Fase 6.34: `taxes` reemplaza los impuestos del producto; `tax_rate_id`
+     * (la pantalla actual) los reemplaza por esa tasa o por ninguno. Sin
+     * ninguno de los dos, no se tocan.
+     */
+    private function syncTaxes(Product $product, StoreProductRequest|UpdateProductRequest $request): void
+    {
+        $specs = $request->taxSpecs();
+
+        if ($specs === null && $request->exists('tax_rate_id')) {
+            $taxRate = $product->tax_rate_id !== null ? TaxRate::find($product->tax_rate_id) : null;
+            $specs = $taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : [];
+        }
+
+        if ($specs !== null) {
+            $this->taxWriter->replaceProductTaxes($product, $specs);
+            $product->load('taxes');
+        }
     }
 }

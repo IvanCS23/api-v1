@@ -2,12 +2,16 @@
 
 namespace App\Http\Requests;
 
+use App\Http\Requests\Concerns\ValidatesLineTaxes;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Validator;
 
 class UpdateQuoteItemRequest extends FormRequest
 {
+    use ValidatesLineTaxes;
+
     public function authorize(): bool
     {
         return true;
@@ -31,6 +35,13 @@ class UpdateQuoteItemRequest extends FormRequest
             'unit_price' => ['sometimes', 'numeric', 'min:0'],
             'discount' => ['sometimes', 'numeric', 'min:0'],
             'tax_rate_id' => ['sometimes', 'nullable', 'integer', 'exists:tax_rates,id'],
+            // Fase 6.34: varios impuestos por línea (ver ValidatesLineTaxes).
+            ...$this->taxesRules(),
         ];
+    }
+
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(fn (Validator $validator) => $this->validateTaxRules($validator));
     }
 }

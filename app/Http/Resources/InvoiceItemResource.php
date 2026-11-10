@@ -24,6 +24,10 @@ class InvoiceItemResource extends JsonResource
             'discount' => $this->discount,
             'subtotal' => $this->subtotal,
             'tax_total' => $this->tax_total,
+            // Fase 6.34: tax_total sigue siendo la suma de los trasladados.
+            'taxes_transferred' => $this->taxes_transferred,
+            'taxes_withheld' => $this->taxes_withheld,
+            'taxes' => LineTaxResource::collection($this->whenLoaded('taxes')),
             'total' => $this->total,
             'product_clave_producto' => $this->product_clave_producto,
             'product_clave_unidad' => $this->product_clave_unidad,

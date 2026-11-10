@@ -45,6 +45,9 @@ class InvoiceResource extends JsonResource
             'subtotal' => $this->subtotal,
             'discount_total' => $this->discount_total,
             'tax_total' => $this->tax_total,
+            // Fase 6.34: tax_total sigue siendo la suma de los trasladados.
+            'taxes_transferred' => $this->taxes_transferred,
+            'taxes_withheld' => $this->taxes_withheld,
             'total' => $this->total,
             'currency' => $this->currency,
             'notes' => $this->notes,

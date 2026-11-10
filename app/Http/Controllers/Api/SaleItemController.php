@@ -11,11 +11,16 @@ use App\Models\Sale;
 use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
 use App\Services\Sales\SaleCalculator;
+use App\Services\Taxes\LineTaxWriter;
+use App\Services\Taxes\TaxSpec;
 use Illuminate\Support\Facades\DB;
 
 class SaleItemController extends Controller
 {
-    public function __construct(private readonly SaleCalculator $calculator) {}
+    public function __construct(
+        private readonly SaleCalculator $calculator,
+        private readonly LineTaxWriter $taxWriter,
+    ) {}
 
     public function index($saleId)
     {
@@ -43,9 +48,13 @@ class SaleItemController extends Controller
             : (float) $product->precio_unitario;
         $discount = $request->validated('discount') !== null ? (float) $request->validated('discount') : 0.0;
 
-        $calculated = $this->calculator->calculateItem($quantity, $unitPrice, $discount, $taxRate);
+        // Fase 6.34: `taxes`, o `tax_rate_id` (aunque sea nulo), o los del producto.
+        $specs = $this->taxWriter->specsForNewLine($product, $request->taxSpecs(), $request->exists('tax_rate_id'), $taxRate);
+        $calculated = $this->calculator->calculateLine($quantity, $unitPrice, $discount, $specs);
+        $taxRows = $calculated['taxes'];
+        unset($calculated['taxes']);
 
-        $item = DB::transaction(function () use ($sale, $product, $taxRate, $quantity, $unitPrice, $calculated) {
+        $item = DB::transaction(function () use ($sale, $product, $taxRate, $quantity, $unitPrice, $calculated, $taxRows) {
             $locked = $this->lockedEditableSale($sale);
 
             if ($locked === null) {
@@ -60,6 +69,7 @@ class SaleItemController extends Controller
                 'unit_price' => $unitPrice,
                 ...$calculated,
             ]);
+            $this->taxWriter->replace($item, $taxRows);
 
             $this->calculator->recalculateSale($locked)->save();
 
@@ -89,7 +99,7 @@ class SaleItemController extends Controller
 
         $data = $request->validated();
 
-        $updated = DB::transaction(function () use ($data, $item, $sale): bool {
+        $updated = DB::transaction(function () use ($data, $item, $sale, $request): bool {
             $locked = $this->lockedEditableSale($sale);
 
             if ($locked === null) {
@@ -109,7 +119,20 @@ class SaleItemController extends Controller
             $taxRateId = array_key_exists('tax_rate_id', $data) ? $data['tax_rate_id'] : $item->tax_rate_id;
             $taxRate = $taxRateId !== null ? TaxRate::find($taxRateId) : null;
 
-            $calculated = $this->calculator->calculateItem($quantity, $unitPrice, $discount, $taxRate);
+            // Fase 6.34: `taxes` o `tax_rate_id` de la petición; si no trae
+            // ninguno, los impuestos que ya tiene la línea (o su tasa de antes).
+            if (array_key_exists('taxes', $data)) {
+                $specs = $request->taxSpecs() ?? [];
+                $taxRateId = null;
+            } elseif (array_key_exists('tax_rate_id', $data)) {
+                $specs = $taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : [];
+            } else {
+                $specs = $item->taxes->isNotEmpty() ? TaxSpec::fromModels($item->taxes) : ($taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : []);
+            }
+
+            $calculated = $this->calculator->calculateLine($quantity, $unitPrice, $discount, $specs);
+            $taxRows = $calculated['taxes'];
+            unset($calculated['taxes']);
 
             $item->fill([
                 'quantity' => $quantity,
@@ -118,6 +141,7 @@ class SaleItemController extends Controller
                 ...$calculated,
             ]);
             $item->save();
+            $this->taxWriter->replace($item, $taxRows);
 
             $this->calculator->recalculateSale($locked)->save();
 

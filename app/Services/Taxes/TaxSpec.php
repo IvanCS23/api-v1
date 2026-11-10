@@ -5,6 +5,7 @@ namespace App\Services\Taxes;
 use App\Enums\TaxFactorType;
 use App\Enums\TaxType;
 use App\Models\TaxRate;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Fase 6.34: un impuesto a aplicar en una línea, antes de calcularlo.
@@ -55,6 +56,32 @@ final class TaxSpec
             $exempt || ($data['rate'] ?? null) === null ? null : DecimalMath::round(DecimalMath::of($data['rate']), 6),
             $data['tax'] === '003' && $kind === TaxType::Traslado ? ($data['ieps_mode'] ?? self::IEPS_SUM_BEFORE_TAXES) : null,
         );
+    }
+
+    /** Un impuesto ya guardado (product_taxes o *_item_taxes). */
+    public static function fromModel(Model $tax): self
+    {
+        return self::fromArray([
+            'tax' => $tax->getAttribute('tax'),
+            'kind' => $tax->getAttribute('kind'),
+            'factor' => $tax->getAttribute('factor'),
+            'rate' => $tax->getAttribute('rate'),
+            'ieps_mode' => $tax->getAttribute('ieps_mode'),
+        ]);
+    }
+
+    /**
+     * @param  iterable<Model>  $taxes
+     * @return list<self>
+     */
+    public static function fromModels(iterable $taxes): array
+    {
+        $specs = [];
+        foreach ($taxes as $tax) {
+            $specs[] = self::fromModel($tax);
+        }
+
+        return $specs;
     }
 
     public function isWithholding(): bool

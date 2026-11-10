@@ -14,6 +14,9 @@ class Product extends Model
 {
     use BelongsToCompany, HasFactory, SoftDeletes;
 
+    /** Fase 6.34: sus impuestos viajan siempre con el modelo. */
+    protected $with = ['taxes'];
+
     protected $fillable = [
         'name',
         'type',

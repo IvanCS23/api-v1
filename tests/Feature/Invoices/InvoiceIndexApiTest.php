@@ -34,7 +34,8 @@ test('el listado tiene contrato explícito paginado y no incluye items ni campos
         'id', 'client_id', 'folio', 'cfdi_series', 'cfdi_folio_number', 'cfdi_folio',
         'cfdi_folio_matches_erp', 'status', 'client_name', 'client_rfc',
         'client_regimen_fiscal', 'client_uso_cfdi', 'client_codigo_postal', 'subtotal',
-        'discount_total', 'tax_total', 'total', 'currency', 'notes',
+        // Fase 6.34: trasladados y retenidos explícitos.
+        'discount_total', 'tax_total', 'taxes_transferred', 'taxes_withheld', 'total', 'currency', 'notes',
         'payment_form', 'payment_method', 'issued_at', 'cancelled_at',
         'created_at', 'updated_at',
     ])->and($response->json('data.0'))->not->toHaveKey('items')

@@ -12,8 +12,10 @@ use App\Models\InvoiceItem;
 use App\Models\Product;
 use App\Models\Sale;
 use App\Models\SaleItem;
+use App\Models\SaleItemTax;
 use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
+use App\Services\Taxes\LineTaxWriter;
 use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Facades\DB;
 
@@ -51,6 +53,7 @@ class SaleToInvoiceConverter
     public function __construct(
         private readonly SaleBillingReadinessService $billingReadiness,
         private readonly InvoiceNumberGenerator $numberGenerator,
+        private readonly LineTaxWriter $taxWriter = new LineTaxWriter,
     ) {}
 
     public function convert(Sale $sale, ?int $createdBy = null): Invoice
@@ -109,6 +112,8 @@ class SaleToInvoiceConverter
                 'subtotal' => $lockedSale->subtotal,
                 'discount_total' => $lockedSale->discount_total,
                 'tax_total' => $lockedSale->tax_total,
+                'taxes_transferred' => $lockedSale->taxes_transferred,
+                'taxes_withheld' => $lockedSale->taxes_withheld,
                 'total' => $lockedSale->total,
                 'currency' => $lockedSale->currency,
                 'notes' => $lockedSale->notes,
@@ -155,6 +160,8 @@ class SaleToInvoiceConverter
                     'discount' => $saleItem->discount,
                     'subtotal' => $saleItem->subtotal,
                     'tax_total' => $saleItem->tax_total,
+                    'taxes_transferred' => $saleItem->taxes_transferred,
+                    'taxes_withheld' => $saleItem->taxes_withheld,
                     'total' => $saleItem->total,
                     'product_clave_producto' => $product?->clave_producto,
                     'product_clave_unidad' => $product?->clave_unidad,
@@ -171,6 +178,11 @@ class SaleToInvoiceConverter
                 $item->company_id = $invoice->company_id;
                 $item->invoice_id = $invoice->id;
                 $item->save();
+
+                // Fase 6.34: snapshot fiscal de los impuestos de la línea
+                // (inmutable; es lo que se envía al PAC). Las columnas tax_*
+                // de arriba se conservan por compatibilidad.
+                $this->taxWriter->replace($item, $this->taxWriter->rowsToCopy($saleItem, SaleItemTax::class, 'sale_item_id'));
             }
 
             return $invoice;

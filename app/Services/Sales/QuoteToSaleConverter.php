@@ -7,9 +7,11 @@ use App\Enums\SaleStatus;
 use App\Exceptions\QuoteAlreadyConvertedException;
 use App\Models\Quote;
 use App\Models\QuoteItem;
+use App\Models\QuoteItemTax;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Taxes\LineTaxWriter;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -52,7 +54,10 @@ use Illuminate\Support\Facades\DB;
  */
 class QuoteToSaleConverter
 {
-    public function __construct(private readonly SaleNumberGenerator $numberGenerator) {}
+    public function __construct(
+        private readonly SaleNumberGenerator $numberGenerator,
+        private readonly LineTaxWriter $taxWriter = new LineTaxWriter,
+    ) {}
 
     public function convert(Quote $quote): Sale
     {
@@ -75,6 +80,8 @@ class QuoteToSaleConverter
                 'subtotal' => $lockedQuote->subtotal,
                 'discount_total' => $lockedQuote->discount_total,
                 'tax_total' => $lockedQuote->tax_total,
+                'taxes_transferred' => $lockedQuote->taxes_transferred,
+                'taxes_withheld' => $lockedQuote->taxes_withheld,
                 'total' => $lockedQuote->total,
                 'currency' => $lockedQuote->currency,
                 'notes' => $lockedQuote->notes,
@@ -96,11 +103,16 @@ class QuoteToSaleConverter
                     'discount' => $quoteItem->discount,
                     'subtotal' => $quoteItem->subtotal,
                     'tax_total' => $quoteItem->tax_total,
+                    'taxes_transferred' => $quoteItem->taxes_transferred,
+                    'taxes_withheld' => $quoteItem->taxes_withheld,
                     'total' => $quoteItem->total,
                 ]);
                 $item->company_id = $sale->company_id;
                 $item->sale_id = $sale->id;
                 $item->save();
+
+                // Fase 6.34: los impuestos de la línea, tal cual.
+                $this->taxWriter->replace($item, $this->taxWriter->rowsToCopy($quoteItem, QuoteItemTax::class, 'quote_item_id'));
             }
 
             $lockedQuote->forceFill([

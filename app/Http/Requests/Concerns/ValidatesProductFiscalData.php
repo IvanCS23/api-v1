@@ -23,6 +23,9 @@ use Illuminate\Validation\Validator;
  */
 trait ValidatesProductFiscalData
 {
+    // Fase 6.34: `taxes` (varios impuestos) en lugar de `tax_rate_id`.
+    use ValidatesLineTaxes;
+
     private const FISCAL_FIELDS = ['clave_producto', 'clave_unidad', 'objeto_imp', 'tax_rate_id'];
 
     protected function normalizeFiscalData(): void
@@ -59,6 +62,7 @@ trait ValidatesProductFiscalData
                 ->where('active', true)
                 ->where('tax_type', TaxType::Traslado->value)
                 ->where('code', '002')],
+            ...$this->taxesRules(),
         ];
     }
 
@@ -73,6 +77,13 @@ trait ValidatesProductFiscalData
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator): void {
+            // Fase 6.34: con `taxes`, la coherencia con el objeto de impuesto la
+            // revisa TaxRuleValidator (no la regla de tax_rate_id de la 6.26).
+            if ($this->exists('taxes')) {
+                $objeto = $this->exists('objeto_imp') ? $this->input('objeto_imp') : ($this->currentFiscalData()['objeto_imp'] ?? null);
+                $this->validateTaxRules($validator, is_string($objeto) && $objeto !== '' ? $objeto : null);
+            }
+
             $sent = array_filter(self::FISCAL_FIELDS, fn (string $field): bool => $this->exists($field));
 
             if ($sent === [] || $validator->errors()->hasAny(self::FISCAL_FIELDS)) {
@@ -85,6 +96,9 @@ trait ValidatesProductFiscalData
             }
 
             foreach (app(SatFiscalValidator::class)->productIssues($product) as $issue) {
+                if ($this->exists('taxes') && $issue['code'] === 'PRODUCT_TAX_OBJECT_MISMATCH') {
+                    continue;
+                }
                 $validator->errors()->add($issue['field'], $issue['message']);
             }
         });

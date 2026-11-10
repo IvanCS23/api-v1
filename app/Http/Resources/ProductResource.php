@@ -40,6 +40,8 @@ class ProductResource extends JsonResource
 
         return [
             ...parent::toArray($request),
+            // Fase 6.34: impuestos del producto (traslados y retenciones).
+            'taxes' => LineTaxResource::collection($this->whenLoaded('taxes')),
             'fiscal_issues' => app(SatFiscalValidator::class)->productIssues(
                 $this->resource->only(['clave_producto', 'clave_unidad', 'objeto_imp', 'tax_rate_id']),
                 $this->productKeys === null ? null : isset($this->productKeys[$productKey]),

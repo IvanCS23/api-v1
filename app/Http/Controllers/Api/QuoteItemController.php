@@ -10,11 +10,16 @@ use App\Models\Product;
 use App\Models\Quote;
 use App\Models\TaxRate;
 use App\Services\Sales\QuoteCalculator;
+use App\Services\Taxes\LineTaxWriter;
+use App\Services\Taxes\TaxSpec;
 use Illuminate\Support\Facades\DB;
 
 class QuoteItemController extends Controller
 {
-    public function __construct(private readonly QuoteCalculator $calculator) {}
+    public function __construct(
+        private readonly QuoteCalculator $calculator,
+        private readonly LineTaxWriter $taxWriter,
+    ) {}
 
     public function index($quoteId)
     {
@@ -46,18 +51,27 @@ class QuoteItemController extends Controller
             : (float) $product->precio_unitario;
         $discount = $request->validated('discount') !== null ? (float) $request->validated('discount') : 0.0;
 
-        $calculated = $this->calculator->calculateItem($quantity, $unitPrice, $discount, $taxRate);
+        // Fase 6.34: `taxes`, o `tax_rate_id` (aunque sea nulo), o los del producto.
+        $specs = $this->taxWriter->specsForNewLine($product, $request->taxSpecs(), $request->exists('tax_rate_id'), $taxRate);
+        $calculated = $this->calculator->calculateLine($quantity, $unitPrice, $discount, $specs);
+        $taxRows = $calculated['taxes'];
+        unset($calculated['taxes']);
 
-        $item = $quote->items()->create([
-            'product_id' => $product->id,
-            'tax_rate_id' => $taxRate?->id,
-            'description' => $product->name,
-            'quantity' => $quantity,
-            'unit_price' => $unitPrice,
-            ...$calculated,
-        ]);
+        $item = DB::transaction(function () use ($quote, $product, $taxRate, $quantity, $unitPrice, $calculated, $taxRows) {
+            $item = $quote->items()->create([
+                'product_id' => $product->id,
+                'tax_rate_id' => $taxRate?->id,
+                'description' => $product->name,
+                'quantity' => $quantity,
+                'unit_price' => $unitPrice,
+                ...$calculated,
+            ]);
+            $this->taxWriter->replace($item, $taxRows);
 
-        $this->calculator->recalculateQuote($quote)->save();
+            $this->calculator->recalculateQuote($quote)->save();
+
+            return $item;
+        });
 
         return (new QuoteItemResource($item))->response()->setStatusCode(201);
     }
@@ -78,7 +92,7 @@ class QuoteItemController extends Controller
 
         $data = $request->validated();
 
-        DB::transaction(function () use ($data, $item, $quote): void {
+        DB::transaction(function () use ($data, $item, $quote, $request): void {
             if (array_key_exists('product_id', $data)) {
                 $item->product_id = $data['product_id'];
             }
@@ -92,7 +106,20 @@ class QuoteItemController extends Controller
             $taxRateId = array_key_exists('tax_rate_id', $data) ? $data['tax_rate_id'] : $item->tax_rate_id;
             $taxRate = $taxRateId !== null ? TaxRate::find($taxRateId) : null;
 
-            $calculated = $this->calculator->calculateItem($quantity, $unitPrice, $discount, $taxRate);
+            // Fase 6.34: `taxes` o `tax_rate_id` de la petición; si no trae
+            // ninguno, los impuestos que ya tiene la línea (o su tasa de antes).
+            if (array_key_exists('taxes', $data)) {
+                $specs = $request->taxSpecs() ?? [];
+                $taxRateId = null;
+            } elseif (array_key_exists('tax_rate_id', $data)) {
+                $specs = $taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : [];
+            } else {
+                $specs = $item->taxes->isNotEmpty() ? TaxSpec::fromModels($item->taxes) : ($taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : []);
+            }
+
+            $calculated = $this->calculator->calculateLine($quantity, $unitPrice, $discount, $specs);
+            $taxRows = $calculated['taxes'];
+            unset($calculated['taxes']);
 
             $item->fill([
                 'quantity' => $quantity,
@@ -101,6 +128,7 @@ class QuoteItemController extends Controller
                 ...$calculated,
             ]);
             $item->save();
+            $this->taxWriter->replace($item, $taxRows);
 
             $this->calculator->recalculateQuote($quote)->save();
         });

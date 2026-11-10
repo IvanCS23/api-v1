@@ -4,6 +4,7 @@ namespace App\Services\Sales;
 
 use App\Models\Quote;
 use App\Models\TaxRate;
+use App\Services\Taxes\TaxSpec;
 
 /**
  * Único responsable de calcular subtotal/descuento/impuesto/total de una
@@ -20,11 +21,22 @@ class QuoteCalculator
     }
 
     /**
-     * @return array{subtotal: float, discount: float, tax_total: float, total: float}
+     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
      */
     public function calculateItem(float $quantity, float $unitPrice, float $discount = 0, ?TaxRate $taxRate = null): array
     {
         return $this->lineItemCalculator->calculateItem($quantity, $unitPrice, $discount, $taxRate);
+    }
+
+    /**
+     * Fase 6.34: la línea con varios impuestos (ver LineItemCalculator::calculateLine).
+     *
+     * @param  list<TaxSpec>  $specs
+     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float, taxes: list<array<string, mixed>>}
+     */
+    public function calculateLine(mixed $quantity, mixed $unitPrice, mixed $discount, array $specs): array
+    {
+        return $this->lineItemCalculator->calculateLine($quantity, $unitPrice, $discount, $specs);
     }
 
     /**
