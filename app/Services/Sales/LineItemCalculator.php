@@ -3,6 +3,8 @@
 namespace App\Services\Sales;
 
 use App\Models\TaxRate;
+use App\Services\Taxes\LineTaxCalculator;
+use App\Services\Taxes\TaxSpec;
 use Illuminate\Database\Eloquent\Model;
 
 /**
@@ -19,21 +21,47 @@ use Illuminate\Database\Eloquent\Model;
  */
 class LineItemCalculator
 {
+    public function __construct(private readonly LineTaxCalculator $taxes = new LineTaxCalculator) {}
+
     /**
-     * @return array{subtotal: float, discount: float, tax_total: float, total: float}
+     * Fase 6.34 (3): delega en LineTaxCalculator (bcmath). Una tasa de
+     * retención ya no se suma como traslado: va a `taxes_withheld` y se
+     * resta del total. `tax_total` sigue siendo la suma de los trasladados.
+     *
+     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
      */
     public function calculateItem(float $quantity, float $unitPrice, float $discount = 0, ?TaxRate $taxRate = null): array
     {
-        $subtotal = round($quantity * $unitPrice, 2);
-        $taxableBase = max($subtotal - $discount, 0);
-        $taxTotal = $taxRate !== null ? round($taxableBase * (float) $taxRate->rate, 2) : 0.0;
-        $total = round($taxableBase + $taxTotal, 2);
+        return $this->columns($this->taxes->calculate($quantity, $unitPrice, $discount, $taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : []));
+    }
 
+    /**
+     * Fase 6.34: la línea con varios impuestos. Devuelve las columnas de la
+     * línea y, en `taxes`, las filas de impuestos por línea.
+     *
+     * @param  list<TaxSpec>  $specs
+     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float, taxes: list<array<string, mixed>>}
+     */
+    public function calculateLine(mixed $quantity, mixed $unitPrice, mixed $discount, array $specs): array
+    {
+        $result = $this->taxes->calculate($quantity, $unitPrice, $discount, $specs);
+
+        return [...$this->columns($result), 'taxes' => $result['taxes']];
+    }
+
+    /**
+     * @param  array<string, mixed>  $result
+     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
+     */
+    private function columns(array $result): array
+    {
         return [
-            'subtotal' => $subtotal,
-            'discount' => $discount,
-            'tax_total' => $taxTotal,
-            'total' => $total,
+            'subtotal' => (float) $result['subtotal'],
+            'discount' => (float) $result['discount'],
+            'tax_total' => (float) $result['tax_total'],
+            'taxes_transferred' => (float) $result['taxes_transferred'],
+            'taxes_withheld' => (float) $result['taxes_withheld'],
+            'total' => (float) $result['total'],
         ];
     }
 
@@ -50,6 +78,8 @@ class LineItemCalculator
             'subtotal' => round((float) $items->sum('subtotal'), 2),
             'discount_total' => round((float) $items->sum('discount'), 2),
             'tax_total' => round((float) $items->sum('tax_total'), 2),
+            'taxes_transferred' => round((float) $items->sum('taxes_transferred'), 2),
+            'taxes_withheld' => round((float) $items->sum('taxes_withheld'), 2),
             'total' => round((float) $items->sum('total'), 2),
         ]);
 
