@@ -1,0 +1,4 @@
+clave,descripcion,retencion,traslado,local_federal,vigencia_inicio,vigencia_fin
+001,ISR,Si,No,Federal,2022-01-01,
+002,IVA,Si,Si,Federal,2022-01-01,
+003,IEPS,Si,Si,Federal,2022-01-01,

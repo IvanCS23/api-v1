@@ -15,8 +15,39 @@ editan a mano ni se toman de terceros.
 | Tamaño | 48 774 656 bytes |
 | SHA-256 del .xls | `fde78b456d1e0d90366bfc68f8312f9edce5703ad5dc8ccebf09c462db13a079` |
 
-El .xls no se versiona (49 MB); los CSV sí. `manifest.json` repite el
+El .xls no se versiona (49 MB; `.gitignore` lo excluye); los CSV sí. `manifest.json` repite el
 SHA-256 del origen y guarda el de cada CSV generado.
+
+## Catálogos de impuestos (Fase 6.34)
+
+c_Impuesto, c_TipoFactor y c_TasaOCuota salen de un archivo más nuevo. Las
+seis hojas de la tabla siguiente se compararon contra él y salen idénticas
+byte a byte, así que sus CSV no se regeneraron y conservan el origen de
+arriba.
+
+| Dato | Valor |
+|---|---|
+| Archivo | `catCFDI_V_4_20261106.xls` (copiado por el responsable desde el portal del SAT el 2026-11-10) |
+| Tamaño | 48 771 072 bytes |
+| SHA-256 del .xls | `6249e37275ce164a1c4ac44e726dcd60858dac5c5604ff6c9ab06005a9199e1a` |
+
+| Hoja | CSV | Filas | Versión | Revisión | Publicación |
+|---|---|---|---|---|---|
+| c_Impuesto | `impuesto.csv` | 3 | 1 | 0 | — |
+| c_TipoFactor | `tipo_factor.csv` | 3 | 1 | 0 | — |
+| c_TasaOCuota | `tasa_o_cuota.csv` | 19 | 4 | 0 | 2025-12-31 |
+
+- Se generan con `tools/convert_tax_catalogs.php` (mismo lector), que sólo
+  escribe esos tres CSV y la llave `tax_catalogs` de `manifest.json`.
+- c_TasaOCuota: valores con 6 decimales; en las filas "Fijo" el SAT deja vacío
+  el mínimo y pone el valor en el máximo. La fila "IVA Crédito aplicado del
+  50%" (8 %, región fronteriza) queda marcada aparte en `SatCatalog::taxRates()`.
+- La cuota de IEPS (rango 0 – 72.1605) rige desde el 2026-01-01.
+
+```bash
+# desde api-v1
+php -d memory_limit=1G database/data/sat/tools/convert_tax_catalogs.php database/data/sat/catCFDI_V_4_AAAAMMDD.xls
+```
 
 ## Versiones de cada catálogo (encabezado de su hoja)
 

@@ -69,6 +69,73 @@ final class SatCatalog
         ]);
     }
 
+    /**
+     * Fase 6.34: c_Impuesto (001 ISR, 002 IVA, 003 IEPS) y si admite
+     * traslado y retención.
+     *
+     * @return array<string, array{code: string, description: string, transfer: bool, withholding: bool}>
+     */
+    public static function taxes(): array
+    {
+        return self::load('impuesto', fn (array $row): array => [
+            'code' => $row['clave'],
+            'description' => $row['descripcion'],
+            'transfer' => self::yes($row['traslado']),
+            'withholding' => self::yes($row['retencion']),
+        ]);
+    }
+
+    /**
+     * Fase 6.34: c_TipoFactor (Tasa, Cuota, Exento).
+     *
+     * @return array<string, array{code: string}>
+     */
+    public static function taxFactors(): array
+    {
+        return self::load('tipo_factor', fn (array $row): array => ['code' => $row['clave']]);
+    }
+
+    /**
+     * Fase 6.34: c_TasaOCuota. Cada fila es un valor fijo (min = max) o un
+     * rango, con 6 decimales como texto. `tax` es la clave de c_Impuesto;
+     * `border_credit` marca la fila "IVA Crédito aplicado del 50%" (8 %,
+     * estímulo de la región fronteriza, fuera del alcance de la 6.34).
+     *
+     * @return array<string, array{code: string, range: bool, min: string, max: string, tax: string, factor: string, transfer: bool, withholding: bool, border_credit: bool}>
+     */
+    public static function taxRates(): array
+    {
+        $codes = [];
+        foreach (self::taxes() as $tax) {
+            $codes[$tax['description']] = $tax['code'];
+        }
+
+        return self::load('tasa_o_cuota', function (array $row) use ($codes): array {
+            $borderCredit = ! isset($codes[$row['impuesto']]) && str_starts_with($row['impuesto'], 'IVA');
+            $tax = $codes[$row['impuesto']] ?? ($borderCredit ? $codes['IVA'] : throw new RuntimeException("Impuesto desconocido en c_TasaOCuota: {$row['impuesto']}"));
+            $range = $row['tipo'] === 'Rango';
+            $min = $range ? $row['minimo'] : $row['maximo'];
+
+            return [
+                'code' => implode('|', [$row['impuesto'], $row['factor'], $row['tipo'], $min, $row['maximo']]),
+                'range' => $range,
+                'min' => $min,
+                'max' => $row['maximo'],
+                'tax' => $tax,
+                'factor' => $row['factor'],
+                'transfer' => self::yes($row['traslado']),
+                'withholding' => self::yes($row['retencion']),
+                'border_credit' => $borderCredit,
+            ];
+        });
+    }
+
+    /** El SAT escribe "Sí" en unas hojas y "Si" en otras. */
+    private static function yes(string $value): bool
+    {
+        return in_array($value, ['Sí', 'Si'], true);
+    }
+
     public static function isTaxRegime(?string $code): bool
     {
         return $code !== null && isset(self::taxRegimes()[$code]);

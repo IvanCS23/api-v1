@@ -20,3 +20,6 @@ yarn-error.log
 /.nova
 /.vscode
 /.zed
+
+# Fase 6.34: el catálogo oficial del SAT (49 MB) no se versiona; sí sus CSV.
+/database/data/sat/*.xls

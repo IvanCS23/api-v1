@@ -80,5 +80,50 @@
             },
             "csv_sha256": "dad8ab5f38cc8e2d02ac352b7a4c69426cc0b4b26bd341e44a37adce03b613c2"
         }
+    },
+    "tax_catalogs": {
+        "source_file": "catCFDI_V_4_20261106.xls",
+        "source_sha256": "6249e37275ce164a1c4ac44e726dcd60858dac5c5604ff6c9ab06005a9199e1a",
+        "catalogs": {
+            "impuesto": {
+                "sheet": "c_Impuesto",
+                "rows": 3,
+                "version": {
+                    "version_cfdi": "4",
+                    "version_catalogo": "1",
+                    "revision": "0",
+                    "fecha_publicacion": "",
+                    "vigencia_inicio": "2022-01-01",
+                    "vigencia_fin": ""
+                },
+                "csv_sha256": "bf3936c23871795fe0692bf20f1651abba231a89f585ea3caf2b526fdcc2d9a6"
+            },
+            "tipo_factor": {
+                "sheet": "c_TipoFactor",
+                "rows": 3,
+                "version": {
+                    "version_cfdi": "4",
+                    "version_catalogo": "1",
+                    "revision": "0",
+                    "fecha_publicacion": "",
+                    "vigencia_inicio": "2022-01-01",
+                    "vigencia_fin": ""
+                },
+                "csv_sha256": "463a2fcfa8f161df0b54e1d62dda192d51484b141fcba6a496dcea5fb2ea0bba"
+            },
+            "tasa_o_cuota": {
+                "sheet": "c_TasaOCuota",
+                "rows": 19,
+                "version": {
+                    "version_cfdi": "4",
+                    "version_catalogo": "4",
+                    "revision": "0",
+                    "fecha_publicacion": "2025-12-31",
+                    "vigencia_inicio": "2026-01-02",
+                    "vigencia_fin": ""
+                },
+                "csv_sha256": "d95703a0059166dd8b5c8de13a71d126539724fafa3e2e8fe9a9ac971e6a78d2"
+            }
+        }
     }
 }
