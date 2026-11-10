@@ -344,10 +344,10 @@ FASE 6.33 — Actualización de dependencias (cerrada el 2026-11-09):
 - api-v1 (sólo `composer.lock`; `composer.json` sin cambios): `laravel/framework` 12.54.1 → 12.71.0; Symfony 7.4.x → 7.4.17–7.4.23 y polyfills 1.33 → 1.37–1.43; Guzzle 7.10.0 → 7.16.1 y psr7 2.9.0 → 2.13.2; `league/commonmark` 2.8.1 → 2.10.7; `league/flysystem` 3.32.0 → 3.36.0; herramientas: Pest 3.8.7, PHPUnit 11.5.56, Pint 1.32.1, Sail 1.69.0, Mockery 1.6.15 y `hamcrest/hamcrest-php` 3.0.0 (mayor, sólo desarrollo, vía Mockery; las pruebas no lo usan). `composer audit`: 53 avisos en 12 paquetes (1 crítico, 15 altos) → 0.
 - Cambios de comportamiento de Laravel 12.54 → 12.71, revisados en las notas y comparando el código del framework: TokenGuard rechaza credenciales que no son texto (antes un `api_token` arreglo daba 500 por `TypeError` en `hash()`; con `hash => true` no llegaba a autenticar); la regla `email` rechaza saltos de línea (antes pasaban los plegados que permite el RFC, p. ej. `"persona\r\n @example.com"`); la regla `in` compara estricto (las nuestras usan textos canónicos y `payment_form` ya tenía regex); el escape del Markdown del correo se endureció. Sin cambios en `NotPwnedVerifier`, `Rules\Password`, `Rules\Email`, `redirectGuestsTo`, `shouldRenderJsonWhen`, `Authenticate` ni los brokers de contraseña; `PendingRequest` sólo se refactorizó. El aviso de inclusión de relaciones era de `JsonApiResource` (no se usa) y 12.71.0 sólo corrige `Concurrency\ProcessDriver` (no se usa).
 - app-front: `next` 16.2.1 → 16.4.5 (`^16.4.5`), con postcss 8.5.23 y sharp 0.35.5; `npm audit fix` sin `--force` (vitest 4.1.12 y dependencias anidadas). Notas de 16.2 a 16.4 revisadas: sin cambios incompatibles en lo que se usa. `images.unoptimized: true` (la app no usa `next/image`; los logotipos son `<img>` con URL `blob:`): con `next start`, `/_next/image` responde 404 a imágenes locales, SVG y URL externas (antes procesaba PNG → WebP) y los SVG de `public/` siguen en 200. `npm audit`: 24 avisos (1 crítico, 10 altos) → 8 moderados, todos de desarrollo; producción 5 → 0.
-- `eslint-config-next` sigue en 16.1.6 (pendiente de decisión): la 16.4.5 sube el lint de 31 a 45 errores y de 51 a 54 avisos (`react-hooks/set-state-in-effect` más estricta, +13 en 11 archivos de componentes y hooks; `preserve-manual-memoization` +1; `no-location-assign-relative-destination` +3 avisos) y no corrige ningún aviso de seguridad.
+- `eslint-config-next` se queda en 16.1.6 (decidido al cerrar la 6.33): la 16.4.5 sube el lint de 31 a 45 errores y de 51 a 54 avisos y no corrige ningún aviso de seguridad. Detalle y archivos en la hoja de ruta, "Lint y Pint globales".
 - Pruebas nuevas: `FrameworkUpgradeRegressionTest` (fallan con 12.54 y pasan con 12.71: un `api_token` que no es texto da 401, la regla `email` y la recuperación rechazan saltos de línea, el correo de recuperación se arma en HTML con el enlace correcto), `HttpTransportSmokeTest` (transporte real contra dos `php -S` locales; fuera de `127.0.0.1` y `localhost` todo sigue bloqueado: credencial con la forma del cliente de Facturapi, una redirección a otro host la quita, espera de 3 s, `PwnedPasswordVerifier` falla abierto en 3 s) y `FilesystemUpgradeTest`. Verificación en navegador con `next start` 16.4.5, API aislada (SQLite) y Mailpit: recuperar, restablecer, cambiar desde Configuración y cambio obligatorio, 23/23.
 - CI: workflow `audit` en ambos repositorios (push, PR, cada lunes y manual) con `composer audit --locked --no-dev` y `npm audit --omit=dev` desde el lock, y una compuerta (`api-v1/scripts/ci/audit-gate.php`, `app-front/scripts/audit-gate.mjs`) que falla sólo con avisos altos o críticos de producción que no estén en `security/accepted-advisories.json`, con aceptaciones vencidas (`review_by`) o si la auditoría no se puede leer. Probadas en local contra los locks anteriores a la fase (fallan con 15 y 25 altos o críticos). app-front no tenía CI.
-- Commits api-v1: `037b677` (Laravel y Symfony), `c95c718` (Guzzle y psr7), `2ac7b28` (CommonMark y Flysystem), `cfcec70` (herramientas), `e46b15c` (CI) y el de documentación. app-front: `fcbbaea` (mitigación), `7e8d44a` (Next), `67e7b21` (audit fix), `e80cf43` (CI).
+- Commits api-v1: `037b677` (Laravel y Symfony), `c95c718` (Guzzle y psr7), `2ac7b28` (CommonMark y Flysystem), `cfcec70` (herramientas), `e46b15c` (CI), `9ad49c5` (documentación) y, al cerrar, `5654f7c` (formato con Pint en 36 archivos, sin cambios de lógica), `a91685f` (CI con `pint --test`) y el de documentación del cierre. app-front: `fcbbaea` (mitigación), `7e8d44a` (Next), `67e7b21` (audit fix), `e80cf43` (CI).
 
 Documentación principal:
 
@@ -363,7 +363,7 @@ Línea base de la FASE 6.33 (verificada el 2026-11-09 sobre `changes-ivan` e
 - Build Next.js 16.4.5: aprobado, 37 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`. Con `eslint-config-next` 16.4.5 serían 45 / 54 (ver la 6.33).
 - `composer audit`: 0 avisos. `npm audit`: 8 moderados de desarrollo (aceptados, ver "Dependencias"); producción 0.
-- Pint de archivos relacionados: aprobado. Pint global: 36 archivos fuera de formato desde antes de la 6.33 (Pint 1.29 y 1.32 marcan los mismos; CI corre `pint`, que corrige, no `pint --test`).
+- Pint de archivos relacionados: aprobado. `pint --test` en todo el repositorio: aprobado (los 36 archivos que fallaban se formatearon al cerrar la 6.33; CI corre `pint --test`).
 - `git diff --check`: limpio.
 
 Ejecuta las suites de nuevo antes de afirmar que el workspace actual está
@@ -404,8 +404,9 @@ Dependencias (6.33):
 - Avisos aceptados:
   - `GHSA-g3hv-75wg-m249` (`minimatch` 10.2.x, moderado, sólo desarrollo; arrastra los otros 7 moderados de la cadena `eslint-config-next` → `typescript-eslint`). DoS por amplificación de patrones; la corrección es 11.0.1 y ni la última `typescript-eslint` (8.72.2) la acepta. Sólo corre en ESLint sobre nuestro código; no va en el build ni en producción. No usar `npm audit fix --force` (bajaría `eslint-config-next` a 15.5.29). Revisar el 2027-02-09 o al actualizar `eslint-config-next`. Lista: `app-front/security/accepted-advisories.json`.
   - api-v1: ninguno (`api-v1/security/accepted-advisories.json` vacía).
+- Primera ejecución en GitHub (pendiente, después del push): revisar los workflows `audit` de ambos repositorios, `linter` (ahora `pint --test`) y `tests` de api-v1. Comprobar que existe `actions/setup-node@v5` (usado en `app-front/.github/workflows/audit.yml`; no se verificó) y que las compuertas leen bien la salida de `composer audit` y `npm audit` en el runner.
 - Mitigaciones vigentes: `next dev` sólo en `127.0.0.1` y sin `allowedDevOrigins` (no exponerlo por Tailscale ni por la red local); `images.unoptimized: true` mientras la app no use `next/image` (si algún día se usa, reevaluar los avisos del optimizador y no habilitar `dangerouslyAllowSVG`).
-- Pendientes: `eslint-config-next` 16.4.5 (decidir si se corrigen los 14 errores nuevos de React Hooks o se mantiene 16.1.6); Next 16.4.6 (publicada el 2026-11-09, no evaluada); versiones mayores fuera de la 6.33: Laravel 13, Pest 4 (con `pest-plugin-laravel` 4) y Tinker 3, cada una en su fase con sus notas de actualización.
+- Pendientes: `eslint-config-next` 16.4.5, sólo después de corregir sus errores nuevos (ver "Lint y Pint globales"). Next 16.4.6 (2026-11-09) revisada el 2026-11-10: sin correcciones de seguridad (compresión de respuestas de route handlers, Tailwind en create-next-app y ajustes de Turbopack en desarrollo) y ningún aviso de GitHub afecta a 16.4.5; no se actualizó. Versiones mayores fuera de la 6.33: Laravel 13, Pest 4 (con `pest-plugin-laravel` 4) y Tinker 3, cada una en su fase con sus notas de actualización.
 
 Hallazgos de producto pendientes (verificados en el código):
 - `billing:pac-check` no compara el `support_email` de Facturapi con el correo de contacto local ni avisa si la organización trae un logotipo que no se subió desde el sistema (en desarrollo, ambos heredados).
@@ -492,7 +493,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.33 — Actualización de dependencias (ver sección 7), cerrada el 2026-11-09; queda pendiente la decisión sobre `eslint-config-next` 16.4.5 (sección 8, "Dependencias"). La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
+La última fase completada es la FASE 6.33 — Actualización de dependencias (ver sección 7), cerrada el 2026-11-10. Después del primer push con sus commits hay que revisar la primera ejecución de los workflows en GitHub (sección 8, "Dependencias"). La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -502,7 +503,7 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.30 — Envío del CFDI por correo. Completa.
 - FASE 6.31 — Modo Live con una empresa piloto. Código y R0 completos; P1 a P7 pendientes (incluye la verificación obligatoria del acuse en la primera cancelación real; ver `DEPLOYMENT.md`, sección 10).
 - FASE 6.32 — Cuentas de usuario en Next.js (cambio de contraseña, cambio obligatorio, recuperación por correo) y retiro de la web de Laravel. Completa.
-- FASE 6.33 — Actualización de dependencias (Laravel 12.71, Symfony, Guzzle, CommonMark, Flysystem, Next 16.4.5) y auditoría en CI. Completa; `eslint-config-next` 16.4.5 pendiente de decisión.
+- FASE 6.33 — Actualización de dependencias (Laravel 12.71, Symfony, Guzzle, CommonMark, Flysystem, Next 16.4.5) y auditoría en CI. Completa (`eslint-config-next` se queda en 16.1.6).
 
 Hito 2 — Lanzamiento general:
 - 2FA del producto: exigirla en `POST /api/login` y en Next.js (la web de Laravel que la ofrecía se retiró en la 6.32; las columnas `two_factor_*` se conservan).
@@ -523,7 +524,11 @@ Hito 3 — Contabilidad y estadísticas:
 
 Después del lanzamiento:
 - Deprecación de endpoints legacy (`/api/invoices/{id}/issue`, `/cancel`, `/pac/issue`, `/pac/cancel`): headers `Deprecation`, successor links y pruebas. `legacy-invoices` ya no está: sus rutas se retiraron en la 6.31.
-- Lint y Pint globales.
+- Lint y Pint globales. Pint ya está limpio y CI lo exige (`pint --test`, cierre de la 6.33). Lint del frontend: 31 errores / 51 avisos previos. Antes de subir `eslint-config-next` de 16.1.6 a 16.4.5 hay que corregir lo que la 16.4.5 agrega (medido en la 6.33):
+  - 13 errores de `react-hooks/set-state-in-effect` en 9 archivos: `app/components/invoices/InvoiceFiscalPanel.tsx` (líneas 157 y 160), `app/components/settings/CompanyLogoCard.tsx` (31), `app/components/users/ChangePasswordModal.tsx` (38), `app/components/users/EditUserModal.tsx` (47), `app/components/users/ResetPasswordModal.tsx` (27), `app/components/users/UserSecurityModal.tsx` (48), `app/pages/catalogs/clients/page.tsx` (211 y 223), `app/pages/catalogs/products/page.tsx` (796 y 824) y `src/hooks/useUsers.ts` (67 y 90).
+  - 1 error de `react-hooks/preserve-manual-memoization` en `app/components/invoices/InvoiceFiscalPanel.tsx` (201).
+  - 3 avisos de `@next/next/no-location-assign-relative-destination` en `src/services/invoice-billing.services.ts` (52), `src/services/invoice.services.ts` (28) y `src/services/sale.services.ts` (44).
+  - En total 12 archivos (al cerrar la 6.33 se reportó "11" por error).
 - Aprobación de ventas por rol.
 - Sesiones múltiples por usuario (hoy `POST /api/login` reemplaza el `api_token`).
 
