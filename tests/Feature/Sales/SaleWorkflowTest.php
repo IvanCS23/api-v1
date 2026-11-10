@@ -1,13 +1,17 @@
 <?php
 
 use App\Enums\SaleStatus;
+use App\Exceptions\WorkflowTransitionException;
 use App\Models\Client;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\SaleItem;
+use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Services\Sales\SaleWorkflow;
 use App\Support\Tenant\CurrentTenant;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 test('submit transiciona Draft a Pending', function () {
     $company = Company::factory()->create();
@@ -100,13 +104,13 @@ test('no se puede confirmar una venta sin un cliente válido', function () {
     $client = Client::factory()->create(['company_id' => $company->id]);
     $sale = Sale::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => SaleStatus::Pending]);
     app(CurrentTenant::class)->set($company->id);
-    \App\Models\SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id]);
+    SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id]);
     $client->delete(); // soft delete: la relación client() deja de resolver.
 
     $workflow = app(SaleWorkflow::class);
 
     expect(fn () => $workflow->confirm($sale->fresh()))
-        ->toThrow(\App\Exceptions\WorkflowTransitionException::class, 'sin un cliente válido');
+        ->toThrow(WorkflowTransitionException::class, 'sin un cliente válido');
 });
 
 test('una venta confirmada no puede cancelarse', function () {
@@ -174,13 +178,13 @@ test('no se puede confirmar una venta con importes incoherentes respecto a sus l
     $client = Client::factory()->create(['company_id' => $company->id]);
     $sale = Sale::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => SaleStatus::Pending, 'total' => 0, 'subtotal' => 0]);
     app(CurrentTenant::class)->set($company->id);
-    \App\Models\SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id, 'subtotal' => 100, 'total' => 100]);
+    SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id, 'subtotal' => 100, 'total' => 100]);
     // $sale->total sigue en 0 porque no se volvió a recalcular tras crear la línea directo por factory (sin pasar por el controller).
 
     $workflow = app(SaleWorkflow::class);
 
     expect(fn () => $workflow->confirm($sale->fresh()))
-        ->toThrow(\App\Exceptions\WorkflowTransitionException::class, 'importes incoherentes');
+        ->toThrow(WorkflowTransitionException::class, 'importes incoherentes');
 });
 
 test('el workflow no puede bloquear ni modificar una Sale de otra empresa aunque la instancia llegue con un company_id manipulado', function () {
@@ -193,13 +197,13 @@ test('el workflow no puede bloquear ni modificar una Sale de otra empresa aunque
     // la empresa B. El endurecimiento defensivo de lockedSale() debe
     // rechazar esto (no encuentra la fila bajo ese company_id) en vez de
     // ignorar el mismatch y bloquear/modificar la fila real de todos modos.
-    $tamperedSale = Sale::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)->find($sale->id);
+    $tamperedSale = Sale::withoutGlobalScope(CompanyScope::class)->find($sale->id);
     $tamperedSale->company_id = $companyB->id;
 
     $workflow = app(SaleWorkflow::class);
 
     expect(fn () => $workflow->submit($tamperedSale))
-        ->toThrow(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        ->toThrow(ModelNotFoundException::class);
 
     // La fila real de la empresa A permanece intacta: sigue Draft.
     expect($sale->fresh()->status)->toBe(SaleStatus::Draft);

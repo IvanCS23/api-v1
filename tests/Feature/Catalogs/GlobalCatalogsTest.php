@@ -8,6 +8,7 @@ use App\Models\TaxRate;
 use App\Support\Tenant\CurrentTenant;
 use Database\Seeders\PaymentChannelSeeder;
 use Database\Seeders\TaxRateSeeder;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Schema;
 
 /*
@@ -65,14 +66,14 @@ test('payment_channels tiene el esquema esperado', function () {
     PaymentChannel::factory()->create(['code' => 'UNIQUE_CODE']);
 
     expect(fn () => PaymentChannel::factory()->create(['code' => 'UNIQUE_CODE']))
-        ->toThrow(Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });
 
 test('el seeder de payment_channels crea el catálogo base y es idempotente', function () {
-    (new PaymentChannelSeeder())->run();
+    (new PaymentChannelSeeder)->run();
     $countAfterFirstRun = PaymentChannel::count();
 
-    (new PaymentChannelSeeder())->run();
+    (new PaymentChannelSeeder)->run();
     $countAfterSecondRun = PaymentChannel::count();
 
     expect($countAfterFirstRun)->toBe(5)
@@ -112,7 +113,7 @@ test('rate se castea como decimal (string), nunca como float de PHP', function (
 });
 
 test('el registro IVA Exento tiene una combinación coherente de rate, tax_type y factor_type', function () {
-    (new TaxRateSeeder())->run();
+    (new TaxRateSeeder)->run();
 
     $exento = TaxRate::where('name', 'IVA Exento')->firstOrFail();
 
@@ -122,7 +123,7 @@ test('el registro IVA Exento tiene una combinación coherente de rate, tax_type 
 });
 
 test('las tasas sembradas por el seeder no son negativas', function () {
-    (new TaxRateSeeder())->run();
+    (new TaxRateSeeder)->run();
 
     $hasNegative = TaxRate::query()->get()->contains(fn (TaxRate $rate) => (float) $rate->rate < 0);
 
@@ -136,10 +137,10 @@ test('la factory de tax_rates no genera tasas negativas por defecto', function (
 });
 
 test('el seeder de tax_rates crea el catálogo base y es idempotente', function () {
-    (new TaxRateSeeder())->run();
+    (new TaxRateSeeder)->run();
     $countAfterFirstRun = TaxRate::count();
 
-    (new TaxRateSeeder())->run();
+    (new TaxRateSeeder)->run();
     $countAfterSecondRun = TaxRate::count();
 
     expect($countAfterFirstRun)->toBe(4)

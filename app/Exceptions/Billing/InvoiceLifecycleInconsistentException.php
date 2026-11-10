@@ -4,6 +4,4 @@ namespace App\Exceptions\Billing;
 
 use RuntimeException;
 
-class InvoiceLifecycleInconsistentException extends RuntimeException
-{
-}
+class InvoiceLifecycleInconsistentException extends RuntimeException {}

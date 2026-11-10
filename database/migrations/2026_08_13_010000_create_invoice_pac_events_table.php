@@ -13,28 +13,28 @@ return new class extends Migration
     public function up(): void
     {
         Schema::create('invoice_pac_events', function (Blueprint $table) {
-    $table->id();
+            $table->id();
 
-    $table->unsignedBigInteger('company_id');
-    $table->unsignedBigInteger('invoice_id');
+            $table->unsignedBigInteger('company_id');
+            $table->unsignedBigInteger('invoice_id');
 
-    $table->string('event_type', 80);
+            $table->string('event_type', 80);
 
-    $table->string('pac_provider', 30)->nullable();
-    $table->string('pac_external_id', 255)->nullable();
-    $table->char('cfdi_uuid', 36)->nullable();
+            $table->string('pac_provider', 30)->nullable();
+            $table->string('pac_external_id', 255)->nullable();
+            $table->char('cfdi_uuid', 36)->nullable();
 
-    $table->string('pac_status', 30)->nullable();
-    $table->string('cancellation_status', 30)->nullable();
-    $table->string('pac_issue_status', 30)->nullable();
+            $table->string('pac_status', 30)->nullable();
+            $table->string('cancellation_status', 30)->nullable();
+            $table->string('pac_issue_status', 30)->nullable();
 
-    $table->string('pac_code', 100)->nullable();
+            $table->string('pac_code', 100)->nullable();
 
-    $table->timestamp('occurred_at')->useCurrent();
+            $table->timestamp('occurred_at')->useCurrent();
 
-    $table->longText('context')->nullable();
+            $table->longText('context')->nullable();
 
-    $table->timestamp('created_at')->useCurrent();
+            $table->timestamp('created_at')->useCurrent();
 
             $table->foreign('company_id', 'erp_invoice_pac_events_company_fk')
                 ->references('id')

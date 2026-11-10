@@ -2,6 +2,8 @@
 
 use App\Models\Company;
 use App\Models\Invoice;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -74,8 +76,8 @@ test('pac_draft_ready_to_stamp/created_at/last_sync_at tienen el cast correcto',
     $fresh = $invoice->fresh();
 
     expect($fresh->pac_draft_ready_to_stamp)->toBeBool()
-        ->and($fresh->pac_draft_created_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
-        ->and($fresh->pac_draft_last_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class);
+        ->and($fresh->pac_draft_created_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($fresh->pac_draft_last_sync_at)->toBeInstanceOf(CarbonImmutable::class);
 });
 
 test('la unicidad (company_id, pac_provider, pac_draft_external_id) impide dos filas con el mismo draft para la misma empresa', function () {
@@ -87,7 +89,7 @@ test('la unicidad (company_id, pac_provider, pac_draft_external_id) impide dos f
     $second = Invoice::factory()->create(['company_id' => $company->id]);
 
     expect(fn () => $second->forceFill(['pac_provider' => 'facturapi', 'pac_draft_external_id' => 'inv_draft_dup'])->save())
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });
 
 test('la unicidad (company_id, pac_provider, pac_draft_idempotency_key) impide dos filas con la misma llave de draft', function () {
@@ -100,5 +102,5 @@ test('la unicidad (company_id, pac_provider, pac_draft_idempotency_key) impide d
     $second = Invoice::factory()->create(['company_id' => $company->id]);
 
     expect(fn () => $second->forceFill(['pac_provider' => 'facturapi', 'pac_draft_idempotency_key' => $key])->save())
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });

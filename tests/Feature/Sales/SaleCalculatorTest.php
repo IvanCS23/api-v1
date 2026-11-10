@@ -7,9 +7,10 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\TaxRate;
 use App\Services\Sales\SaleCalculator;
+use App\Support\Tenant\CurrentTenant;
 
 test('calculateItem calcula subtotal, descuento, impuesto y total de una línea', function () {
-    $calculator = new SaleCalculator();
+    $calculator = new SaleCalculator;
     $taxRate = TaxRate::factory()->make(['rate' => 0.16, 'tax_type' => TaxType::Traslado, 'factor_type' => TaxFactorType::Tasa]);
 
     $result = $calculator->calculateItem(quantity: 3, unitPrice: 100, discount: 30, taxRate: $taxRate);
@@ -22,7 +23,7 @@ test('calculateItem calcula subtotal, descuento, impuesto y total de una línea'
 });
 
 test('calculateItem sin tasa de impuesto no cobra impuesto', function () {
-    $calculator = new SaleCalculator();
+    $calculator = new SaleCalculator;
 
     $result = $calculator->calculateItem(quantity: 2, unitPrice: 50);
 
@@ -32,7 +33,7 @@ test('calculateItem sin tasa de impuesto no cobra impuesto', function () {
 });
 
 test('calculateItem nunca deja una base gravable negativa si el descuento excede el subtotal', function () {
-    $calculator = new SaleCalculator();
+    $calculator = new SaleCalculator;
 
     $result = $calculator->calculateItem(quantity: 1, unitPrice: 10, discount: 100);
 
@@ -49,9 +50,9 @@ test('recalculateSale suma los importes de todas las líneas de la venta', funct
     // CompanyScope es fail-closed: fuera de una request HTTP no hay tenant
     // activo, así que $sale->items() devolvería 0 filas sin esto. En el
     // uso real (dentro de un controller), TenantMiddleware ya lo puebla.
-    app(App\Support\Tenant\CurrentTenant::class)->set($company->id);
+    app(CurrentTenant::class)->set($company->id);
 
-    $calculator = new SaleCalculator();
+    $calculator = new SaleCalculator;
     $calculator->recalculateSale($sale)->save();
 
     $sale->refresh();

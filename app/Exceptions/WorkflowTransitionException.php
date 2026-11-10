@@ -11,6 +11,4 @@ use RuntimeException;
  * ejemplo, confirmar una venta sin líneas). El controller la traduce
  * siempre a una respuesta 422 con el mensaje tal cual.
  */
-class WorkflowTransitionException extends RuntimeException
-{
-}
+class WorkflowTransitionException extends RuntimeException {}

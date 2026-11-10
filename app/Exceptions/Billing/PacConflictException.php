@@ -13,6 +13,4 @@ namespace App\Exceptions\Billing;
  * `reconciliation_required` y exige consultar el estado remoto real
  * antes de decidir cualquier otra cosa.
  */
-class PacConflictException extends PacException
-{
-}
+class PacConflictException extends PacException {}

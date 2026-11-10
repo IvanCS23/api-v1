@@ -103,6 +103,6 @@ class LegacyInvoiceController extends Controller
 
     private function nextInvoiceNumber(): string
     {
-        return 'TCK-' . now()->format('Ymd') . '-' . Str::upper(Str::random(6));
+        return 'TCK-'.now()->format('Ymd').'-'.Str::upper(Str::random(6));
     }
 }

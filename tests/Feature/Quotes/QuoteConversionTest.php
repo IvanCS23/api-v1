@@ -2,6 +2,7 @@
 
 use App\Enums\QuoteStatus;
 use App\Enums\SaleStatus;
+use App\Exceptions\QuoteAlreadyConvertedException;
 use App\Models\Client;
 use App\Models\Company;
 use App\Models\Product;
@@ -9,6 +10,7 @@ use App\Models\Quote;
 use App\Models\Sale;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
+use App\Services\Sales\QuoteToSaleConverter;
 use App\Support\Tenant\CurrentTenant;
 
 test('convertir una cotización aprobada crea una venta con los mismos datos y marca la cotización como converted', function () {
@@ -121,11 +123,11 @@ test('el converter rechaza directamente una segunda conversión aunque el contro
     $quote = Quote::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => QuoteStatus::Approved]);
     app(CurrentTenant::class)->set($company->id);
 
-    $converter = app(\App\Services\Sales\QuoteToSaleConverter::class);
+    $converter = app(QuoteToSaleConverter::class);
     $sale = $converter->convert($quote->fresh());
 
     expect(fn () => $converter->convert($quote->fresh()))
-        ->toThrow(\App\Exceptions\QuoteAlreadyConvertedException::class);
+        ->toThrow(QuoteAlreadyConvertedException::class);
 
     expect(Sale::where('company_id', $company->id)->count())->toBe(1)
         ->and($quote->fresh()->converted_sale_id)->toBe($sale->id);

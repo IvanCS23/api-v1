@@ -7,9 +7,11 @@ use App\Models\Client;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\Sale;
+use App\Models\SaleItem;
 use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
 use App\Models\User;
+use App\Support\Tenant\CurrentTenant;
 
 test('agregar un producto a una venta crea la línea y recalcula los totales de la venta', function () {
     $company = Company::factory()->create();
@@ -88,7 +90,7 @@ test('recalcular: agregar una segunda línea suma correctamente al total de la v
     // items()->count() consulta con CompanyScope activo; fuera de una
     // request HTTP (actingAs ya terminó y TenantMiddleware limpió el
     // tenant) hace falta fijarlo manualmente para esta verificación.
-    app(App\Support\Tenant\CurrentTenant::class)->set($company->id);
+    app(CurrentTenant::class)->set($company->id);
 
     expect((float) $sale->subtotal)->toBe(250.0) // 100*1 + 50*3
         ->and((float) $sale->total)->toBe(250.0)
@@ -112,7 +114,7 @@ test('eliminar una línea recalcula los totales de la venta hacia abajo', functi
     $this->actingAs($user, 'api')->deleteJson("/api/sales/{$sale->id}/items/{$itemA['id']}")->assertNoContent();
 
     $sale->refresh();
-    app(App\Support\Tenant\CurrentTenant::class)->set($company->id);
+    app(CurrentTenant::class)->set($company->id);
 
     expect((float) $sale->total)->toBe(50.0)
         ->and($sale->items()->count())->toBe(1);
@@ -157,7 +159,7 @@ test('no se pueden agregar ni eliminar productos en una venta confirmada', funct
     // controller) para poder intentar eliminarla sobre una venta que ya
     // nace Confirmed, sin depender de que agregar líneas esté permitido.
     $sale = Sale::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => SaleStatus::Confirmed]);
-    $existingItem = \App\Models\SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id]);
+    $existingItem = SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id]);
 
     $this->actingAs($user, 'api')->postJson("/api/sales/{$sale->id}/items", [
         'product_id' => $product->id,
@@ -167,8 +169,8 @@ test('no se pueden agregar ni eliminar productos en una venta confirmada', funct
     $this->actingAs($user, 'api')->deleteJson("/api/sales/{$sale->id}/items/{$existingItem->id}")
         ->assertStatus(422);
 
-    app(\App\Support\Tenant\CurrentTenant::class)->set($company->id);
-    expect(\App\Models\SaleItem::find($existingItem->id))->not->toBeNull();
+    app(CurrentTenant::class)->set($company->id);
+    expect(SaleItem::find($existingItem->id))->not->toBeNull();
 });
 
 test('eliminar una línea de una venta cancelada también se rechaza', function () {
@@ -176,7 +178,7 @@ test('eliminar una línea de una venta cancelada también se rechaza', function 
     $user = User::factory()->create(['company_id' => $company->id]);
     $client = Client::factory()->create(['company_id' => $company->id]);
     $sale = Sale::factory()->create(['company_id' => $company->id, 'client_id' => $client->id, 'status' => SaleStatus::Cancelled]);
-    $existingItem = \App\Models\SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id]);
+    $existingItem = SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id]);
 
     $this->actingAs($user, 'api')->deleteJson("/api/sales/{$sale->id}/items/{$existingItem->id}")
         ->assertStatus(422);
@@ -203,13 +205,13 @@ test('las líneas de venta quedan aisladas por tenant (CompanyScope directo sobr
     $companyA = Company::factory()->create();
     $companyB = Company::factory()->create();
 
-    \App\Models\SaleItem::factory()->count(2)->create(['company_id' => $companyA->id]);
-    \App\Models\SaleItem::factory()->create(['company_id' => $companyB->id]);
+    SaleItem::factory()->count(2)->create(['company_id' => $companyA->id]);
+    SaleItem::factory()->create(['company_id' => $companyB->id]);
 
-    app(\App\Support\Tenant\CurrentTenant::class)->set($companyA->id);
-    expect(\App\Models\SaleItem::count())->toBe(2);
+    app(CurrentTenant::class)->set($companyA->id);
+    expect(SaleItem::count())->toBe(2);
 
-    expect(\App\Models\SaleItem::withoutGlobalScope(CompanyScope::class)->count())->toBe(3);
+    expect(SaleItem::withoutGlobalScope(CompanyScope::class)->count())->toBe(3);
 });
 
 test('actualizar cantidad de una línea recalcula subtotal, tax_total y total', function () {
@@ -310,8 +312,8 @@ test('un usuario de otra empresa no puede actualizar una línea ajena (aislamien
     $response = $this->actingAs($userB, 'api')->putJson("/api/sales/{$saleA->id}/items/{$itemA['id']}", ['quantity' => 9]);
 
     $response->assertNotFound();
-    app(\App\Support\Tenant\CurrentTenant::class)->set($companyA->id);
-    expect((float) \App\Models\SaleItem::find($itemA['id'])->quantity)->toBe(1.0);
+    app(CurrentTenant::class)->set($companyA->id);
+    expect((float) SaleItem::find($itemA['id'])->quantity)->toBe(1.0);
 });
 
 test('actualizar una línea con un producto de otra empresa es rechazado con 422', function () {
@@ -358,6 +360,6 @@ test('un company_id malicioso al actualizar una línea es ignorado', function ()
     ]);
 
     $response->assertOk();
-    app(\App\Support\Tenant\CurrentTenant::class)->set($company->id);
-    expect(\App\Models\SaleItem::find($item['id'])->company_id)->toBe($company->id);
+    app(CurrentTenant::class)->set($company->id);
+    expect(SaleItem::find($item['id'])->company_id)->toBe($company->id);
 });

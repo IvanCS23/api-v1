@@ -3,6 +3,7 @@
 use App\Http\Resources\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -53,8 +54,8 @@ test('stamped_at y last_pac_sync_at son CarbonImmutable (immutable_datetime)', f
 
     $fresh = $invoice->fresh();
 
-    expect($fresh->stamped_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class)
-        ->and($fresh->last_pac_sync_at)->toBeInstanceOf(\Carbon\CarbonImmutable::class);
+    expect($fresh->stamped_at)->toBeInstanceOf(CarbonImmutable::class)
+        ->and($fresh->last_pac_sync_at)->toBeInstanceOf(CarbonImmutable::class);
 });
 
 test('las columnas de tracking PAC no son asignables masivamente (no fillable)', function () {

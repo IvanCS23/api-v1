@@ -7,6 +7,7 @@ use App\Models\Client;
 use App\Models\Company;
 use App\Models\Product;
 use App\Models\Quote;
+use App\Models\QuoteItem;
 use App\Models\TaxRate;
 use App\Models\User;
 use App\Support\Tenant\CurrentTenant;
@@ -203,7 +204,7 @@ test('un usuario de otra empresa no puede actualizar una línea de cotización a
 
     $response->assertNotFound();
     app(CurrentTenant::class)->set($companyA->id);
-    expect((float) \App\Models\QuoteItem::find($itemA['id'])->quantity)->toBe(1.0);
+    expect((float) QuoteItem::find($itemA['id'])->quantity)->toBe(1.0);
 });
 
 test('actualizar una línea de cotización con un producto de otra empresa es rechazado con 422', function () {
@@ -251,5 +252,5 @@ test('un company_id malicioso al actualizar una línea de cotización es ignorad
 
     $response->assertOk();
     app(CurrentTenant::class)->set($company->id);
-    expect(\App\Models\QuoteItem::find($item['id'])->company_id)->toBe($company->id);
+    expect(QuoteItem::find($item['id'])->company_id)->toBe($company->id);
 });

@@ -2,6 +2,7 @@
 
 use App\Models\Company;
 use App\Models\Invoice;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schema;
 
@@ -69,5 +70,5 @@ test('la unicidad (company_id, pac_provider, pac_idempotency_key) impide dos fil
     $second = Invoice::factory()->create(['company_id' => $company->id]);
 
     expect(fn () => $second->forceFill(['pac_provider' => 'facturapi', 'pac_idempotency_key' => $key])->save())
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });

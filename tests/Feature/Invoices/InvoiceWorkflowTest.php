@@ -6,7 +6,6 @@ use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Services\Billing\InvoiceWorkflow;
-use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 test('markReady transiciona Draft a Ready', function () {

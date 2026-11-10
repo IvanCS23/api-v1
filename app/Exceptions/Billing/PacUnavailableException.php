@@ -7,6 +7,4 @@ namespace App\Exceptions\Billing;
  * falló internamente. Reintentable en teoría (ver FacturapiProvider,
  * que ya reintenta errores transitorios seguros antes de llegar aquí).
  */
-class PacUnavailableException extends PacException
-{
-}
+class PacUnavailableException extends PacException {}

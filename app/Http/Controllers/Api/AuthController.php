@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,7 +21,7 @@ class AuthController extends Controller
     public function login(Request $request): JsonResponse
     {
         $request->validate([
-            'email'    => ['required', 'email'],
+            'email' => ['required', 'email'],
             'password' => ['required', 'string'],
         ]);
 
@@ -30,7 +31,7 @@ class AuthController extends Controller
             ]);
         }
 
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = Auth::guard('web')->user();
 
         if ($user->status !== UserStatus::Active) {
@@ -51,7 +52,7 @@ class AuthController extends Controller
 
         return response()->json([
             'token' => $plainToken,
-            'user'  => new UserResource($user->load('company')),
+            'user' => new UserResource($user->load('company')),
         ]);
     }
 
@@ -60,7 +61,7 @@ class AuthController extends Controller
      */
     public function user(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user('api');
 
         return response()->json(['user' => new UserResource($user->load('company'))]);
@@ -71,7 +72,7 @@ class AuthController extends Controller
      */
     public function logout(Request $request): JsonResponse
     {
-        /** @var \App\Models\User $user */
+        /** @var User $user */
         $user = $request->user('api');
         $user->forceFill(['api_token' => null])->save();
 

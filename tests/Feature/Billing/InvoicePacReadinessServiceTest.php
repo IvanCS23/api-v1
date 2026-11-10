@@ -1,10 +1,13 @@
 <?php
 
+use App\Enums\InvoiceStatus;
+use App\Enums\TaxType;
 use App\Exceptions\Billing\InvoiceFiscalSnapshotIncompleteException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
 use App\Services\Billing\InvoicePacReadinessService;
+use App\Services\Billing\IssueInvoiceService;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Support\Facades\Http;
 
@@ -150,7 +153,7 @@ test('un tax_code no reconocido en el catálogo SAT c_Impuesto produce INVOICE_I
 test('una línea con tax_type=retencion produce INVOICE_ITEM_WITHHOLDING_UNSUPPORTED', function () {
     $invoice = invoiceWithItemForReadinessTest([], [
         'tax_code' => '001',
-        'tax_type' => \App\Enums\TaxType::Retencion,
+        'tax_type' => TaxType::Retencion,
     ]);
 
     $result = app(InvoicePacReadinessService::class)->evaluate($invoice);
@@ -180,7 +183,7 @@ test('integración: no HTTP cuando readiness falla — IssueInvoiceService bloqu
     $company = Company::factory()->create();
     $invoice = Invoice::factory()->create([
         'company_id' => $company->id,
-        'status' => \App\Enums\InvoiceStatus::Issued,
+        'status' => InvoiceStatus::Issued,
         'payment_form' => null,
     ]);
     InvoiceItem::factory()->create(['company_id' => $company->id, 'invoice_id' => $invoice->id]);
@@ -188,7 +191,7 @@ test('integración: no HTTP cuando readiness falla — IssueInvoiceService bloqu
 
     Http::fake();
 
-    expect(fn () => app(\App\Services\Billing\IssueInvoiceService::class)->issue($invoice->fresh(['items'])))
+    expect(fn () => app(IssueInvoiceService::class)->issue($invoice->fresh(['items'])))
         ->toThrow(InvoiceFiscalSnapshotIncompleteException::class);
 
     Http::assertNothingSent();

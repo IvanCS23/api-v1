@@ -14,6 +14,7 @@ use App\Services\Billing\SaleToInvoiceConverter;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Igual que billableSale() en InvoiceConversionTest.php, redeclarada
@@ -87,7 +88,7 @@ test('una línea corrupta cross-tenant aborta la conversión sin crear ninguna I
     // Simula corrupción de datos con un UPDATE crudo (BelongsToCompany
     // revierte cualquier intento vía Eloquent ->update()) — mismo patrón
     // usado en SaleBillingReadinessTest.
-    \Illuminate\Support\Facades\DB::table('sale_items')
+    DB::table('sale_items')
         ->where('sale_id', $sale->id)
         ->update(['company_id' => $companyB->id]);
 

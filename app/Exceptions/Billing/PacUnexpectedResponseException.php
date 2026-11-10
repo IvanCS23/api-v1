@@ -7,6 +7,4 @@ namespace App\Exceptions\Billing;
  * segura: JSON inválido, ausencia de los campos mínimos esperados, o un
  * código de estado HTTP fuera de todo rango mapeado explícitamente.
  */
-class PacUnexpectedResponseException extends PacException
-{
-}
+class PacUnexpectedResponseException extends PacException {}

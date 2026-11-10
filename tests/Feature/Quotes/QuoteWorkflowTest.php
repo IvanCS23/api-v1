@@ -1,9 +1,13 @@
 <?php
 
 use App\Enums\QuoteStatus;
+use App\Exceptions\WorkflowTransitionException;
 use App\Models\Company;
 use App\Models\Quote;
+use App\Models\Scopes\CompanyScope;
 use App\Models\User;
+use App\Services\Sales\QuoteWorkflow;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 test('send transiciona Draft a Sent', function () {
     $company = Company::factory()->create();
@@ -97,7 +101,7 @@ test('transiciones inválidas de Quote son rechazadas con un error controlado', 
 });
 
 test('Converted solo se alcanza a través de QuoteToSaleConverter, nunca vía QuoteWorkflow', function () {
-    $workflow = app(\App\Services\Sales\QuoteWorkflow::class);
+    $workflow = app(QuoteWorkflow::class);
 
     // QuoteWorkflow no expone ningún método para llegar a Converted:
     // ni send(), approve(), reject() ni expire() lo permiten como destino.
@@ -109,7 +113,7 @@ test('Converted solo se alcanza a través de QuoteToSaleConverter, nunca vía Qu
     // approve() exige venir de Sent; una Approved ya no puede "reintentarse"
     // hacia Converted a través del workflow bajo ningún método existente.
     expect(fn () => $workflow->approve($quote))
-        ->toThrow(\App\Exceptions\WorkflowTransitionException::class);
+        ->toThrow(WorkflowTransitionException::class);
 });
 
 test('el workflow no puede bloquear ni modificar una Quote de otra empresa aunque la instancia llegue con un company_id manipulado', function () {
@@ -119,13 +123,13 @@ test('el workflow no puede bloquear ni modificar una Quote de otra empresa aunqu
 
     // Misma idea que el equivalente en SaleWorkflowTest: instancia con el
     // id real de la empresa A pero company_id forzado a la empresa B.
-    $tamperedQuote = Quote::withoutGlobalScope(\App\Models\Scopes\CompanyScope::class)->find($quote->id);
+    $tamperedQuote = Quote::withoutGlobalScope(CompanyScope::class)->find($quote->id);
     $tamperedQuote->company_id = $companyB->id;
 
-    $workflow = app(\App\Services\Sales\QuoteWorkflow::class);
+    $workflow = app(QuoteWorkflow::class);
 
     expect(fn () => $workflow->send($tamperedQuote))
-        ->toThrow(\Illuminate\Database\Eloquent\ModelNotFoundException::class);
+        ->toThrow(ModelNotFoundException::class);
 
     expect($quote->fresh()->status)->toBe(QuoteStatus::Draft);
 });

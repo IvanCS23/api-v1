@@ -1,6 +1,7 @@
 <?php
 
 use App\Models\Company;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\Artisan;
 
 /**
@@ -43,5 +44,5 @@ test('el resto de atributos de la tabla companies no se ven afectados (RFC/uuid 
     $company = Company::factory()->create();
 
     expect(fn () => Company::factory()->create(['rfc' => $company->rfc]))
-        ->toThrow(\Illuminate\Database\QueryException::class);
+        ->toThrow(QueryException::class);
 });

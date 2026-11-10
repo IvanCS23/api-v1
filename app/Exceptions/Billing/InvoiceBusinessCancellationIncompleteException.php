@@ -4,6 +4,4 @@ namespace App\Exceptions\Billing;
 
 use RuntimeException;
 
-class InvoiceBusinessCancellationIncompleteException extends RuntimeException
-{
-}
+class InvoiceBusinessCancellationIncompleteException extends RuntimeException {}

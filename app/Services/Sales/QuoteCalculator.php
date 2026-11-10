@@ -16,7 +16,7 @@ class QuoteCalculator
 
     public function __construct(?LineItemCalculator $lineItemCalculator = null)
     {
-        $this->lineItemCalculator = $lineItemCalculator ?? new LineItemCalculator();
+        $this->lineItemCalculator = $lineItemCalculator ?? new LineItemCalculator;
     }
 
     /**
