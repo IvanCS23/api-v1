@@ -9,3 +9,28 @@
 CHANGELOG.md export-ignore
 README.md export-ignore
 .github/workflows/browser-tests.yml export-ignore
+
+# Fase 6.34 (preparación): binarios explícitos. Nunca se convierten fines de
+# línea ni se muestran como texto. El resto usa `text=auto eol=lf`: LF en el
+# repositorio y en la copia de trabajo, y la detección automática de git
+# respeta los archivos de texto con bytes binarios (p. ej.
+# tests/Feature/Company/CompanyLogoTest.php trae cabeceras PNG/JPEG reales).
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
+*.avif binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.gz binary
+*.woff binary
+*.woff2 binary
+*.ttf binary
+*.otf binary
+*.eot binary
+*.cer binary
+*.key binary
+*.p12 binary
+*.pfx binary
