@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -41,6 +42,8 @@ class InvoiceItem extends Model
         'discount',
         'subtotal',
         'tax_total',
+        'taxes_transferred',
+        'taxes_withheld',
         'total',
         'product_clave_producto',
         'product_clave_unidad',
@@ -61,6 +64,8 @@ class InvoiceItem extends Model
         'discount' => 'decimal:2',
         'subtotal' => 'decimal:2',
         'tax_total' => 'decimal:2',
+        'taxes_transferred' => 'decimal:2',
+        'taxes_withheld' => 'decimal:2',
         'total' => 'decimal:2',
         'tax_rate_value' => 'decimal:6',
     ];
@@ -80,5 +85,11 @@ class InvoiceItem extends Model
     public function taxRate(): BelongsTo
     {
         return $this->belongsTo(TaxRate::class);
+    }
+
+    /** Fase 6.34: impuestos (traslados y retenciones), en orden. */
+    public function taxes(): HasMany
+    {
+        return $this->hasMany(InvoiceItemTax::class)->orderBy('position')->orderBy('id');
     }
 }
