@@ -41,7 +41,10 @@ Route::post('/password/reset', [PasswordRecoveryController::class, 'reset'])->mi
 // Protected routes (require valid API token and an active user)
 // Fase 6.32: `password.current` bloquea todo mientras el usuario deba cambiar
 // su contraseña, salvo las tres rutas que lo quitan explícitamente.
-Route::middleware(['auth:api', 'active', 'password.current', 'throttle:60,1'])->group(function () {
+// Fase 6.35 (D10): límite general de 120 peticiones por minuto por usuario
+// (antes 60: una pantalla hace ~10 peticiones). Login (10/min) y la
+// recuperación de contraseña conservan sus límites estrictos.
+Route::middleware(['auth:api', 'active', 'password.current', 'throttle:120,1'])->group(function () {
     Route::get('/user', [AuthController::class, 'user'])->withoutMiddleware('password.current');
     Route::post('/logout', [AuthController::class, 'logout'])->withoutMiddleware('password.current');
     // Fase 6.32: la propia contraseña, con la actual (cualquier rol).
