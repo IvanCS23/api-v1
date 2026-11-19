@@ -23,6 +23,8 @@ class InvoiceItemResource extends JsonResource
             'unit_price' => $this->unit_price,
             'discount' => $this->discount,
             'subtotal' => $this->subtotal,
+            // Fase 6.34: importe exacto (6 decimales) para mostrarlo al pasar el cursor.
+            'subtotal_exact' => $this->subtotal_exact,
             'tax_total' => $this->tax_total,
             // Fase 6.34: tax_total sigue siendo la suma de los trasladados.
             'taxes_transferred' => $this->taxes_transferred,

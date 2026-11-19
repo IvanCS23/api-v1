@@ -74,7 +74,11 @@ test('caso H de punta a punta: la API guarda 1.15 y la venta se puede confirmar'
     $sale = $this->actingAs($user, 'api')->postJson('/api/sales', ['client_id' => $client->id])->json();
     foreach (range(1, 3) as $ignored) {
         $this->actingAs($user, 'api')->postJson("/api/sales/{$sale['id']}/items", ['product_id' => $product->id, 'quantity' => 1])
-            ->assertCreated()->assertJsonPath('total', '0.38');
+            ->assertCreated()
+            ->assertJsonPath('total', '0.38')
+            // Para el frontend: el importe exacto y el impuesto exacto de la línea.
+            ->assertJsonPath('subtotal_exact', '0.330000')
+            ->assertJsonPath('taxes.0.amount', '0.052800');
     }
 
     $this->actingAs($user, 'api')->getJson("/api/sales/{$sale['id']}")
