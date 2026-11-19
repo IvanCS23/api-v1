@@ -8,6 +8,7 @@ use App\Models\Client;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Taxes\DocumentTaxTotals;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -138,15 +139,10 @@ class SaleWorkflow
             throw new WorkflowTransitionException('No se puede confirmar una venta sin un cliente válido.');
         }
 
-        $expectedSubtotal = round((float) $items->sum('subtotal'), 2);
-        $expectedDiscount = round((float) $items->sum('discount'), 2);
-        $expectedTax = round((float) $items->sum('tax_total'), 2);
-        $expectedTotal = round((float) $items->sum('total'), 2);
-
-        $coherent = round((float) $sale->subtotal, 2) === $expectedSubtotal
-            && round((float) $sale->discount_total, 2) === $expectedDiscount
-            && round((float) $sale->tax_total, 2) === $expectedTax
-            && round((float) $sale->total, 2) === $expectedTotal;
+        // Fase 6.34: los totales del documento son el agregado estilo SAT de
+        // sus líneas exactas (DocumentTaxTotals), no la suma de las líneas
+        // redondeadas.
+        $coherent = DocumentTaxTotals::matches($sale, (new DocumentTaxTotals)->compute($items));
 
         if (! $coherent) {
             throw new WorkflowTransitionException('No se puede confirmar una venta con importes incoherentes respecto a sus líneas.');

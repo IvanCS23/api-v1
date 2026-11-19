@@ -77,9 +77,14 @@ test('RESICO: ISR retenido 1.25 %', function () {
 test('redondeo: la mitad se aleja del cero y se conserva el importe exacto', function () {
     $r = phase634Calc('1.255', '10.10', '0', [phase634Spec('002', 'traslado', 'tasa', '0.16')]);
 
-    // 1.255 × 10.10 = 12.6755 → 12.68; 12.68 × 0.16 = 2.0288 → 2.03.
+    // Estilo SAT (caso G de Facturapi): el impuesto se calcula sobre el
+    // importe exacto 1.255 × 10.10 = 12.6755 (no sobre 12.68):
+    // 12.6755 × 0.16 = 2.02808. Total de la línea = 12.6755 + 2.02808 =
+    // 14.70358 → 14.70 (el documento da 14.71: ver PhaseSatRoundingTest).
     expect($r['subtotal'])->toBe('12.68')
-        ->and($r['taxes'][0])->toMatchArray(['amount' => '2.028800', 'amount_rounded' => '2.03'])
+        ->and($r['subtotal_exact'])->toBe('12.675500')
+        ->and($r['taxes'][0])->toMatchArray(['base' => '12.675500', 'amount' => '2.028080', 'amount_rounded' => '2.03'])
+        ->and($r['total'])->toBe('14.70')
         ->and(DecimalMath::round('0.125', 2))->toBe('0.13')
         ->and(DecimalMath::round('-0.125', 2))->toBe('-0.13')
         ->and(DecimalMath::round('2.0000005', 6))->toBe('2.000001');
@@ -97,12 +102,12 @@ test('corrige el error latente: una retención ya no se suma como traslado', fun
     $r = (new LineItemCalculator)->calculateItem(1, 100, 0, $retention);
 
     // Antes: tax_total 10 y total 110 (sumada como traslado).
-    expect($r)->toBe(['subtotal' => 100.0, 'discount' => 0.0, 'tax_total' => 0.0, 'taxes_transferred' => 0.0, 'taxes_withheld' => 10.0, 'total' => 90.0]);
+    expect($r)->toBe(['subtotal' => 100.0, 'subtotal_exact' => '100.000000', 'discount' => 0.0, 'tax_total' => 0.0, 'taxes_transferred' => 0.0, 'taxes_withheld' => 10.0, 'total' => 90.0]);
 });
 
 test('el cálculo de siempre con IVA 16 % no cambia', function () {
     $iva = new TaxRate(['code' => '002', 'name' => 'IVA 16%', 'rate' => 0.16, 'tax_type' => TaxType::Traslado, 'factor_type' => TaxFactorType::Tasa]);
 
     expect((new LineItemCalculator)->calculateItem(3, 33.33, 0, $iva))
-        ->toBe(['subtotal' => 99.99, 'discount' => 0.0, 'tax_total' => 16.0, 'taxes_transferred' => 16.0, 'taxes_withheld' => 0.0, 'total' => 115.99]);
+        ->toBe(['subtotal' => 99.99, 'subtotal_exact' => '99.990000', 'discount' => 0.0, 'tax_total' => 16.0, 'taxes_transferred' => 16.0, 'taxes_withheld' => 0.0, 'total' => 115.99]);
 });

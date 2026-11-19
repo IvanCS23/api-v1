@@ -3,18 +3,26 @@
 namespace App\Services\Taxes;
 
 use App\Enums\TaxType;
+use App\Models\Invoice;
+use App\Models\Quote;
+use App\Models\Sale;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Fase 6.34 (2): verifica, sin escribir nada, que los impuestos por línea y
- * los totales cuadren. Recorre todas las empresas (sin global scopes).
+ * Fase 6.34: verifica, sin escribir nada, que los impuestos por línea y los
+ * totales cuadren con el cálculo estilo SAT. Recorre todas las empresas
+ * (sin global scopes).
  *
- * Por línea (cotización, venta y factura):
- * - suma de `amount_rounded` de los traslados = `taxes_transferred` = `tax_total`;
- * - suma de `amount_rounded` de las retenciones = `taxes_withheld`;
- * - `total` = max(subtotal − descuento, 0) + trasladados − retenidos.
+ * Por línea (cotización, venta y factura), con los importes exactos:
+ * - trasladados = `taxes_transferred` = `tax_total` = redondeo de la suma
+ *   exacta de sus traslados; retenidos = `taxes_withheld`, igual;
+ * - total = redondeo de max(importe − descuento, 0) + trasladados −
+ *   retenidos (importe = `subtotal_exact`, o `subtotal` en líneas
+ *   anteriores).
  *
- * Por documento: `taxes_transferred` = `tax_total`.
+ * Por documento: sus seis totales = DocumentTaxTotals de sus líneas (la
+ * suma de las líneas redondeadas puede diferir por centavos: es correcto).
  */
 class LineTaxConsistency
 {
@@ -26,47 +34,52 @@ class LineTaxConsistency
         $issues = [];
 
         foreach (LineTaxBackfill::LINE_TABLES as $table => [$taxTable, $foreignKey]) {
-            $sums = DB::table($taxTable)
-                ->select($foreignKey, 'kind', DB::raw('SUM(amount_rounded) as total'))
-                ->groupBy($foreignKey, 'kind')
-                ->get()
+            $exact = DB::table($taxTable)
+                ->where('factor', '!=', 'exento')
+                ->get([$foreignKey, 'kind', 'amount', 'amount_rounded'])
                 ->groupBy($foreignKey);
 
-            foreach (DB::table($table)->orderBy('id')->get(['id', 'subtotal', 'discount', 'tax_total', 'taxes_transferred', 'taxes_withheld', 'total']) as $line) {
-                $byKind = ($sums[$line->id] ?? collect())->keyBy('kind');
-                $transferred = $this->cents($byKind[TaxType::Traslado->value]->total ?? 0);
-                $withheld = $this->cents($byKind[TaxType::Retencion->value]->total ?? 0);
-                $base = max($this->cents($line->subtotal) - $this->cents($line->discount), 0);
+            foreach (DB::table($table)->orderBy('id')->get(['id', 'subtotal', 'subtotal_exact', 'discount', 'tax_total', 'taxes_transferred', 'taxes_withheld', 'total']) as $line) {
+                $transferred = '0';
+                $withheld = '0';
+                foreach ($exact[$line->id] ?? [] as $tax) {
+                    $amount = DecimalMath::of($tax->amount ?? $tax->amount_rounded);
+                    $tax->kind === TaxType::Retencion->value
+                        ? $withheld = DecimalMath::add($withheld, $amount)
+                        : $transferred = DecimalMath::add($transferred, $amount);
+                }
 
-                if ($transferred !== $this->cents($line->taxes_transferred) || $transferred !== $this->cents($line->tax_total)) {
-                    $issues[] = "{$table} #{$line->id}: traslados por impuesto {$this->money($transferred)}, taxes_transferred {$line->taxes_transferred}, tax_total {$line->tax_total}";
-                }
-                if ($withheld !== $this->cents($line->taxes_withheld)) {
-                    $issues[] = "{$table} #{$line->id}: retenciones por impuesto {$this->money($withheld)}, taxes_withheld {$line->taxes_withheld}";
-                }
-                if ($base + $this->cents($line->taxes_transferred) - $this->cents($line->taxes_withheld) !== $this->cents($line->total)) {
-                    $issues[] = "{$table} #{$line->id}: total {$line->total} ≠ subtotal − descuento + trasladados − retenidos";
+                $importe = DecimalMath::of($line->subtotal_exact ?? $line->subtotal);
+                $base = DecimalMath::max(DecimalMath::sub($importe, DecimalMath::of($line->discount)), '0');
+                $expected = [
+                    'taxes_transferred' => DecimalMath::round($transferred, 2),
+                    'tax_total' => DecimalMath::round($transferred, 2),
+                    'taxes_withheld' => DecimalMath::round($withheld, 2),
+                    'total' => DecimalMath::round(DecimalMath::sub(DecimalMath::add($base, $transferred), $withheld), 2),
+                ];
+
+                foreach ($expected as $column => $value) {
+                    if (DecimalMath::round(DecimalMath::of($line->{$column}), 2) !== $value) {
+                        $issues[] = "{$table} #{$line->id}: {$column} {$line->{$column}}, se esperaba {$value}";
+                    }
                 }
             }
         }
 
-        foreach (LineTaxBackfill::DOCUMENT_TABLES as $table) {
-            foreach (DB::table($table)->whereColumn('taxes_transferred', '!=', 'tax_total')->orderBy('id')->get(['id', 'tax_total', 'taxes_transferred']) as $document) {
-                $issues[] = "{$table} #{$document->id}: taxes_transferred {$document->taxes_transferred} ≠ tax_total {$document->tax_total}";
-            }
+        $totals = new DocumentTaxTotals;
+        foreach (['quotes' => Quote::class, 'sales' => Sale::class, 'invoices' => Invoice::class] as $table => $model) {
+            $model::withoutGlobalScope(CompanyScope::class)
+                ->with(['items' => fn ($query) => $query->withoutGlobalScope(CompanyScope::class)])
+                ->orderBy('id')->chunk(200, function ($documents) use ($totals, $table, &$issues): void {
+                    foreach ($documents as $document) {
+                        $computed = $totals->compute($document->items);
+                        if (! DocumentTaxTotals::matches($document, $computed, array_keys($computed))) {
+                            $issues[] = "{$table} #{$document->id}: totales guardados (total {$document->total}) ≠ calculados (total {$computed['total']})";
+                        }
+                    }
+                });
         }
 
         return $issues;
-    }
-
-    /** Centavos enteros: compara importes de 2 decimales sin errores de float. */
-    private function cents(mixed $value): int
-    {
-        return (int) bcmul(number_format((float) $value, 2, '.', ''), '100', 0);
-    }
-
-    private function money(int $cents): string
-    {
-        return number_format($cents / 100, 2, '.', '');
     }
 }

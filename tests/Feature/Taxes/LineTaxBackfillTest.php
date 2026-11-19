@@ -127,7 +127,7 @@ test('una línea con retención detiene el backfill sin escribir nada', function
 test('la verificación detecta una línea que no cuadra', function () {
     $data = phase634Legacy();
     $this->artisan('billing:backfill-line-taxes --apply')->assertSuccessful();
-    DB::table('sale_item_taxes')->where('sale_item_id', $data['taxed']->id)->update(['amount_rounded' => 30.41]);
+    DB::table('sale_item_taxes')->where('sale_item_id', $data['taxed']->id)->update(['amount' => 30.41]);
 
     $this->artisan('billing:tax-lines-check')
         ->expectsOutputToContain("sale_items #{$data['taxed']->id}")

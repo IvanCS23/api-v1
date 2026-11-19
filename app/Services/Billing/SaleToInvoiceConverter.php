@@ -159,6 +159,7 @@ class SaleToInvoiceConverter
                     'unit_price' => $saleItem->unit_price,
                     'discount' => $saleItem->discount,
                     'subtotal' => $saleItem->subtotal,
+                    'subtotal_exact' => $saleItem->subtotal_exact,
                     'tax_total' => $saleItem->tax_total,
                     'taxes_transferred' => $saleItem->taxes_transferred,
                     'taxes_withheld' => $saleItem->taxes_withheld,

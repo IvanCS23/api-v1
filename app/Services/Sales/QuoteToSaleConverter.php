@@ -102,6 +102,7 @@ class QuoteToSaleConverter
                     'unit_price' => $quoteItem->unit_price,
                     'discount' => $quoteItem->discount,
                     'subtotal' => $quoteItem->subtotal,
+                    'subtotal_exact' => $quoteItem->subtotal_exact,
                     'tax_total' => $quoteItem->tax_total,
                     'taxes_transferred' => $quoteItem->taxes_transferred,
                     'taxes_withheld' => $quoteItem->taxes_withheld,

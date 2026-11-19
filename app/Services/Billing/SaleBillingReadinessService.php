@@ -12,6 +12,7 @@ use App\Models\SaleItem;
 use App\Models\SaleItemTax;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Sat\SatFiscalValidator;
+use App\Services\Taxes\DocumentTaxTotals;
 use App\Services\Taxes\LineTaxWriter;
 use App\Services\Taxes\TaxRuleValidator;
 use App\Services\Taxes\TaxSpec;
@@ -111,18 +112,13 @@ class SaleBillingReadinessService
         }
 
         if ($items->isNotEmpty()) {
-            $expectedSubtotal = round((float) $items->sum('subtotal'), 2);
-            $expectedDiscount = round((float) $items->sum('discount'), 2);
-            $expectedTax = round((float) $items->sum('tax_total'), 2);
-            $expectedTotal = round((float) $items->sum('total'), 2);
-
-            $coherent = round((float) $sale->subtotal, 2) === $expectedSubtotal
-                && round((float) $sale->discount_total, 2) === $expectedDiscount
-                && round((float) $sale->tax_total, 2) === $expectedTax
-                && round((float) $sale->total, 2) === $expectedTotal;
+            // Fase 6.34: los totales del documento son el agregado estilo SAT de
+            // sus líneas exactas (DocumentTaxTotals), no la suma de las líneas
+            // redondeadas.
+            $coherent = DocumentTaxTotals::matches($sale, (new DocumentTaxTotals)->compute($items));
 
             if (! $coherent) {
-                $errors[] = $this->error('SALE_TOTALS_MISMATCH', 'total', 'Los totales de la venta no coinciden con la suma de sus líneas.');
+                $errors[] = $this->error('SALE_TOTALS_MISMATCH', 'total', 'Los totales de la venta no coinciden con los que resultan de sus líneas.');
             }
         }
     }

@@ -3,6 +3,7 @@
 namespace App\Services\Sales;
 
 use App\Models\TaxRate;
+use App\Services\Taxes\DocumentTaxTotals;
 use App\Services\Taxes\LineTaxCalculator;
 use App\Services\Taxes\TaxSpec;
 use Illuminate\Database\Eloquent\Model;
@@ -28,7 +29,7 @@ class LineItemCalculator
      * retención ya no se suma como traslado: va a `taxes_withheld` y se
      * resta del total. `tax_total` sigue siendo la suma de los trasladados.
      *
-     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
+     * @return array{subtotal: float, subtotal_exact: string, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
      */
     public function calculateItem(float $quantity, float $unitPrice, float $discount = 0, ?TaxRate $taxRate = null): array
     {
@@ -51,12 +52,13 @@ class LineItemCalculator
 
     /**
      * @param  array<string, mixed>  $result
-     * @return array{subtotal: float, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
+     * @return array{subtotal: float, subtotal_exact: string, discount: float, tax_total: float, taxes_transferred: float, taxes_withheld: float, total: float}
      */
     private function columns(array $result): array
     {
         return [
             'subtotal' => (float) $result['subtotal'],
+            'subtotal_exact' => $result['subtotal_exact'],
             'discount' => (float) $result['discount'],
             'tax_total' => (float) $result['tax_total'],
             'taxes_transferred' => (float) $result['taxes_transferred'],
@@ -72,16 +74,9 @@ class LineItemCalculator
      */
     public function recalculateTotals(Model&HasCalculableItems $model): Model&HasCalculableItems
     {
-        $items = $model->items()->get();
-
-        $model->forceFill([
-            'subtotal' => round((float) $items->sum('subtotal'), 2),
-            'discount_total' => round((float) $items->sum('discount'), 2),
-            'tax_total' => round((float) $items->sum('tax_total'), 2),
-            'taxes_transferred' => round((float) $items->sum('taxes_transferred'), 2),
-            'taxes_withheld' => round((float) $items->sum('taxes_withheld'), 2),
-            'total' => round((float) $items->sum('total'), 2),
-        ]);
+        // Fase 6.34: estilo SAT (DocumentTaxTotals), no la suma de las
+        // líneas redondeadas.
+        $model->forceFill((new DocumentTaxTotals)->compute($model->items()->get()));
 
         return $model;
     }
