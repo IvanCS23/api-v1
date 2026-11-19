@@ -44,8 +44,11 @@ test('recalculateSale suma los importes de todas las líneas de la venta', funct
     $company = Company::factory()->create();
     $sale = Sale::factory()->create(['company_id' => $company->id]);
 
-    SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id, 'subtotal' => 100, 'discount' => 0, 'tax_total' => 16, 'total' => 116]);
-    SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id, 'subtotal' => 50, 'discount' => 5, 'tax_total' => 7.2, 'total' => 52.2]);
+    // Fase 6.34: líneas con datos reales (cantidad, precio, descuento e IVA):
+    // una línea sin importe exacto se recalcula desde ellos.
+    $iva = TaxRate::factory()->create(['code' => '002', 'rate' => 0.16, 'tax_type' => TaxType::Traslado, 'factor_type' => TaxFactorType::Tasa]);
+    SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id, 'tax_rate_id' => $iva->id, 'quantity' => 1, 'unit_price' => 100, 'subtotal' => 100, 'discount' => 0, 'tax_total' => 16, 'total' => 116]);
+    SaleItem::factory()->create(['company_id' => $company->id, 'sale_id' => $sale->id, 'tax_rate_id' => $iva->id, 'quantity' => 1, 'unit_price' => 50, 'subtotal' => 50, 'discount' => 5, 'tax_total' => 7.2, 'total' => 52.2]);
 
     // CompanyScope es fail-closed: fuera de una request HTTP no hay tenant
     // activo, así que $sale->items() devolvería 0 filas sin esto. En el
