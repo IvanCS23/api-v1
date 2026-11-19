@@ -14,6 +14,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Services\Sat\SatFiscalValidator;
 use App\Services\Taxes\DocumentTaxTotals;
 use App\Services\Taxes\LineTaxWriter;
+use App\Services\Taxes\SaleTaxRecalculator;
 use App\Services\Taxes\TaxRuleValidator;
 use App\Services\Taxes\TaxSpec;
 use App\Support\Billing\SalePaymentRules;
@@ -71,6 +72,7 @@ class SaleBillingReadinessService
         $this->checkItems($items, $errors, $warnings, $beforeInvoicing);
         $this->checkTenant($sale, $items, $errors);
         $this->checkLegalTaxRules($sale, $items, $warnings);
+        $this->checkRecalculation($sale, $warnings);
 
         if ($beforeInvoicing) {
             $this->checkPayment($sale, $errors);
@@ -423,6 +425,28 @@ class SaleBillingReadinessService
             fn (array $row): TaxSpec => TaxSpec::fromArray($row),
             (new LineTaxWriter)->rowsToCopy($item, SaleItemTax::class, 'sale_item_id'),
         );
+    }
+
+    /**
+     * Fase 6.34: si al facturar la venta cambiará de total por el cálculo
+     * estilo SAT, se avisa con ambos totales (SaleTaxRecalculator::preview,
+     * sin escribir nada).
+     *
+     * @param  array<int, array<string, mixed>>  $warnings
+     */
+    private function checkRecalculation(Sale $sale, array &$warnings): void
+    {
+        $preview = (new SaleTaxRecalculator)->preview($sale);
+
+        if (! $preview['changed']) {
+            return;
+        }
+
+        $warnings[] = [
+            ...$this->error('SALE_TOTALS_WILL_BE_RECALCULATED', 'total', "Al facturar, la venta se recalcula con el cálculo del CFDI: el total pasa de {$preview['before']['total']} a {$preview['after']['total']}."),
+            'previous_total' => $preview['before']['total'],
+            'new_total' => $preview['after']['total'],
+        ];
     }
 
     /**

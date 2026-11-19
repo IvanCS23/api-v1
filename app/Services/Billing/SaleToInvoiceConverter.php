@@ -2,9 +2,11 @@
 
 namespace App\Services\Billing;
 
+use App\Enums\AuditAction;
 use App\Enums\InvoiceStatus;
 use App\Exceptions\SaleAlreadyInvoicedException;
 use App\Exceptions\SaleNotBillableException;
+use App\Models\AuditLog;
 use App\Models\Client;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -16,8 +18,10 @@ use App\Models\SaleItemTax;
 use App\Models\Scopes\CompanyScope;
 use App\Models\TaxRate;
 use App\Services\Taxes\LineTaxWriter;
+use App\Services\Taxes\SaleTaxRecalculator;
 use App\Support\Billing\SalePaymentRules;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Convierte una Sale (debe estar Confirmed y con billing-readiness
@@ -54,6 +58,7 @@ class SaleToInvoiceConverter
         private readonly SaleBillingReadinessService $billingReadiness,
         private readonly InvoiceNumberGenerator $numberGenerator,
         private readonly LineTaxWriter $taxWriter = new LineTaxWriter,
+        private readonly SaleTaxRecalculator $recalculator = new SaleTaxRecalculator,
     ) {}
 
     public function convert(Sale $sale, ?int $createdBy = null): Invoice
@@ -84,6 +89,14 @@ class SaleToInvoiceConverter
 
             if (! $readiness['ready']) {
                 throw new SaleNotBillableException($readiness['errors']);
+            }
+
+            // Fase 6.34: la venta se recalcula con el cálculo estilo SAT antes
+            // de facturarla; si su total cambia, queda en audit_logs con el
+            // total anterior y el nuevo. Las facturas emitidas no se tocan.
+            $recalculation = $this->recalculator->apply($lockedSale);
+            if ($recalculation['changed']) {
+                $this->auditRecalculation($lockedSale, $recalculation, $createdBy);
             }
 
             $client = Client::withoutGlobalScope(CompanyScope::class)->findOrFail($lockedSale->client_id);
@@ -188,5 +201,41 @@ class SaleToInvoiceConverter
 
             return $invoice;
         });
+    }
+
+    /**
+     * Fase 6.34: evento de auditoría del recálculo al facturar. `user_id` es
+     * quien factura (o, si no se conoce, quien creó la venta); sin ninguno
+     * de los dos se deja constancia en el log.
+     *
+     * @param  array{before: array<string, string>, after: array<string, string>}  $recalculation
+     */
+    private function auditRecalculation(Sale $sale, array $recalculation, ?int $createdBy): void
+    {
+        $metadata = [
+            'sale_id' => $sale->id,
+            'folio' => $sale->folio,
+            'before' => $recalculation['before'],
+            'after' => $recalculation['after'],
+            'reason' => 'Cálculo estilo SAT al facturar (Fase 6.34).',
+        ];
+        $userId = $createdBy ?? $sale->created_by;
+
+        if ($userId === null) {
+            Log::warning('billing.sale.totals_recalculated', ['company_id' => $sale->company_id, ...$metadata]);
+
+            return;
+        }
+
+        AuditLog::create([
+            'company_id' => $sale->company_id,
+            'user_id' => $userId,
+            'actor_id' => $createdBy,
+            'action' => AuditAction::SaleTotalsRecalculated->value,
+            'ip_address' => request()?->ip(),
+            'user_agent' => request()?->userAgent(),
+            'metadata' => $metadata,
+            'created_at' => now(),
+        ]);
     }
 }

@@ -11,4 +11,7 @@ enum AuditAction: string
     case Deactivated = 'deactivated';
     // Fase 6.31: cambio del propio nombre desde la web.
     case ProfileUpdated = 'profile_updated';
+    // Fase 6.34: la venta se recalculó al facturar (cálculo estilo SAT);
+    // metadata con el total anterior y el nuevo.
+    case SaleTotalsRecalculated = 'sale_totals_recalculated';
 }
