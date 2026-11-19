@@ -8,10 +8,14 @@ existe. Fase 6.29; el modo Live (sección 10) es de la Fase 6.31.
 
 | Componente | Versión |
 |---|---|
-| PHP | 8.2 o superior, con `pdo_mysql`, `openssl`, `mbstring`, `fileinfo`; **`zend.exception_ignore_args=On`** en `php.ini` |
+| PHP | 8.2 o superior, con `pdo_mysql`, `openssl`, `mbstring`, `fileinfo` y **`bcmath`**; **`zend.exception_ignore_args=On`** en `php.ini` |
 | Laravel | 12 (lo fija `composer.json`) |
 | Base de datos | **MySQL 8.0 o MariaDB 10.6 o superior** (recomendado) |
 | Node.js | el que pida `app-front/package.json` (Next.js). api-v1 ya no usa Node (Fase 6.32) |
+
+Sobre `bcmath` (Fase 6.34): el cálculo de impuestos usa aritmética decimal
+exacta. `composer.json` exige `ext-bcmath`, así que `composer install` falla
+sin ella; `php -m | grep bcmath` debe mostrarla.
 
 Sobre PHP: con `zend.exception_ignore_args=Off` las trazas de `laravel.log`
 incluyen los argumentos de cada llamada. Los parámetros que reciben llaves
