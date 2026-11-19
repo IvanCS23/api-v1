@@ -15,6 +15,7 @@ use App\Http\Controllers\Api\InvoiceItemController;
 use App\Http\Controllers\Api\InvoicePacActionController;
 use App\Http\Controllers\Api\MyPasswordController;
 use App\Http\Controllers\Api\PasswordRecoveryController;
+use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
@@ -153,6 +154,14 @@ Route::middleware(['auth:api', 'active', 'password.current', 'throttle:120,1'])-
     Route::put('/company/email-settings', [CompanyEmailSettingsController::class, 'update'])->middleware('throttle:company-fiscal');
     Route::get('/company/logo', [CompanyLogoController::class, 'show']);
     Route::post('/company/logo', [CompanyLogoController::class, 'store'])->middleware('throttle:company-fiscal');
+
+    // Fase 6.35: pagos recibidos de facturas PPD (Admin y Contador).
+    Route::get('/payments/receivable-invoices', [PaymentController::class, 'receivableInvoices']);
+    Route::get('/payments', [PaymentController::class, 'index']);
+    Route::post('/payments', [PaymentController::class, 'store']);
+    Route::get('/payments/{id}', [PaymentController::class, 'show'])->whereNumber('id');
+    Route::put('/payments/{id}', [PaymentController::class, 'update'])->whereNumber('id');
+    Route::delete('/payments/{id}', [PaymentController::class, 'destroy'])->whereNumber('id');
 
     // Invoices (Fase 5 — dominio interno de facturas, sin Facturapi/CFDI)
     Route::get('/invoices', [InvoiceController::class, 'index']);

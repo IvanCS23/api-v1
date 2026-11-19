@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Employe;
 use App\Models\Invoice;
 use App\Models\InvoiceItem;
+use App\Models\Payment;
 use App\Models\Product;
 use App\Models\Quote;
 use App\Models\QuoteItem;
@@ -18,6 +19,7 @@ use App\Policies\CompanyPolicy;
 use App\Policies\EmployePolicy;
 use App\Policies\InvoiceItemPolicy;
 use App\Policies\InvoicePolicy;
+use App\Policies\PaymentPolicy;
 use App\Policies\ProductPolicy;
 use App\Policies\QuoteItemPolicy;
 use App\Policies\QuotePolicy;
@@ -84,6 +86,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(QuoteItem::class, QuoteItemPolicy::class);
         Gate::policy(Invoice::class, InvoicePolicy::class);
         Gate::policy(InvoiceItem::class, InvoiceItemPolicy::class);
+        Gate::policy(Payment::class, PaymentPolicy::class);
         Gate::policy(User::class, UserPolicy::class);
         Gate::policy(Company::class, CompanyPolicy::class);
     }
