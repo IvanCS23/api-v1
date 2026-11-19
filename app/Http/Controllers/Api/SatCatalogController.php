@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Services\Sat\SatFiscalValidator;
 use App\Support\Sat\SatCatalog;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -24,7 +25,8 @@ class SatCatalogController extends Controller
             'tax_regimes' => array_values(SatCatalog::taxRegimes()),
             'cfdi_uses' => array_values(SatCatalog::cfdiUses()),
             'payment_forms' => array_values(SatCatalog::paymentForms()),
-            'tax_objects' => array_values(SatCatalog::taxObjects()),
+            // Fase 6.34: no se ofrecen 05, 06 y 08 hasta validarlos.
+            'tax_objects' => array_values(array_diff_key(SatCatalog::taxObjects(), array_flip(SatFiscalValidator::TAX_OBJECTS_UNSUPPORTED))),
         ]);
     }
 

@@ -42,6 +42,16 @@ final class SatFiscalValidator
     public const TAX_OBJECTS_WITHOUT_TAX = ['01', '03', '04'];
 
     /**
+     * Fase 6.34: 05 (IVA crédito PODEBI), 06 (no traslado del IVA) y 08
+     * (sin traslado del IVA ni desglose del IEPS) se rechazan con un error
+     * claro hasta validar sus reglas, y no se ofrecen en la interfaz
+     * (SatCatalogController). 07 sí se valida (IEPS sin IVA).
+     */
+    public const TAX_OBJECTS_UNSUPPORTED = ['05', '06', '08'];
+
+    public const TAX_OBJECT_UNSUPPORTED_MESSAGE = 'El objeto de impuesto %s todavía no está disponible en FacturaPro: usa 01, 02, 03, 04 o 07.';
+
+    /**
      * Régimen societario al final de la razón social: S.A., S.A. de C.V.,
      * S.A.P.I. de C.V., S. de R.L. (de C.V.), S.C., A.C., S.A.S.
      */
@@ -239,6 +249,8 @@ final class SatFiscalValidator
         if ($taxObject !== '') {
             if (! SatCatalog::isTaxObject($taxObject)) {
                 $issues[] = $this->issue('PRODUCT_TAX_OBJECT_INVALID', 'objeto_imp', "El objeto de impuesto {$taxObject} no existe en el catálogo c_ObjetoImp del SAT.");
+            } elseif (in_array($taxObject, self::TAX_OBJECTS_UNSUPPORTED, true)) {
+                $issues[] = $this->issue('PRODUCT_TAX_OBJECT_UNSUPPORTED', 'objeto_imp', sprintf(self::TAX_OBJECT_UNSUPPORTED_MESSAGE, $taxObject));
             } elseif ($taxObject === self::TAX_OBJECT_TAXED && ! $hasTax) {
                 $issues[] = $this->issue('PRODUCT_TAX_OBJECT_MISMATCH', 'tax_rate_id', 'Con objeto de impuesto 02 el producto debe tener IVA (16 %, 0 % o exento).');
             } elseif (in_array($taxObject, self::TAX_OBJECTS_WITHOUT_TAX, true) && $hasTax) {

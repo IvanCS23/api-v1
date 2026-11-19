@@ -191,6 +191,9 @@ class InvoicePacReadinessService
             }
             if (blank($item->product_objeto_imp)) {
                 $errors[] = $this->error('INVOICE_ITEM_TAX_OBJECT_MISSING', "{$prefix}.product_objeto_imp", 'Falta product_objeto_imp (product.taxability).');
+            } elseif (in_array((string) $item->product_objeto_imp, SatFiscalValidator::TAX_OBJECTS_UNSUPPORTED, true)) {
+                // Fase 6.34: 05, 06 y 08 no se envían al PAC hasta validarlos.
+                $errors[] = $this->error('INVOICE_ITEM_TAX_OBJECT_UNSUPPORTED', "{$prefix}.product_objeto_imp", sprintf(SatFiscalValidator::TAX_OBJECT_UNSUPPORTED_MESSAGE, $item->product_objeto_imp));
             }
 
             if ($item->tax_code !== null && ! in_array((string) $item->tax_code, self::RECOGNIZED_SAT_TAX_CODES, true)) {

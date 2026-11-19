@@ -102,7 +102,8 @@ test('GET /api/sat/catalogs entrega los catálogos pequeños con la matriz de co
 
     expect($response->json('tax_regimes'))->toHaveCount(19)
         ->and($response->json('payment_forms'))->toHaveCount(22)
-        ->and($response->json('tax_objects'))->toHaveCount(8)
+        // Fase 6.34: 05, 06 y 08 no se ofrecen hasta validarlos.
+        ->and(collect($response->json('tax_objects'))->pluck('code')->all())->toBe(['01', '02', '03', '04', '07'])
         ->and($response->json('tax_regimes.0'))->toBe(['code' => '601', 'description' => 'General de Ley Personas Morales', 'physical' => false, 'moral' => true])
         ->and(collect($response->json('cfdi_uses'))->firstWhere('code', 'CN01'))->toMatchArray(['physical' => true, 'moral' => false, 'regimes' => ['605']]);
 });

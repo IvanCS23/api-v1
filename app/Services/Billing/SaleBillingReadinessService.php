@@ -291,6 +291,8 @@ class SaleBillingReadinessService
                 'PRODUCT_SAT_KEY_INVALID' => 'ITEM_PRODUCT_SAT_KEY_INVALID',
                 'PRODUCT_UNIT_KEY_INVALID' => 'ITEM_PRODUCT_UNIT_KEY_INVALID',
                 'PRODUCT_TAX_OBJECT_INVALID' => 'ITEM_PRODUCT_OBJETO_IMP_INVALID',
+                // Fase 6.34: 05, 06 y 08 no se facturan hasta validarlos.
+                'PRODUCT_TAX_OBJECT_UNSUPPORTED' => 'ITEM_PRODUCT_OBJETO_IMP_UNSUPPORTED',
                 // La coherencia que cuenta en la factura es la de la línea
                 // (checkTaxObject), no el IVA sugerido del producto.
                 default => null,
