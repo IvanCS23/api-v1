@@ -217,6 +217,12 @@ class Invoice extends Model
         return $this->belongsTo(User::class, 'created_by');
     }
 
+    /** Fase 6.35: pagos (REP) aplicados a esta factura PPD. */
+    public function paymentAllocations(): HasMany
+    {
+        return $this->hasMany(PaymentAllocation::class);
+    }
+
     public function items(): HasMany
     {
         return $this->hasMany(InvoiceItem::class);
