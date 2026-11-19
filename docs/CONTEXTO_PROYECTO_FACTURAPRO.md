@@ -349,16 +349,32 @@ FASE 6.33 — Actualización de dependencias (cerrada el 2026-11-09):
 - CI: workflow `audit` en ambos repositorios (push, PR, cada lunes y manual) con `composer audit --locked --no-dev` y `npm audit --omit=dev` desde el lock, y una compuerta (`api-v1/scripts/ci/audit-gate.php`, `app-front/scripts/audit-gate.mjs`) que falla sólo con avisos altos o críticos de producción que no estén en `security/accepted-advisories.json`, con aceptaciones vencidas (`review_by`) o si la auditoría no se puede leer. Probadas en local contra los locks anteriores a la fase (fallan con 15 y 25 altos o críticos). app-front no tenía CI.
 - Commits api-v1: `037b677` (Laravel y Symfony), `c95c718` (Guzzle y psr7), `2ac7b28` (CommonMark y Flysystem), `cfcec70` (herramientas), `e46b15c` (CI), `9ad49c5` (documentación) y, al cerrar, `5654f7c` (formato con Pint en 36 archivos, sin cambios de lógica), `a91685f` (CI con `pint --test`) y el de documentación del cierre. app-front: `fcbbaea` (mitigación), `7e8d44a` (Next), `67e7b21` (audit fix), `e80cf43` (CI).
 
+FASE 6.34 — Modelo de impuestos por línea (cerrada el 2026-11-19):
+- Catálogos c_Impuesto, c_TipoFactor y c_TasaOCuota del archivo oficial `catCFDI_V_4_20261106.xls` (SHA-256 `6249e372…9e1a`); las seis hojas de la 6.26 salen idénticas con él y no se regeneraron. Se leen de CSV (`SatCatalog::taxes()`, `taxFactors()`, `taxRates()`); el 8 % fronterizo queda marcado aparte.
+- Varios impuestos por producto y por línea: `product_taxes`, `quote_item_taxes`, `sale_item_taxes` e `invoice_item_taxes` (impuesto c_Impuesto, traslado o retención, factor tasa/cuota/exento, tasa con 6 decimales, `ieps_mode`; en líneas, base e importe con 6 decimales). La factura guarda su snapshot inmutable. Las columnas viejas de `products` (iva, iva_retenido, ieps, isr, impuesto_local, cuenta_predial, no_pedimento) quedan congeladas, sin lectura ni escritura nueva.
+- `tax_total` no cambia de significado: es la suma de los trasladados. Nuevos `taxes_transferred` y `taxes_withheld` en documentos y líneas; total = subtotal − descuento + trasladados − retenidos. Corrige el error latente: una tasa de retención se sumaba como traslado.
+- Cálculo estilo SAT (como Facturapi): importe del concepto = cantidad × valor unitario con 6 decimales (`subtotal_exact`) y el impuesto sobre ese importe exacto; subtotal y cada grupo de impuesto (impuesto, traslado/retención, factor, tasa) del documento = redondeo de la suma de los exactos (`DocumentTaxTotals`, única fuente). La suma de las líneas redondeadas puede diferir del total por centavos. bcmath (`ext-bcmath` en `composer.json` y `DEPLOYMENT.md`).
+- Líneas existentes sin `subtotal_exact`: al recalcular una cotización o una venta se recalculan desde cantidad × valor unitario − descuento y sus impuestos, igual que una línea nueva. Una venta calculada con el método anterior se recalcula al facturar (`SaleTaxRecalculator`): el readiness avisa con ambos totales (`SALE_TOTALS_WILL_BE_RECALCULATED`) y, si el total cambia, `audit_logs` registra `sale_totals_recalculated` con el total anterior y el nuevo. Las facturas emitidas nunca se recalculan.
+- Validación (`TaxRuleValidator`): errores sólo para lo que el SAT rechaza al timbrar (D2) — impuesto y traslado/retención de c_Impuesto, tasa fija o dentro del rango de c_TasaOCuota, exento sin tasa y nunca en retención, un registro por impuesto y tipo (IEPS admite tasa y cuota), objeto 02 con impuesto, 01/03/04 sin impuestos, 07 con IEPS sin IVA — y la lista cerrada de tasas de retención (D3: IVA 4 %, 6 %, 0.106667 y 16 %; ISR 10 % y 1.25 %). Fuera de alcance: IVA fronterizo 8 % e IEPS incluido en el precio (D1: sólo `sum_before_taxes`).
+- Objeto de impuesto 05, 06 y 08: se rechazan con un error claro (captura, readiness de venta y de factura) y el catálogo de la API ya no los ofrece, hasta validar sus reglas.
+- Reglas legales de retención: avisos, nunca errores, en un solo lugar (`App\Support\Taxes\LegalTaxRules`), marcados "pendiente de contador" (ver "Pendientes de contador" en la sección 8).
+- Facturapi: `product.taxes[]` sale del snapshot por línea con `withholding`, `factor` e `ieps_mode`; `tax_included` siempre `false` explícito; se quitó el bloqueo de retenciones. Antes de timbrar, el total del borrador debe coincidir con el local al centavo (`PAC_TOTAL_MISMATCH`, tolerancia 0).
+- Verificación contra Facturapi TEST (paso 7, autorizado, 2026-11-10): 8 borradores más uno con `tax_included: true`, `external_id` `exp-6.34-`, todos borrados; 27 llamadas (9 POST, 9 DELETE, 9 GET de comprobación). Con el cálculo estilo SAT, los 8 casos coinciden en local con los totales de Facturapi (220.40, 250.00, 125.28, 40.02, 953.33, 1147.50, 14.71 y 1.15). Con `tax_included: true` Facturapi toma el precio como neto de traslados menos retenciones (total 999.99).
+- Frontend: líneas a 2 decimales con el importe e impuestos exactos al pasar el cursor o tocar; totales siempre del backend; cuando la suma visible de las líneas no coincide con el total, junto al total: "Los impuestos se calculan sobre los importes exactos de cada concepto y se redondean al final, como en el CFDI." (sin fila de ajuste). El readiness muestra el aviso de recálculo con ambos totales. Verificado en navegador (Chrome sin interfaz, API aislada en SQLite) con el caso H: 15/15.
+- Comandos: `billing:backfill-line-taxes [--apply]` (copia el impuesto único anterior, sin recalcular) y `billing:tax-lines-check` (sólo lectura).
+- Desviaciones: los catálogos de impuestos se leen de CSV (sin tabla `sat_tax_rules`); el backfill es un comando, no lógica en la migración; 05, 06 y 08 pasaron de "sin validar" a rechazados.
+- Commits api-v1: `022669a`, `d715e94`, `8de20b7`, `982736b`, `ef1d6c5`, `c03a86b`, `657fbf6` (objeto 05/06/08), `c081db6` (DEPLOYMENT), `53700ff` (cálculo estilo SAT), `51a2a7d` (recálculo al facturar), `c0eef27`, `ea840d6` y `ebe14e5` (líneas sin importe exacto) y el de documentación. app-front: `9908100` (README en UTF-8) y `df0d4eb`.
+
 Documentación principal:
 
 `api-v1/BILLING_LIFECYCLE.md` y `api-v1/DEPLOYMENT.md`
 
 ## 8. Estado de pruebas y línea base
 
-Línea base de la FASE 6.33 (verificada el 2026-11-09 sobre `changes-ivan` e
-`integracion-ivan`, después de la actualización de dependencias):
-- Backend: 1924 pruebas aprobadas, 8927 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB). Igual en un clon limpio con `.env.example`. `route:list`: 95 rutas (94 `api/*` y `up`). Ninguna prueba sale a la red (`Http::preventStrayRequests()`; la prueba de humo sólo habla con servidores `php -S` locales).
-- Frontend: 306 pruebas aprobadas en 32 archivos, 0 fallidas.
+Línea base de la FASE 6.34 (verificada el 2026-11-19 sobre `changes-ivan` e
+`integracion-ivan`, después del modelo de impuestos por línea):
+- Backend: 2023 pruebas aprobadas, 9413 assertions, 0 fallidas, 1 omitida (la prueba de MySQL de la zona horaria; corre sólo contra MySQL/MariaDB). `route:list`: 95 rutas (94 `api/*` y `up`). Ninguna prueba sale a la red (`Http::preventStrayRequests()`; la prueba de humo sólo habla con servidores `php -S` locales).
+- Frontend: 317 pruebas aprobadas en 33 archivos, 0 fallidas (en una copia limpia de `integracion-ivan`; en la copia de trabajo del responsable, `app/page.test.tsx` falla por su cambio sin commit en `app/page.tsx`).
 - TypeScript (`tsc --noEmit`): aprobado. Tras borrar una página hace falta un build para regenerar `.next/types` antes del typecheck.
 - Build Next.js 16.4.5: aprobado, 37 páginas generadas.
 - ESLint global del frontend: 31 errores / 51 avisos, todos previos (antes de la 6.24: 36 / 68); 0 hallazgos de `no-console`. Con `eslint-config-next` 16.4.5 serían 45 / 54 (ver la 6.33).
@@ -384,6 +400,7 @@ Estado de la BD local de desarrollo:
   - Cancelación con motivo 02: `canceled`/`accepted`; no hizo falta reconciliar. Acuse: `CANCELLATION_RECEIPT_UUID_MISMATCH`, como se esperaba en TEST. Estructura real del acuse de TEST: raíz `Acuse` sin namespace, `Acuse/Folios` con `UUID` y `EstatusUUID` hermanos (`EstatusUUID=205`, UUID ajeno `CF5138A2...2E90`) y `Acuse/Signature`.
   - `billing:health`: 21 facturas activas `valid`, sin `pac_environment_mismatch`. 0 coincidencias de `sk_test_`, `sk_live_` o `sk_user_` en los logs de R0. 13 llamadas reales a Facturapi Test, todas 200. El envío por correo se omitió (no se indicó dirección).
   - Conteo: 22 facturas en total, 1 borrada (#14), 21 activas, 3 archivadas (#1–#3). El backfill cuenta las borradas; `billing:health`, no.
+- 6.34, aplicado con autorización: migración `create_line_tax_tables` (lote 42) y `billing:backfill-line-taxes --apply` el 2026-11-18 (13 impuestos de producto, 27 de líneas de venta, 26 de líneas de factura; `billing:tax-lines-check` cuadra); respaldo verificado `backups/facturapro-2026-11-19-6.34-post-backfill.sql` (32 tablas, 55 409 filas iguales a la BD; el respaldo previo a la migración, en un directorio temporal, se perdió); migración `add_subtotal_exact_to_line_items` (lote 43) el 2026-11-19. Con el cálculo estilo SAT ninguna de las 11 ventas sin facturar cambia de total.
 - `sat:audit-catalog-data` en la BD local: 2 de 3 clientes y 10 de 11 productos con problemas (claves inventadas, unidades inexistentes, objeto 01 con IVA). No se corrigió nada. El producto 14 guardó `iva = 0.16` (16 % como fracción) y el backfill sólo traduce 16 y 0, así que quedó sin tasa y se reporta como objeto 02 sin IVA. La venta de prueba #23 (producto 14) ya está facturada (FAC-00000012, `issued`); su línea tiene IVA 16 %, así que el readiness la sigue dando por lista.
 
 Deuda conocida:
@@ -408,11 +425,20 @@ Dependencias (6.33):
 - Mitigaciones vigentes: `next dev` sólo en `127.0.0.1` y sin `allowedDevOrigins` (no exponerlo por Tailscale ni por la red local); `images.unoptimized: true` mientras la app no use `next/image` (si algún día se usa, reevaluar los avisos del optimizador y no habilitar `dangerouslyAllowSVG`).
 - Pendientes: `eslint-config-next` 16.4.5, sólo después de corregir sus errores nuevos (ver "Lint y Pint globales"). Next 16.4.6 (2026-11-09) revisada el 2026-11-10: sin correcciones de seguridad (compresión de respuestas de route handlers, Tailwind en create-next-app y ajustes de Turbopack en desarrollo) y ningún aviso de GitHub afecta a 16.4.5; no se actualizó. Versiones mayores fuera de la 6.33: Laravel 13, Pest 4 (con `pest-plugin-laravel` 4) y Tinker 3, cada una en su fase con sus notas de actualización.
 
+Pendientes de contador (6.34, en `App\Support\Taxes\LegalTaxRules`; hoy son avisos, nunca errores):
+- Las retenciones de IVA e ISR sólo aplican con receptor persona moral (RFC de 12 caracteres, no genérico).
+- El ISR retenido sólo aplica con emisor persona física.
+- Emisor persona física en RESICO (626) con receptor persona moral: ISR retenido de 1.25 %; y ninguna otra tasa de ISR en RESICO.
+- Lista cerrada de tasas de retención: IVA 4 % (autotransporte), 6 % (personal a disposición), 10.6667 % (dos terceras partes; se guarda 0.106667) y 16 %; ISR 10 % (honorarios y arrendamiento) y 1.25 % (RESICO).
+- Si el SAT valida al timbrar alguna de estas condiciones: por confirmar con la guía general del CFDI 4.0 (la que se revisó en la 6.34 es la de entes públicos, DPA, que no admite retenciones). También por confirmar con esa guía: los límites de tolerancia del importe por concepto.
+- IEPS incluido en el precio (`unit` / no desglosado): pendiente de contador (D1).
+- El producto 2 de desarrollo (IVA RET 8, IEPS 50, ISR 5.4 en columnas viejas) se vuelve a capturar a mano (D4).
+
 Hallazgos de producto pendientes (verificados en el código):
 - `billing:pac-check` no compara el `support_email` de Facturapi con el correo de contacto local ni avisa si la organización trae un logotipo que no se subió desde el sistema (en desarrollo, ambos heredados).
 - Correo propio del sistema (fuera de Facturapi): necesario para notificar cancelaciones con su acuse; Facturapi no envía el acuse y un CFDI cancelado ya no se envía.
 - 17 pantallas siguen siendo maquetas (registradas como `demo` en `app-front/src/data/screenStatus.ts`).
-- Complemento de pago (REP): requisito para reactivar PPD (bloqueado en la 6.28). Al construirlo, quitar PPD de `SalePaymentRules::UNAVAILABLE_METHODS`; la regla PPD ↔ 99 ya está lista.
+- Complemento de pago (REP): requisito para reactivar PPD (bloqueado en la 6.28). Al construirlo, quitar PPD de `SalePaymentRules::UNAVAILABLE_METHODS`; la regla PPD ↔ 99 ya está lista. Además (6.34): cuando existan pagos registrados, una venta con pagos no se recalcula sola al facturar; se bloquea con un aviso para revisarla a mano (hoy no hay registro de pagos de ventas).
 - `companies.default_cfdi_series` no tiene uso: la serie del CFDI sale del folio interno (`FAC`). Decidir si se elimina o si se permite configurar el prefijo del folio interno.
 - Un `/stamp` rechazado por una validación del SAT que sólo ocurre al timbrar deja la factura `issued` sin CFDI; se recupera con "Regresar a lista" (6.29) y, para corregir datos, eliminándola y volviendo a facturar la venta. La cancelación sólo ERP no se ofrece a facturas con borrador remoto.
 - Columnas `TIMESTAMP`: límite 2038-01-19 (convertir a `DATETIME` en una fase futura).
@@ -423,9 +449,9 @@ Hallazgos de producto pendientes (verificados en el código):
 - Aprobación de ventas: `submit`/`confirm` se conservan, pero `SalePolicy` no distingue roles (cualquiera de la empresa confirma su propia venta) y no se registra quién confirmó.
 - RFC genéricos en la unicidad de clientes: excluir `XAXX010101000` y `XEXX010101000` del único `(company_id, rfc)` para permitir varios clientes extranjeros (y más de un "público en general") en la misma empresa. Hoy el índice de BD y `Store/UpdateClientRequest` lo impiden; requiere migración (p. ej. columna generada que sea null para los genéricos) y ajustar la regla `unique`.
 - IVA 8 % del estímulo fiscal de la región fronteriza: agregarlo a `tax_rates` con sus condiciones de aplicación (contribuyentes inscritos en el padrón del estímulo, operaciones realizadas en la región, vigencia del decreto) y validarlas al capturar y facturar. Fase propia. Mientras tanto se retiró de Productos porque no existe en `tax_rates`.
-- Objeto de impuesto 05–08 no se valida contra el IVA.
+- Objeto de impuesto 05, 06 y 08: se rechazan desde la 6.34 hasta validar sus reglas (07 sí se valida).
 - Importación masiva real (fase propia): CSV con plantilla, validación por fila con las mismas reglas de la 6.26 vía los Form Requests (`StoreClientRequest` / `StoreProductRequest`, nunca `create()` directo) y reporte de errores por renglón. Falta decidir si un archivo con errores no guarda nada o importa solo las filas válidas. Mientras tanto el botón de Clientes y Productos se muestra como "Próximamente".
-- IEPS, retenciones (IVA RET, ISR), cuenta predial, pedimento e impuestos locales: soporte real de punta a punta (fase propia): captura, cálculo en la línea de venta, copia a la factura y envío al PAC (hoy el PAC rechaza retenciones con `INVOICE_ITEM_WITHHOLDING_UNSUPPORTED`). Hoy esas columnas de `products` se guardan pero nada las lee; Productos las muestra deshabilitadas y ya no las envía (en la BD local, el producto 2 tiene IVA RET 8, IEPS 50 e ISR 5.4). Problemas de diseño encontrados que esa fase no debe heredar:
+- Resuelto en la 6.34: IEPS e IVA/ISR retenidos de punta a punta (ver la sección 7). Siguen pendientes, cada uno en su fase: cuenta predial, pedimento, impuestos locales e IVA fronterizo. Contexto de la decisión original: Hoy esas columnas de `products` se guardan pero nada las lee; Productos las muestra deshabilitadas y ya no las envía (en la BD local, el producto 2 tiene IVA RET 8, IEPS 50 e ISR 5.4). Problemas de diseño encontrados que esa fase no debe heredar:
   - Precisión de dos decimales: las columnas son `decimal(5,2)`, así que 10.6667 % se guarda como 10.67 (y 0.5333 % como 0.53).
   - IEPS tasa y cuota en la misma columna `ieps`: no se distingue cuál es, y al editar siempre vuelve como tasa, así que la cuota se pierde.
   - Solo se guarda la primera cuenta predial y el primer pedimento; los demás se descartaban sin aviso.
@@ -493,7 +519,7 @@ Al terminar:
 
 ## 10. Punto exacto de continuidad
 
-La última fase completada es la FASE 6.33 — Actualización de dependencias (ver sección 7), cerrada el 2026-11-10. Después del primer push con sus commits hay que revisar la primera ejecución de los workflows en GitHub (sección 8, "Dependencias"). La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
+La última fase completada es la FASE 6.34 — Modelo de impuestos por línea (ver sección 7), cerrada el 2026-11-19. Pendientes de contador y retenciones por confirmar con la guía general del CFDI 4.0 (sección 8). Después del primer push con los commits de la 6.33 hay que revisar la primera ejecución de los workflows en GitHub (sección 8, "Dependencias"). La FASE 6.31 sigue con código y R0 completos y P1 a P7 pendientes de empresa con CSD vigente, contador, servidor con `APP_ENV=production` y suscripción activa de Facturapi; antes de P1 falta además el correo transaccional (sección 8, "Pendientes antes de P1").
 
 Hoja de ruta (acordada el 2026-10-30, en tres hitos):
 
@@ -503,13 +529,13 @@ Hito 1 — Piloto (ventas de contado):
 - FASE 6.30 — Envío del CFDI por correo. Completa.
 - FASE 6.31 — Modo Live con una empresa piloto. Código y R0 completos; P1 a P7 pendientes (incluye la verificación obligatoria del acuse en la primera cancelación real; ver `DEPLOYMENT.md`, sección 10).
 - FASE 6.32 — Cuentas de usuario en Next.js (cambio de contraseña, cambio obligatorio, recuperación por correo) y retiro de la web de Laravel. Completa.
+- FASE 6.34 — Modelo de impuestos por línea (IEPS, IVA e ISR retenidos, cálculo estilo SAT). Completa.
 - FASE 6.33 — Actualización de dependencias (Laravel 12.71, Symfony, Guzzle, CommonMark, Flysystem, Next 16.4.5) y auditoría en CI. Completa (`eslint-config-next` se queda en 16.1.6).
 
 Hito 2 — Lanzamiento general:
 - 2FA del producto: exigirla en `POST /api/login` y en Next.js (la web de Laravel que la ofrecía se retiró en la 6.32; las columnas `two_factor_*` se conservan).
 - Token del API en `localStorage` (6.32): Next.js guarda el `api_token` en `localStorage` (`api_token` y `auth_user`), al alcance de cualquier script de la página; un XSS lo robaría. Pendiente antes del lanzamiento general: llevarlo a una cookie `HttpOnly` y `Secure` (o a otro mecanismo que el JavaScript no pueda leer), con su protección CSRF.
 - Token del API sin caducidad (6.32): el `api_token` no vence por tiempo; sólo cambia al iniciar sesión, cerrarla o cambiar o restablecer la contraseña. Pendiente antes del lanzamiento general: caducidad por inactividad y un máximo absoluto, con renovación.
-- Modelo de impuestos por línea: retenciones (IVA RET, ISR) e IEPS (ver los problemas de diseño en la sección 8).
 - Complemento de pago (REP) y reactivación de PPD.
 - Notas de crédito.
 - Cancelación con sustitución.
