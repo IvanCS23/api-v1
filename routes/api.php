@@ -163,6 +163,8 @@ Route::middleware(['auth:api', 'active', 'password.current', 'throttle:120,1'])-
     Route::put('/payments/{id}', [PaymentController::class, 'update'])->whereNumber('id');
     Route::delete('/payments/{id}', [PaymentController::class, 'destroy'])->whereNumber('id');
     Route::post('/payments/{id}/issue', [PaymentController::class, 'issue'])->whereNumber('id')->middleware('throttle:pac-actions');
+    Route::post('/payments/{id}/cancel', [PaymentController::class, 'cancel'])->whereNumber('id')->middleware('throttle:pac-actions');
+    Route::post('/payments/{id}/sync', [PaymentController::class, 'sync'])->whereNumber('id')->middleware('throttle:pac-actions');
     Route::get('/payments/{id}/cfdi/xml', [PaymentController::class, 'cfdiXml'])->whereNumber('id');
     Route::get('/payments/{id}/cfdi/pdf', [PaymentController::class, 'cfdiPdf'])->whereNumber('id');
 

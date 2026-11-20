@@ -9,8 +9,10 @@ use App\Exceptions\Billing\InvoiceLifecycleInconsistentException;
 use App\Exceptions\Billing\PacReconciliationRequiredException;
 use App\Exceptions\InvoiceCancellationInProgressException;
 use App\Exceptions\InvoiceCannotBeCancelledException;
+use App\Exceptions\InvoiceHasActivePaymentsException;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Payments\InvoiceBalance;
 use App\Support\Billing\PacCredentialGuard;
 use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
@@ -55,6 +57,12 @@ class OrchestrateInvoiceCancellationService
 
         if ($this->capabilities->requiresReview($current)) {
             throw new PacReconciliationRequiredException;
+        }
+
+        // Fase 6.35 (ajuste 4): con REP vigentes la factura es "No
+        // cancelable" para el SAT; se rechaza antes de cualquier HTTP.
+        if ((new InvoiceBalance)->hasActivePayments($current)) {
+            throw new InvoiceHasActivePaymentsException($current);
         }
 
         return match ($this->capabilities->cancellationMode($current)) {

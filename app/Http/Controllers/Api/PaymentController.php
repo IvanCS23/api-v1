@@ -9,10 +9,14 @@ use App\Http\Requests\UpdatePaymentRequest;
 use App\Http\Resources\PaymentResource;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Services\Payments\CancelPaymentService;
 use App\Services\Payments\InvoiceBalance;
 use App\Services\Payments\IssuePaymentService;
+use App\Services\Payments\PaymentCancellationInProgressException;
+use App\Services\Payments\PaymentCancellationMotiveException;
 use App\Services\Payments\PaymentIssuanceInProgressException;
 use App\Services\Payments\PaymentNotDraftException;
+use App\Services\Payments\PaymentNotIssuedException;
 use App\Services\Payments\PaymentNotReadyException;
 use App\Services\Payments\PaymentReceiptNotValidException;
 use App\Services\Payments\PaymentRegistrar;
@@ -35,6 +39,7 @@ class PaymentController extends Controller
         private readonly PaymentRegistrar $registrar,
         private readonly InvoiceBalance $balance,
         private readonly IssuePaymentService $issuer,
+        private readonly CancelPaymentService $canceller,
         private readonly PacProviderResolver $resolver,
         private readonly InvoicePacActionExceptionResponder $responder,
     ) {}
@@ -169,6 +174,44 @@ class PaymentController extends Controller
             return response()->json(['message' => $e->getMessage(), 'code' => PaymentReceiptNotValidException::CODE], 502);
         } catch (Throwable $e) {
             return $this->responder->respond($e, null, 'issuePayment') ?? throw $e;
+        }
+
+        return new PaymentResource($this->loaded($payment));
+    }
+
+    /** Fase 6.35 (5): pide cancelar el REP (motivos 02 y 03). */
+    public function cancel(Request $request, $id): JsonResponse|PaymentResource
+    {
+        $payment = Payment::findOrFail($id);
+        $this->authorize('update', $payment);
+        $data = $request->validate(['motive' => ['required', 'string', Rule::in(CancelPaymentService::motives())]], [
+            'motive.in' => 'Un complemento de pago sólo se cancela con los motivos 02 o 03.',
+        ]);
+
+        return $this->paymentAction(fn () => $this->canceller->cancel($payment, $data['motive'], $request->user()), 'cancelPayment');
+    }
+
+    /** Fase 6.35 (5): consulta en el PAC el estado de la cancelación del REP. */
+    public function sync($id): JsonResponse|PaymentResource
+    {
+        $payment = Payment::findOrFail($id);
+        $this->authorize('update', $payment);
+
+        return $this->paymentAction(fn () => $this->canceller->sync($payment), 'syncPayment');
+    }
+
+    private function paymentAction(callable $action, string $name): JsonResponse|PaymentResource
+    {
+        try {
+            $payment = $action();
+        } catch (PaymentNotIssuedException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentNotIssuedException::CODE], 409);
+        } catch (PaymentCancellationInProgressException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentCancellationInProgressException::CODE], 409);
+        } catch (PaymentCancellationMotiveException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentCancellationMotiveException::CODE], 422);
+        } catch (Throwable $e) {
+            return $this->responder->respond($e, null, $name) ?? throw $e;
         }
 
         return new PaymentResource($this->loaded($payment));

@@ -17,4 +17,6 @@ enum AuditAction: string
     // Fase 6.35: se emitió el REP de un pago; metadata con cada documento
     // relacionado y el payment-summary del PAC.
     case PaymentIssued = 'payment_issued';
+    // Fase 6.35: se pidió cancelar el REP; metadata con motivo y estado.
+    case PaymentCancellationRequested = 'payment_cancellation_requested';
 }

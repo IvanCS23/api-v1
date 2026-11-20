@@ -7,6 +7,7 @@ use App\Enums\InvoicePacEventType;
 use App\Enums\InvoiceStatus;
 use App\Models\Invoice;
 use App\Models\User;
+use App\Services\Payments\InvoiceBalance;
 use App\Support\Billing\PacEnvironment;
 use App\Support\Billing\PacEnvironmentAccess;
 use App\Support\Billing\PacOrganizationAccess;
@@ -50,8 +51,10 @@ class InvoiceBusinessCapabilitiesService
         $canIssue = $user?->can('issueBusiness', $invoice) === true
             && $this->canIssueByState($invoice);
         $mode = $this->cancellationMode($invoice);
+        // Fase 6.35 (ajuste 4): no se ofrece con REP vigentes.
         $canCancel = $mode !== null
-            && $user?->can('cancelBusiness', $invoice) === true;
+            && $user?->can('cancelBusiness', $invoice) === true
+            && ! (new InvoiceBalance)->hasActivePayments($invoice);
         $canReconcile = $this->needsReconciliationAction($invoice)
             && $this->hasReconciliationContext($invoice)
             && $user?->can('reconcilePac', $invoice) === true;

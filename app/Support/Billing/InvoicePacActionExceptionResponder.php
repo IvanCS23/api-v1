@@ -37,6 +37,7 @@ use App\Exceptions\InvoiceCannotBeCancelledException;
 use App\Exceptions\InvoiceCannotBeIssuedException;
 use App\Exceptions\InvoiceCannotBeRevertedException;
 use App\Exceptions\InvoiceDraftNotReadyToStampException;
+use App\Exceptions\InvoiceHasActivePaymentsException;
 use App\Exceptions\InvoiceIssuanceInProgressException;
 use App\Exceptions\InvoicePacTotalMismatchException;
 use App\Models\Invoice;
@@ -122,6 +123,12 @@ class InvoicePacActionExceptionResponder
                 $error->environment === 'live'
                     ? 'En producción sólo se puede cancelar con los motivos 02 y 03.'
                     : 'El motivo 04 no está disponible: el sistema no emite facturas globales.',
+            ],
+            // Fase 6.35 (ajuste 4): antes que la regla general de cancelación.
+            $error instanceof InvoiceHasActivePaymentsException => [
+                409,
+                InvoiceHasActivePaymentsException::CODE,
+                'La factura tiene complementos de pago vigentes. Cancela primero esos complementos; mientras existan, el SAT la considera no cancelable.',
             ],
             $error instanceof InvoiceCannotBeCancelledException => [
                 409,
