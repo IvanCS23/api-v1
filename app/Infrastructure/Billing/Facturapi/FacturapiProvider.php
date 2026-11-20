@@ -95,6 +95,47 @@ class FacturapiProvider implements PacProvider
         return $this->mapResponse($response);
     }
 
+    /**
+     * Fase 6.35: `GET /invoices/{id}/payment-summary?amount=` — lo que
+     * Facturapi calcula para un documento relacionado de un REP (uuid,
+     * serie, folio, parcialidad, saldo anterior, total e impuestos
+     * prorrateados al monto). Sólo consulta; se compara con el cálculo local
+     * antes de emitir (D3).
+     *
+     * @return array<string, mixed>
+     */
+    public function paymentSummary(string $invoiceExternalId, string $amount): array
+    {
+        $response = $this->client()->get("/invoices/{$invoiceExternalId}/payment-summary", ['amount' => $amount]);
+
+        $this->assertSuccessful($response);
+
+        $data = $response->json();
+
+        if (! is_array($data) || ! isset($data['uuid'], $data['installment']) || ! array_key_exists('last_balance', $data)) {
+            throw new PacUnexpectedResponseException(
+                'La respuesta de payment-summary del PAC no contiene los campos esperados (uuid, installment, last_balance).',
+                $response->status(),
+            );
+        }
+
+        return $data;
+    }
+
+    /**
+     * Fase 6.35: emite un CFDI de pago (REP, tipo P) con `POST /invoices`.
+     * El payload lo arma FacturapiPaymentPayload; lleva `idempotency_key`,
+     * así que se puede reintentar ante un fallo de conexión.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function createPaymentReceipt(array $payload): PacInvoiceResult
+    {
+        $response = $this->client()->post('/invoices', $payload);
+
+        return $this->mapTestInvoiceResponse($response, 'createPaymentReceipt');
+    }
+
     public function retrieveInvoice(string $externalId): PacInvoiceResult
     {
         $response = $this->client()->get("/invoices/{$externalId}");

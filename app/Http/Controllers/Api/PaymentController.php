@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Contracts\Billing\PacProviderResolver;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StorePaymentRequest;
 use App\Http\Requests\UpdatePaymentRequest;
@@ -9,12 +10,20 @@ use App\Http\Resources\PaymentResource;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Services\Payments\InvoiceBalance;
+use App\Services\Payments\IssuePaymentService;
+use App\Services\Payments\PaymentIssuanceInProgressException;
 use App\Services\Payments\PaymentNotDraftException;
+use App\Services\Payments\PaymentNotReadyException;
+use App\Services\Payments\PaymentReceiptNotValidException;
 use App\Services\Payments\PaymentRegistrar;
+use App\Services\Payments\PaymentSummaryMismatchException;
+use App\Support\Billing\InvoicePacActionExceptionResponder;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Validation\Rule;
+use Throwable;
 
 /**
  * Fase 6.35 (2): pagos recibidos de facturas PPD (registro en borrador).
@@ -25,6 +34,9 @@ class PaymentController extends Controller
     public function __construct(
         private readonly PaymentRegistrar $registrar,
         private readonly InvoiceBalance $balance,
+        private readonly IssuePaymentService $issuer,
+        private readonly PacProviderResolver $resolver,
+        private readonly InvoicePacActionExceptionResponder $responder,
     ) {}
 
     public function index(Request $request)
@@ -135,6 +147,66 @@ class PaymentController extends Controller
         }
 
         return response()->json(null, 204);
+    }
+
+    /** Fase 6.35 (4): emite el REP del pago en borrador. */
+    public function issue(Request $request, $id): JsonResponse|PaymentResource
+    {
+        $payment = Payment::findOrFail($id);
+        $this->authorize('update', $payment);
+
+        try {
+            $payment = $this->issuer->issue($payment, $request->user());
+        } catch (PaymentNotDraftException $e) {
+            return $this->notDraft($e);
+        } catch (PaymentNotReadyException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentNotReadyException::CODE, 'errors' => $e->problems], 422);
+        } catch (PaymentSummaryMismatchException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentSummaryMismatchException::CODE, 'differences' => $e->differences], 422);
+        } catch (PaymentIssuanceInProgressException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentIssuanceInProgressException::CODE], 409);
+        } catch (PaymentReceiptNotValidException $e) {
+            return response()->json(['message' => $e->getMessage(), 'code' => PaymentReceiptNotValidException::CODE], 502);
+        } catch (Throwable $e) {
+            return $this->responder->respond($e, null, 'issuePayment') ?? throw $e;
+        }
+
+        return new PaymentResource($this->loaded($payment));
+    }
+
+    public function cfdiXml($id): Response|JsonResponse
+    {
+        return $this->artifact($id, 'xml');
+    }
+
+    public function cfdiPdf($id): Response|JsonResponse
+    {
+        return $this->artifact($id, 'pdf');
+    }
+
+    /** XML o PDF del REP, directo del PAC (no se guarda copia todavía). */
+    private function artifact($id, string $format): Response|JsonResponse
+    {
+        $payment = Payment::findOrFail($id);
+        $this->authorize('view', $payment);
+
+        if (blank($payment->pac_external_id)) {
+            return response()->json(['message' => 'El pago todavía no tiene complemento de pago emitido.', 'code' => 'PAYMENT_NOT_ISSUED'], 404);
+        }
+
+        try {
+            $provider = $this->resolver->forCompany((int) $payment->company_id);
+            $content = $format === 'xml' ? $provider->downloadXml($payment->pac_external_id) : $provider->downloadPdf($payment->pac_external_id);
+        } catch (Throwable $e) {
+            return $this->responder->respond($e, null, 'downloadPayment') ?? throw $e;
+        }
+
+        return response($content, 200, [
+            'Content-Type' => $format === 'xml' ? 'application/xml' : 'application/pdf',
+            'Content-Disposition' => "attachment; filename=\"{$payment->folio}.{$format}\"",
+            'X-Content-Type-Options' => 'nosniff',
+            'Cache-Control' => 'no-store, private',
+        ]);
     }
 
     private function loaded(Payment $payment): Payment

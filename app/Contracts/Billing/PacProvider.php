@@ -93,6 +93,20 @@ interface PacProvider
     public function retrieveInvoice(string $externalId): PacInvoiceResult;
 
     /**
+     * Fase 6.35: cálculo del PAC para un documento relacionado de un REP.
+     *
+     * @return array<string, mixed>
+     */
+    public function paymentSummary(string $invoiceExternalId, string $amount): array;
+
+    /**
+     * Fase 6.35: emite un REP (CFDI tipo P).
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public function createPaymentReceipt(array $payload): PacInvoiceResult;
+
+    /**
      * @throws PacAmbiguousInvoiceMatchException si el PAC devuelve más de una coincidencia
      */
     public function findInvoiceByExternalId(string $externalId): ?PacInvoiceResult;

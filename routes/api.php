@@ -162,6 +162,9 @@ Route::middleware(['auth:api', 'active', 'password.current', 'throttle:120,1'])-
     Route::get('/payments/{id}', [PaymentController::class, 'show'])->whereNumber('id');
     Route::put('/payments/{id}', [PaymentController::class, 'update'])->whereNumber('id');
     Route::delete('/payments/{id}', [PaymentController::class, 'destroy'])->whereNumber('id');
+    Route::post('/payments/{id}/issue', [PaymentController::class, 'issue'])->whereNumber('id')->middleware('throttle:pac-actions');
+    Route::get('/payments/{id}/cfdi/xml', [PaymentController::class, 'cfdiXml'])->whereNumber('id');
+    Route::get('/payments/{id}/cfdi/pdf', [PaymentController::class, 'cfdiPdf'])->whereNumber('id');
 
     // Invoices (Fase 5 — dominio interno de facturas, sin Facturapi/CFDI)
     Route::get('/invoices', [InvoiceController::class, 'index']);
