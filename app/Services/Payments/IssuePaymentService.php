@@ -244,6 +244,9 @@ class IssuePaymentService
                 'folio' => $payment->folio,
                 'cfdi_uuid' => $payment->cfdi_uuid,
                 'amount' => $payment->getRawOriginal('amount'),
+                // D9: aviso, no bloqueo; queda registro si salió fuera de plazo.
+                'rep_deadline' => PaymentReceiptDeadline::for($payment->payment_date)->toDateString(),
+                'late' => PaymentReceiptDeadline::isLate($payment),
                 'documents' => array_map(fn (array $document): array => [
                     'invoice' => $document['invoice']->folio,
                     'installment' => $document['installment'],

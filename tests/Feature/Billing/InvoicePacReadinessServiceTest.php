@@ -111,16 +111,13 @@ test('payment_method inválido (ni PUE ni PPD) produce INVOICE_PAYMENT_METHOD_IN
         ->and(collect($result['errors'])->pluck('code'))->toContain('INVOICE_PAYMENT_METHOD_INVALID');
 });
 
-test('Fase 6.28: payment_method PPD produce INVOICE_PPD_NOT_AVAILABLE y bloquea la emisión', function () {
+test('Fase 6.35: payment_method PPD con forma 99 ya no bloquea la emisión (antes INVOICE_PPD_NOT_AVAILABLE)', function () {
     $invoice = invoiceWithItemForReadinessTest(['payment_form' => '99', 'payment_method' => 'PPD']);
 
-    $result = app(InvoicePacReadinessService::class)->evaluate($invoice);
-    $error = collect($result['errors'])->firstWhere('code', 'INVOICE_PPD_NOT_AVAILABLE');
+    $codes = collect(app(InvoicePacReadinessService::class)->evaluate($invoice)['errors'])->pluck('code');
 
-    expect($result['ready'])->toBeFalse()
-        ->and($error['field'])->toBe('payment_method')
-        ->and($error['message'])->toContain('complemento de pago')
-        ->and(collect($result['errors'])->pluck('code'))->not->toContain('INVOICE_PAYMENT_METHOD_INVALID');
+    expect($codes)->not->toContain('INVOICE_PPD_NOT_AVAILABLE')
+        ->and($codes)->not->toContain('INVOICE_PAYMENT_METHOD_INVALID');
 });
 
 test('payment_method null (omitido deliberadamente) NO produce ningún error', function () {

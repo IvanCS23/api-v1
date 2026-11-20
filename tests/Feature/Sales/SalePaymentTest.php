@@ -53,13 +53,13 @@ test('crear una venta guarda su forma y método de pago', function (string $form
     'PUE efectivo' => ['01', 'PUE'],
 ]);
 
-test('Fase 6.28: PPD se rechaza al crear y al editar, aun con la forma 99', function () {
+test('Fase 6.35: PPD con forma 99 se acepta al crear y al editar (antes, Fase 6.28, se rechazaba)', function () {
     [, $user, $client] = phase625Context();
 
     $this->actingAs($user, 'api')
         ->postJson('/api/sales', ['client_id' => $client->id, 'payment_form' => '99', 'payment_method' => 'PPD'])
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors(['payment_method' => 'complemento de pago']);
+        ->assertCreated()
+        ->assertJsonPath('payment_method', 'PPD');
 
     $sale = $this->actingAs($user, 'api')
         ->postJson('/api/sales', ['client_id' => $client->id, 'payment_form' => '03', 'payment_method' => 'PUE'])
@@ -68,10 +68,9 @@ test('Fase 6.28: PPD se rechaza al crear y al editar, aun con la forma 99', func
 
     $this->actingAs($user, 'api')
         ->putJson("/api/sales/{$sale['id']}", ['payment_form' => '99', 'payment_method' => 'PPD'])
-        ->assertUnprocessable()
-        ->assertJsonValidationErrors(['payment_method' => 'complemento de pago']);
-
-    expect(Sale::withoutGlobalScopes()->findOrFail($sale['id'])->payment_method)->toBe('PUE');
+        ->assertOk()
+        ->assertJsonPath('payment_form', '99')
+        ->assertJsonPath('payment_method', 'PPD');
 });
 
 test('rechaza combinaciones y formatos inválidos', function (array $payload, string $field, string $message) {
@@ -82,7 +81,7 @@ test('rechaza combinaciones y formatos inválidos', function (array $payload, st
         ->assertUnprocessable()
         ->assertJsonValidationErrors([$field => $message]);
 })->with([
-    'PPD (aún no disponible)' => [['payment_form' => '03', 'payment_method' => 'PPD'], 'payment_method', 'aún no está disponible'],
+    'PPD con forma distinta de 99' => [['payment_form' => '03', 'payment_method' => 'PPD'], 'payment_form', 'Con método de pago PPD'],
     'PUE con forma 99' => [['payment_form' => '99', 'payment_method' => 'PUE'], 'payment_form', 'Con método de pago PUE'],
     'forma de 3 dígitos' => [['payment_form' => '003'], 'payment_form', '2 dígitos'],
     'método desconocido' => [['payment_method' => 'XYZ'], 'payment_method', 'PUE o PPD'],
@@ -145,25 +144,24 @@ test('SalePaymentRules: violación y valor efectivo', function () {
         ->and(SalePaymentRules::effective(null, 'PPD', '03', 'PUE'))->toBe(['03', 'PPD']);
 });
 
-test('Fase 6.28: SalePaymentRules marca PPD como no disponible', function () {
+test('Fase 6.35: SalePaymentRules ya admite PPD', function () {
     expect(SalePaymentRules::isMethodAvailable('PUE'))->toBeTrue()
         ->and(SalePaymentRules::isMethodAvailable(null))->toBeTrue()
-        ->and(SalePaymentRules::isMethodAvailable('PPD'))->toBeFalse()
-        ->and(SalePaymentRules::message(SalePaymentRules::PPD_NOT_AVAILABLE))->toContain('complemento de pago');
+        ->and(SalePaymentRules::isMethodAvailable('PPD'))->toBeTrue()
+        ->and(SalePaymentRules::UNAVAILABLE_METHODS)->toBe([]);
 });
 
-test('Fase 6.28: una venta PPD guardada antes del bloqueo no llega a timbrarse', function () {
+test('Fase 6.35: una venta PPD con forma 99 llega a la factura sin bloqueo de PPD', function () {
     [$company, $user, $client] = phase625Context(['default_payment_form' => '03', 'default_payment_method' => 'PUE']);
     $product = Product::factory()->create(['company_id' => $company->id, 'clave_unidad' => 'H87']);
     $sale = phase625ConfirmedSale($user, $client, $product);
     $sale->forceFill(['payment_form' => '99', 'payment_method' => 'PPD'])->save();
     app(CurrentTenant::class)->set($company->id);
 
-    // La conversión directa no evalúa el pago (sólo la ruta "antes de
-    // facturar"); el readiness de la factura es quien impide timbrarla.
     $invoice = app(SaleToInvoiceConverter::class)->convert($sale->fresh(), $user->id);
     $codes = collect(app(InvoicePacReadinessService::class)->evaluate($invoice->fresh(['items']))['errors'])->pluck('code');
 
     expect($invoice->payment_method)->toBe('PPD')
-        ->and($codes)->toContain('INVOICE_PPD_NOT_AVAILABLE');
+        ->and($invoice->payment_form)->toBe('99')
+        ->and($codes)->not->toContain('INVOICE_PPD_NOT_AVAILABLE');
 });

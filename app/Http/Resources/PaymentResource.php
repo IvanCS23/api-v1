@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Services\Payments\PaymentReceiptDeadline;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -28,6 +29,10 @@ class PaymentResource extends JsonResource
             'exchange_rate' => $this->exchange_rate,
             'amount' => $this->amount,
             'operation_number' => $this->operation_number,
+            // Fase 6.35 (D9): aviso del plazo del REP (quinto día natural del
+            // mes siguiente al pago); el estado sólo aplica a borradores.
+            'rep_deadline' => $this->payment_date !== null ? PaymentReceiptDeadline::for($this->payment_date)->toDateString() : null,
+            'rep_deadline_status' => PaymentReceiptDeadline::status($this->resource),
             'notes' => $this->notes,
             'cfdi_uuid' => $this->cfdi_uuid,
             'pac_environment' => $this->pac_environment,

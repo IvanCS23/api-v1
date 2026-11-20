@@ -70,19 +70,24 @@ test('la combinación efectiva incompatible se reporta con su código', function
 })->with([
     // La venta sólo trae el método; la forma sale de la empresa.
     'PUE con forma 99 de la empresa' => [['default_payment_form' => '99'], ['payment_method' => 'PUE'], 'SALE_PUE_FORBIDS_FORM_99'],
-    // Fase 6.28: la venta sin método hereda el PPD de la empresa.
-    'PPD heredado de la empresa' => [['default_payment_form' => '99', 'default_payment_method' => 'PPD'], [], 'SALE_PPD_NOT_AVAILABLE'],
+    // La venta sin método hereda el PPD de la empresa; su forma 03 no es 99.
+    'PPD heredado de la empresa con forma 03' => [['default_payment_form' => '99', 'default_payment_method' => 'PPD'], ['payment_form' => '03'], 'SALE_PPD_REQUIRES_FORM_99'],
 ]);
 
-test('Fase 6.28: una venta PPD guardada antes del bloqueo reporta sólo SALE_PPD_NOT_AVAILABLE', function () {
+test('Fase 6.35: PPD heredado de la empresa con forma 99 ya no se bloquea', function () {
+    [, $user, $sale] = phase625DraftSale(company: ['default_payment_form' => '99', 'default_payment_method' => 'PPD']);
+
+    expect(phase625Codes($user, $sale))->not->toContain('SALE_PPD_NOT_AVAILABLE', 'SALE_PPD_REQUIRES_FORM_99');
+});
+
+test('Fase 6.35: una venta PPD con forma distinta de 99 reporta SALE_PPD_REQUIRES_FORM_99', function () {
     [, $user, $sale] = phase625DraftSale(sale: ['payment_form' => '03', 'payment_method' => 'PUE']);
     $sale->forceFill(['payment_form' => '03', 'payment_method' => 'PPD'])->save();
 
     $errors = collect($this->actingAs($user, 'api')->getJson("/api/sales/{$sale->id}/billing-readiness")->assertOk()->json('errors'));
 
-    expect($errors->pluck('code')->all())->toContain('SALE_PPD_NOT_AVAILABLE')
-        ->not->toContain('SALE_PPD_REQUIRES_FORM_99')
-        ->and($errors->firstWhere('code', 'SALE_PPD_NOT_AVAILABLE')['message'])->toContain('complemento de pago');
+    expect($errors->pluck('code')->all())->toContain('SALE_PPD_REQUIRES_FORM_99')
+        ->not->toContain('SALE_PPD_NOT_AVAILABLE');
 });
 
 // Fase 6.34: las retenciones ya se facturan (antes ITEM_TAX_WITHHOLDING_UNSUPPORTED).

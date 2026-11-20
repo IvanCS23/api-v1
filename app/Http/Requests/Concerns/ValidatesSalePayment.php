@@ -22,9 +22,12 @@ trait ValidatesSalePayment
             // dígitos). El regex va primero porque `in` no compara estricto
             // ("003" == "03" en PHP).
             'payment_form' => ['nullable', 'string', 'regex:/^\d{2}$/', Rule::in(array_keys(SatCatalog::paymentForms()))],
-            // Fase 6.28: PPD sigue en el catálogo, pero se rechaza hasta que
-            // exista el complemento de pago (SalePaymentRules).
-            'payment_method' => ['nullable', 'string', Rule::in(SalePaymentRules::PAYMENT_METHODS), Rule::notIn(SalePaymentRules::UNAVAILABLE_METHODS)],
+            // Fase 6.28: métodos bloqueados (SalePaymentRules). Fase 6.35: PPD
+            // ya se admite; la lista queda vacía.
+            'payment_method' => array_values(array_filter([
+                'nullable', 'string', Rule::in(SalePaymentRules::PAYMENT_METHODS),
+                SalePaymentRules::UNAVAILABLE_METHODS === [] ? null : Rule::notIn(SalePaymentRules::UNAVAILABLE_METHODS),
+            ])),
         ];
     }
 

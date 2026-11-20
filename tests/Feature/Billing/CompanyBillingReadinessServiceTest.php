@@ -38,13 +38,13 @@ test('default_payment_method = PUE es válido', function () {
     expect($result['ready'])->toBeTrue();
 });
 
-test('Fase 6.28: default_payment_method = PPD produce COMPANY_PPD_NOT_AVAILABLE', function () {
+test('Fase 6.35: default_payment_method = PPD con forma 99 ya es válido (antes COMPANY_PPD_NOT_AVAILABLE)', function () {
     $company = Company::factory()->create(['default_payment_form' => '99', 'default_payment_method' => 'PPD']);
 
     $result = app(CompanyBillingReadinessService::class)->evaluate($company);
 
-    expect($result['ready'])->toBeFalse()
-        ->and(collect($result['errors'])->pluck('code')->all())->toBe(['COMPANY_PPD_NOT_AVAILABLE']);
+    expect($result['ready'])->toBeTrue()
+        ->and(collect($result['errors'])->pluck('code')->all())->not->toContain('COMPANY_PPD_NOT_AVAILABLE');
 });
 
 test('default_payment_method con un valor que no es PUE ni PPD produce COMPANY_PAYMENT_METHOD_INVALID', function () {

@@ -34,12 +34,14 @@ final class SalePaymentRules
     public const PPD_NOT_AVAILABLE = 'SALE_PPD_NOT_AVAILABLE';
 
     /**
-     * Fase 6.28: métodos del catálogo que todavía no se pueden usar. Un CFDI
-     * PPD obliga a emitir un complemento de pago por cada cobro, y el sistema
-     * aún no lo genera. Es una constante, no configuración: habilitarlo sin
-     * el complemento dejaría facturas sin forma de acreditar sus pagos.
+     * Fase 6.28: métodos del catálogo que todavía no se pueden usar. Es una
+     * constante, no configuración.
+     *
+     * Fase 6.35: PPD se habilita: el sistema ya emite el complemento de pago
+     * (REP) de cada cobro. Se conserva el mecanismo por si otro método
+     * tuviera que bloquearse.
      */
-    public const UNAVAILABLE_METHODS = ['PPD'];
+    public const UNAVAILABLE_METHODS = [];
 
     public const PPD_NOT_AVAILABLE_MESSAGE = 'El método de pago PPD (parcialidades o diferido) aún no está disponible: requiere el complemento de pago, que se habilitará en una fase posterior. Usa PUE.';
 
