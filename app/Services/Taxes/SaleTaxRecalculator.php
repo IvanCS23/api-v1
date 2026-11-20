@@ -2,10 +2,12 @@
 
 namespace App\Services\Taxes;
 
+use App\Exceptions\SaleNotBillableException;
 use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SaleItemTax;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Payments\SalePayments;
 use Illuminate\Database\Eloquent\Collection;
 
 /**
@@ -74,6 +76,11 @@ class SaleTaxRecalculator
      */
     public function apply(Sale $sale): array
     {
+        // Fase 6.35 (D8): guarda real, aunque el readiness ya lo reporte.
+        if (SalePayments::exist($sale)) {
+            throw new SaleNotBillableException([SalePayments::error()]);
+        }
+
         $result = $this->preview($sale);
 
         foreach ($result['lines'] as ['item' => $item, 'values' => $values]) {

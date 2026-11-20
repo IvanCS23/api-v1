@@ -11,6 +11,7 @@ use App\Models\Sale;
 use App\Models\SaleItem;
 use App\Models\SaleItemTax;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Payments\SalePayments;
 use App\Services\Sat\SatFiscalValidator;
 use App\Services\Taxes\DocumentTaxTotals;
 use App\Services\Taxes\LineTaxWriter;
@@ -107,6 +108,11 @@ class SaleBillingReadinessService
 
         if ($items->isEmpty()) {
             $errors[] = $this->error('SALE_NO_ITEMS', 'items', 'La venta no tiene ninguna línea.');
+        }
+
+        // Fase 6.35 (D8): con pagos registrados la venta no se recalcula.
+        if (SalePayments::exist($sale)) {
+            $errors[] = SalePayments::error();
         }
 
         if (empty($sale->currency) || ! preg_match('/^[A-Z]{3}$/', (string) $sale->currency)) {
