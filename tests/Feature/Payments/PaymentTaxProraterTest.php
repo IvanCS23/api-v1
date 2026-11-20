@@ -100,6 +100,22 @@ test('una línea con impuestos sin desglose detiene el prorrateo', function () {
     expect(fn () => (new PaymentTaxProrater)->prorate($invoice, '50'))->toThrow(RuntimeException::class);
 });
 
+test('con las líneas ya cargadas da lo mismo que leyendo la BD', function () {
+    $company = Company::factory()->create();
+    $invoice = p635TaxInvoice($company, '953.33', [
+        ['1000', '160', [
+            p635Iva('1000', '160'),
+            ['tax' => '001', 'kind' => 'retencion', 'factor' => 'tasa', 'rate' => '0.100000', 'base' => '1000', 'amount' => '100', 'amount_rounded' => 100],
+        ]],
+        ['50', '0', [['tax' => '002', 'kind' => 'traslado', 'factor' => 'exento', 'rate' => null, 'base' => '50', 'amount' => null, 'amount_rounded' => 0]]],
+    ]);
+    $fromDb = (new PaymentTaxProrater)->prorate($invoice->fresh(), '400');
+
+    $loaded = $invoice->fresh()->load(['items' => fn ($items) => $items->withoutGlobalScope(CompanyScope::class)->orderBy('id'), 'items.taxes']);
+
+    expect((new PaymentTaxProrater)->prorate($loaded, '400'))->toBe($fromDb);
+});
+
 test('guarda los impuestos de la asignación, reemplazando los anteriores', function () {
     $company = Company::factory()->create();
     $invoice = p635TaxInvoice($company, '1160', [['1000', '160', [p635Iva('1000', '160')]]]);

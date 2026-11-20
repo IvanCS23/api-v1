@@ -94,13 +94,28 @@ class PaymentTaxProrater
      */
     private function groups(Invoice $invoice): array
     {
-        $items = InvoiceItem::withoutGlobalScope(CompanyScope::class)
-            ->where('invoice_id', $invoice->id)
-            ->orderBy('id')->get();
+        // Las líneas ya cargadas (con sus impuestos) se usan tal cual; si no,
+        // se leen de la BD.
+        $items = $invoice->relationLoaded('items')
+            ? $invoice->getRelation('items')
+            : InvoiceItem::withoutGlobalScope(CompanyScope::class)
+                ->where('invoice_id', $invoice->id)
+                ->orderBy('id')->get();
 
         $groups = [];
         foreach ($items as $item) {
-            $rows = $this->taxWriter->rowsToCopy($item, InvoiceItemTax::class, 'invoice_item_id');
+            $rows = $item->relationLoaded('taxes') && $item->getRelation('taxes')->isNotEmpty()
+                ? $item->getRelation('taxes')->map(fn (InvoiceItemTax $tax): array => [
+                    'tax' => $tax->tax,
+                    'kind' => $tax->kind,
+                    'factor' => $tax->factor,
+                    'rate' => $tax->getAttributes()['rate'] ?? null,
+                    'ieps_mode' => $tax->ieps_mode,
+                    'base' => $tax->getAttributes()['base'] ?? null,
+                    'amount' => $tax->getAttributes()['amount'] ?? null,
+                    'amount_rounded' => $tax->getAttributes()['amount_rounded'] ?? null,
+                ])->all()
+                : $this->taxWriter->rowsToCopy($item, InvoiceItemTax::class, 'invoice_item_id');
 
             // Una línea con impuestos guardados pero sin filas ni tasa no se
             // puede prorratear: mejor detenerse que mandar un REP sin ellos.
