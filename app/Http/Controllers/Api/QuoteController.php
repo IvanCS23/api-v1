@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Enums\QuoteStatus;
 use App\Exceptions\QuoteAlreadyConvertedException;
+use App\Exceptions\QuoteNotEditableException;
 use App\Exceptions\WorkflowTransitionException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreQuoteRequest;
@@ -11,45 +12,50 @@ use App\Http\Requests\UpdateQuoteRequest;
 use App\Http\Resources\QuoteResource;
 use App\Http\Resources\SaleResource;
 use App\Models\Quote;
-use App\Services\Sales\QuoteNumberGenerator;
+use App\Services\Sales\QuoteService;
 use App\Services\Sales\QuoteToSaleConverter;
 use App\Services\Sales\QuoteWorkflow;
-use App\Support\Tenant\CurrentTenant;
+use Illuminate\Http\Request;
 
 class QuoteController extends Controller
 {
     public function __construct(
-        private readonly QuoteNumberGenerator $numberGenerator,
+        private readonly QuoteService $quotes,
         private readonly QuoteToSaleConverter $converter,
         private readonly QuoteWorkflow $workflow,
     ) {}
 
-    public function index()
+    /**
+     * Sin ?page devuelve el arreglo plano de siempre (no rompe al
+     * frontend). Con ?page devuelve la respuesta paginada (data/links/meta);
+     * ?per_page es opcional y QuoteService lo limita a 100.
+     */
+    public function index(Request $request)
     {
         $this->authorize('viewAny', Quote::class);
 
-        return QuoteResource::collection(Quote::with('items')->latest()->get());
+        $quotes = $request->has('page')
+            ? $this->quotes->paginated(
+                $request->integer('page', 1),
+                $request->integer('per_page', QuoteService::DEFAULT_PER_PAGE),
+            )
+            : $this->quotes->all();
+
+        return QuoteResource::collection($quotes);
     }
 
     public function store(StoreQuoteRequest $request)
     {
         $this->authorize('create', Quote::class);
 
-        $companyId = app(CurrentTenant::class)->id();
+        $quote = $this->quotes->create($request->validated(), $request->user());
 
-        $quote = Quote::create([
-            ...$request->validated(),
-            'created_by' => $request->user()->id,
-            'folio' => $this->numberGenerator->next($companyId),
-            'status' => QuoteStatus::Draft,
-        ]);
-
-        return (new QuoteResource($quote->load('items')))->response()->setStatusCode(201);
+        return (new QuoteResource($quote))->response()->setStatusCode(201);
     }
 
     public function show($id)
     {
-        $quote = Quote::with('items')->findOrFail($id);
+        $quote = $this->quotes->get($id);
 
         $this->authorize('view', $quote);
 
@@ -67,13 +73,13 @@ class QuoteController extends Controller
 
         $this->authorize('update', $quote);
 
-        if (! $quote->isEditable()) {
-            return response()->json(['message' => 'Esta cotización ya no se puede editar en su estado actual.'], 422);
+        try {
+            $quote = $this->quotes->update($quote, $request->validated());
+        } catch (QuoteNotEditableException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $quote->update($request->validated());
-
-        return new QuoteResource($quote->load('items'));
+        return new QuoteResource($quote);
     }
 
     public function destroy($id)
@@ -82,11 +88,11 @@ class QuoteController extends Controller
 
         $this->authorize('delete', $quote);
 
-        if (! $quote->isEditable()) {
-            return response()->json(['message' => 'Esta cotización ya no se puede eliminar en su estado actual.'], 422);
+        try {
+            $this->quotes->delete($quote);
+        } catch (QuoteNotEditableException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
-
-        $quote->delete();
 
         return response()->json(null, 204);
     }
