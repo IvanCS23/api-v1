@@ -7,30 +7,40 @@ use App\Http\Requests\StoreProductRequest;
 use App\Http\Requests\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
 use App\Models\Product;
-use App\Models\TaxRate;
-use App\Services\Taxes\LineTaxWriter;
-use App\Services\Taxes\TaxSpec;
-use App\Support\Sat\SatCatalog;
-use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
+use App\Services\Catalogs\ProductService;
+use Illuminate\Http\Request;
 
 class ProductController extends Controller
 {
-    public function __construct(private readonly LineTaxWriter $taxWriter) {}
+    public function __construct(private readonly ProductService $products) {}
 
     /**
      * Obtener todos los productos
      */
-    public function index()
+    public function index(Request $request)
     {
         $this->authorize('viewAny', Product::class);
 
-        $products = Product::all();
+        if ($request->has('page')) {
+            $page = $this->products->paginated(
+                (int) $request->query('page', 1),
+                (int) $request->query('per_page', ProductService::DEFAULT_PER_PAGE),
+            );
 
-        // Fase 6.26: existencia de claves SAT en una consulta por catálogo
-        // para calcular `fiscal_issues` de todo el listado.
-        $productKeys = SatCatalog::existingProductKeys($products->pluck('clave_producto')->map(fn ($code) => trim((string) $code)));
-        $unitKeys = SatCatalog::existingUnitKeys($products->pluck('clave_unidad')->map(fn ($code) => mb_strtoupper(trim((string) $code))));
+            // Fase 6.26: el lookup de claves SAT se hace solo sobre la página actual.
+            [$productKeys, $unitKeys] = $this->products->catalogLookup($page->items());
+
+            $collection = ProductResource::collection($page);
+            $collection->collection = $collection->collection->map(
+                fn (ProductResource $resource) => $resource->withCatalogLookup($productKeys, $unitKeys)
+            );
+
+            return $collection;
+        }
+
+        $products = $this->products->all();
+
+        [$productKeys, $unitKeys] = $this->products->catalogLookup($products);
 
         return $products->map(fn (Product $product) => (new ProductResource($product))->withCatalogLookup($productKeys, $unitKeys))->values();
     }
@@ -42,14 +52,11 @@ class ProductController extends Controller
     {
         $this->authorize('create', Product::class);
 
-        // Fase 6.34: impuestos del producto (product_taxes): `taxes` o, por
-        // compatibilidad, `tax_rate_id`.
-        $product = DB::transaction(function () use ($request): Product {
-            $product = Product::create(Arr::except($request->validated(), ['taxes']));
-            $this->syncTaxes($product, $request);
-
-            return $product;
-        });
+        $product = $this->products->create(
+            $request->validated(),
+            $request->taxSpecs(),
+            $request->exists('tax_rate_id'),
+        );
 
         return (new ProductResource($product))->response()->setStatusCode(201);
     }
@@ -59,7 +66,7 @@ class ProductController extends Controller
      */
     public function show(string $id)
     {
-        $product = Product::findOrFail($id);
+        $product = $this->products->get($id);
 
         $this->authorize('view', $product);
 
@@ -71,14 +78,16 @@ class ProductController extends Controller
      */
     public function update(UpdateProductRequest $request, string $id)
     {
-        $product = Product::findOrFail($id);
+        $product = $this->products->get($id);
 
         $this->authorize('update', $product);
 
-        DB::transaction(function () use ($product, $request): void {
-            $product->update(Arr::except($request->validated(), ['taxes']));
-            $this->syncTaxes($product, $request);
-        });
+        $product = $this->products->update(
+            $product,
+            $request->validated(),
+            $request->taxSpecs(),
+            $request->exists('tax_rate_id'),
+        );
 
         return new ProductResource($product);
     }
@@ -88,34 +97,14 @@ class ProductController extends Controller
      */
     public function destroy(string $id)
     {
-        $product = Product::findOrFail($id);
+        $product = $this->products->get($id);
 
         $this->authorize('delete', $product);
 
-        $product->delete();
+        $this->products->delete($product);
 
         return response()->json([
             'message' => 'Producto eliminado correctamente',
         ]);
-    }
-
-    /**
-     * Fase 6.34: `taxes` reemplaza los impuestos del producto; `tax_rate_id`
-     * (la pantalla actual) los reemplaza por esa tasa o por ninguno. Sin
-     * ninguno de los dos, no se tocan.
-     */
-    private function syncTaxes(Product $product, StoreProductRequest|UpdateProductRequest $request): void
-    {
-        $specs = $request->taxSpecs();
-
-        if ($specs === null && $request->exists('tax_rate_id')) {
-            $taxRate = $product->tax_rate_id !== null ? TaxRate::find($product->tax_rate_id) : null;
-            $specs = $taxRate !== null ? [TaxSpec::fromTaxRate($taxRate)] : [];
-        }
-
-        if ($specs !== null) {
-            $this->taxWriter->replaceProductTaxes($product, $specs);
-            $product->load('taxes');
-        }
     }
 }
