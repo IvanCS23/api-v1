@@ -7,28 +7,41 @@ use App\Http\Requests\StoreClientRequest;
 use App\Http\Requests\UpdateClientRequest;
 use App\Http\Resources\ClientResource;
 use App\Models\Client;
+use App\Services\Catalogs\ClientService;
+use Illuminate\Http\Request;
 
 class ClientController extends Controller
 {
-    public function index()
+    public function __construct(private readonly ClientService $clients) {}
+
+    public function index(Request $request)
     {
         $this->authorize('viewAny', Client::class);
 
-        return ClientResource::collection(Client::all());
+        if ($request->has('page')) {
+            return ClientResource::collection(
+                $this->clients->paginated(
+                    (int) $request->query('page', 1),
+                    (int) $request->query('per_page', ClientService::DEFAULT_PER_PAGE),
+                )
+            );
+        }
+
+        return ClientResource::collection($this->clients->all());
     }
 
     public function store(StoreClientRequest $request)
     {
         $this->authorize('create', Client::class);
 
-        $client = Client::create($request->validated());
+        $client = $this->clients->create($request->validated());
 
         return (new ClientResource($client))->response()->setStatusCode(201);
     }
 
     public function show($id)
     {
-        $client = Client::findOrFail($id);
+        $client = $this->clients->get($id);
 
         $this->authorize('view', $client);
 
@@ -37,22 +50,22 @@ class ClientController extends Controller
 
     public function update(UpdateClientRequest $request, $id)
     {
-        $client = Client::findOrFail($id);
+        $client = $this->clients->get($id);
 
         $this->authorize('update', $client);
 
-        $client->update($request->validated());
+        $client = $this->clients->update($client, $request->validated());
 
         return new ClientResource($client);
     }
 
     public function destroy($id)
     {
-        $client = Client::findOrFail($id);
+        $client = $this->clients->get($id);
 
         $this->authorize('delete', $client);
 
-        $client->delete();
+        $this->clients->delete($client);
 
         return response()->json(null, 204);
     }
