@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Exceptions\InvoiceNotEditableException;
 use App\Exceptions\SaleAlreadyInvoicedException;
 use App\Exceptions\SaleNotBillableException;
 use App\Exceptions\WorkflowTransitionException;
@@ -12,6 +13,7 @@ use App\Http\Requests\UpdateInvoiceRequest;
 use App\Http\Resources\InvoiceResource;
 use App\Models\Invoice;
 use App\Models\Sale;
+use App\Services\Billing\InvoiceService;
 use App\Services\Billing\InvoiceWorkflow;
 use App\Services\Billing\SaleToInvoiceConverter;
 use App\Support\Billing\InvoiceFolio;
@@ -22,6 +24,7 @@ class InvoiceController extends Controller
     public function __construct(
         private readonly SaleToInvoiceConverter $converter,
         private readonly InvoiceWorkflow $workflow,
+        private readonly InvoiceService $invoices,
     ) {}
 
     public function index(IndexInvoiceRequest $request)
@@ -139,13 +142,13 @@ class InvoiceController extends Controller
 
         $this->authorize('update', $invoice);
 
-        if (! $invoice->isEditable()) {
-            return response()->json(['message' => 'Esta factura ya no se puede editar en su estado actual.'], 422);
+        try {
+            $invoice = $this->invoices->update($invoice, $request->validated());
+        } catch (InvoiceNotEditableException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
         }
 
-        $invoice->update($request->validated());
-
-        return new InvoiceResource($invoice->load('items'));
+        return new InvoiceResource($invoice);
     }
 
     public function destroy($id)

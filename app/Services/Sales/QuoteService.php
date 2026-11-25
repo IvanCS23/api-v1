@@ -9,8 +9,8 @@ use App\Models\User;
 use App\Support\Tenant\CurrentTenant;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Support\Facades\DB;
-
 
 class QuoteService
 {
@@ -20,7 +20,6 @@ class QuoteService
         private readonly QuoteNumberGenerator $numberGenerator,
         private readonly CurrentTenant $tenant,
     ) {}
-
 
     public function create(array $data, User $author): Quote
     {
@@ -67,7 +66,7 @@ class QuoteService
     }
 
     /**
-     * @throws \Illuminate\Database\Eloquent\ModelNotFoundException
+     * @throws ModelNotFoundException
      */
     public function get(int|string $id): Quote
     {

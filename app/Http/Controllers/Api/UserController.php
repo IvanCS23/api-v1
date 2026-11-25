@@ -2,61 +2,35 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\AuditAction;
 use App\Enums\UserRole;
 use App\Enums\UserStatus;
+use App\Exceptions\CannotDeactivateSelfException;
+use App\Exceptions\CompanyAdminViolationException;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreUserRequest;
 use App\Http\Requests\UpdateUserRequest;
 use App\Http\Resources\UserResource;
 use App\Models\User;
-use App\Services\AuditLogger;
-use App\Services\Users\CompanyAdminGuard;
-use App\Services\Users\PasswordChangeSecurity;
+use App\Services\Users\UserService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Validation\Rules\Enum;
 
 class UserController extends Controller
 {
-    public function __construct(private readonly CompanyAdminGuard $admins) {}
+    public function __construct(private readonly UserService $users) {}
 
     public function index(Request $request): JsonResponse
     {
-        $request->validate([
+        $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:255'],
             'role' => ['nullable', new Enum(UserRole::class)],
             'status' => ['nullable', new Enum(UserStatus::class)],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:100'],
         ]);
 
-        $authUser = $request->user('api');
-
-        $query = User::query()
-            ->with('company')
-            ->where('company_id', $authUser->company_id);
-
-        if ($search = $request->query('search')) {
-            $query->where(function ($q) use ($search) {
-                $q->where('name', 'like', "%{$search}%")
-                    ->orWhere('email', 'like', "%{$search}%");
-            });
-        }
-
-        if ($role = $request->query('role')) {
-            $query->where('role', $role);
-        }
-
-        if ($status = $request->query('status')) {
-            $query->where('status', $status);
-        }
-
-        $users = $query
-            ->orderByDesc('created_at')
-            ->paginate((int) $request->query('per_page', 15))
-            ->withQueryString();
+        $users = $this->users->paginatedForCompany($request->user('api')->company_id, $filters);
 
         return response()->json([
             'data' => UserResource::collection($users->items()),
@@ -72,31 +46,14 @@ class UserController extends Controller
     public function store(StoreUserRequest $request): JsonResponse
     {
         $this->authorize('create', User::class);
-        $validated = $request->validated();
-        $authUser = $request->user('api');
 
-        $user = new User;
-        $user->fill([
-            'company_id' => $authUser->company_id,
-            'name' => $validated['name'],
-            'email' => $validated['email'],
-            'password' => Hash::make($validated['password']),
-            'role' => $validated['role'],
-            'status' => $validated['status'] ?? UserStatus::Active->value,
-            'phone' => $validated['phone'] ?? null,
-            'position' => $validated['position'] ?? null,
-            'branch' => $validated['branch'] ?? null,
-            'must_change_password' => $validated['must_change_password'] ?? false,
-            'password_changed_at' => now(),
-        ]);
+        $user = $this->users->create(
+            $request->validated(),
+            $request->user('api')->company_id,
+            $this->avatarFrom($request),
+        );
 
-        if ($request->hasFile('avatar')) {
-            $user->avatar = $request->file('avatar')->store('avatars', 'public');
-        }
-
-        $user->save();
-
-        return response()->json(['user' => new UserResource($user->load('company'))], 201);
+        return response()->json(['user' => new UserResource($user)], 201);
     }
 
     public function show(Request $request, string $id): JsonResponse
@@ -110,45 +67,20 @@ class UserController extends Controller
     {
         $user = $this->findWithinCompany($request, $id);
         $this->authorize('update', $user);
-        $validated = $request->validated();
-        $previousStatus = $user->status;
 
-        $violation = $this->admins->change(
-            $request->user('api'),
-            $user,
-            isset($validated['role']) ? UserRole::from($validated['role']) : null,
-            isset($validated['status']) ? UserStatus::from($validated['status']) : null,
-            function () use ($request, $user, $validated): void {
-                $previousEmail = $user->email;
-                $user->fill(collect($validated)->except('avatar')->toArray());
-
-                // Fase 6.32: un enlace de recuperación enviado al correo
-                // anterior deja de servir.
-                if ($user->isDirty('email')) {
-                    PasswordChangeSecurity::forgetResetTokensFor($previousEmail);
-                }
-
-                if ($request->hasFile('avatar')) {
-                    if ($user->avatar) {
-                        Storage::disk('public')->delete($user->avatar);
-                    }
-                    $user->avatar = $request->file('avatar')->store('avatars', 'public');
-                }
-
-                $user->save();
-            },
-        );
-
-        if ($violation !== null) {
-            return response()->json($violation, 422);
+        try {
+            $user = $this->users->update(
+                $request->user('api'),
+                $user,
+                $request->validated(),
+                $this->avatarFrom($request),
+                $request,
+            );
+        } catch (CompanyAdminViolationException $e) {
+            return response()->json($e->violation, 422);
         }
 
-        if (array_key_exists('status', $validated) && $user->status !== $previousStatus) {
-            $action = $user->status === UserStatus::Active ? AuditAction::Activated : AuditAction::Deactivated;
-            AuditLogger::record($user, $action, $request);
-        }
-
-        return response()->json(['user' => new UserResource($user->load('company'))]);
+        return response()->json(['user' => new UserResource($user)]);
     }
 
     public function destroy(Request $request, string $id): JsonResponse
@@ -156,33 +88,27 @@ class UserController extends Controller
         $user = $this->findWithinCompany($request, $id);
         $this->authorize('delete', $user);
 
-        if ($user->id === $request->user('api')->id) {
-            return response()->json([
-                'message' => 'No puedes desactivar tu propia cuenta.',
-            ], 422);
+        try {
+            $this->users->deactivate($request->user('api'), $user, $request);
+        } catch (CannotDeactivateSelfException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        } catch (CompanyAdminViolationException $e) {
+            return response()->json($e->violation, 422);
         }
-
-        $violation = $this->admins->change(
-            $request->user('api'),
-            $user,
-            null,
-            UserStatus::Inactive,
-            fn () => $user->update(['status' => UserStatus::Inactive]),
-        );
-
-        if ($violation !== null) {
-            return response()->json($violation, 422);
-        }
-
-        AuditLogger::record($user, AuditAction::Deactivated, $request);
 
         return response()->json(['message' => 'Usuario desactivado correctamente.']);
     }
 
     private function findWithinCompany(Request $request, string $id): User
     {
-        return User::query()
-            ->where('company_id', $request->user('api')->company_id)
-            ->findOrFail($id);
+        return $this->users->findWithinCompany($request->user('api')->company_id, $id);
+    }
+
+    /**
+     * Igual que antes: solo se toma el avatar si es un archivo subido válido.
+     */
+    private function avatarFrom(Request $request): ?UploadedFile
+    {
+        return $request->hasFile('avatar') ? $request->file('avatar') : null;
     }
 }

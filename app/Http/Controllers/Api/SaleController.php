@@ -2,7 +2,6 @@
 
 namespace App\Http\Controllers\Api;
 
-use App\Enums\SaleStatus;
 use App\Exceptions\SaleCancelledException;
 use App\Exceptions\SaleNotBillableException;
 use App\Exceptions\WorkflowTransitionException;
@@ -16,15 +15,14 @@ use App\Models\Invoice;
 use App\Models\Sale;
 use App\Services\Billing\SaleBillingReadinessService;
 use App\Services\Sales\InvoiceSaleService;
-use App\Services\Sales\SaleNumberGenerator;
+use App\Services\Sales\SaleService;
 use App\Services\Sales\SaleWorkflow;
-use App\Support\Tenant\CurrentTenant;
 use Illuminate\Http\Request;
 
 class SaleController extends Controller
 {
     public function __construct(
-        private readonly SaleNumberGenerator $numberGenerator,
+        private readonly SaleService $sales,
         private readonly SaleWorkflow $workflow,
         private readonly SaleBillingReadinessService $billingReadiness,
         private readonly InvoiceSaleService $invoicing,
@@ -38,23 +36,8 @@ class SaleController extends Controller
     {
         $this->authorize('viewAny', Sale::class);
 
-        $filters = $request->validated();
-        $query = Sale::query()->with(['client:id,company_id,name,rfc', 'invoice:id,sale_id,folio,status']);
-
-        if (isset($filters['search'])) {
-            $search = '%'.$filters['search'].'%';
-            $query->where(function ($query) use ($search): void {
-                $query->where('folio', 'like', $search)
-                    ->orWhereHas('client', fn ($client) => $client->where(
-                        fn ($client) => $client->where('name', 'like', $search)->orWhere('rfc', 'like', $search),
-                    ));
-            });
-        }
-
-        $query->when($filters['status'] ?? null, fn ($query, $status) => $query->where('status', $status));
-
         return SaleResource::collection(
-            $query->latest()->orderByDesc('id')->paginate($filters['per_page'] ?? 20)->withQueryString(),
+            $this->sales->search($request->validated())
         );
     }
 
@@ -62,16 +45,9 @@ class SaleController extends Controller
     {
         $this->authorize('create', Sale::class);
 
-        $companyId = app(CurrentTenant::class)->id();
+        $sale = $this->sales->create($request->validated(), $request->user());
 
-        $sale = Sale::create([
-            ...$request->validated(),
-            'created_by' => $request->user()->id,
-            'folio' => $this->numberGenerator->next($companyId),
-            'status' => SaleStatus::Draft,
-        ]);
-
-        return (new SaleResource($sale->load('items')))->response()->setStatusCode(201);
+        return (new SaleResource($sale))->response()->setStatusCode(201);
     }
 
     public function show($id)
