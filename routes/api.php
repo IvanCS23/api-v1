@@ -19,6 +19,7 @@ use App\Http\Controllers\Api\PaymentController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\QuoteItemController;
+use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SaleItemController;
 use App\Http\Controllers\Api\SatCatalogController;
@@ -73,6 +74,10 @@ Route::middleware(['auth:api', 'active', 'password.current', 'throttle:120,1'])-
     Route::get('/users/{id}', [UserController::class, 'show']);
     Route::put('/users/{id}', [UserController::class, 'update']);
     Route::delete('/users/{id}', [UserController::class, 'destroy']);
+
+    // Roles y permisos (catálogo en código, ver RoleService)
+    Route::get('/roles', [RoleController::class, 'index']);
+    Route::get('/roles/me', [RoleController::class, 'me']);
 
     // User security actions
     Route::patch('/users/{id}/password', [UserSecurityController::class, 'changePassword']);

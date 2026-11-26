@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\UserRole;
 use App\Enums\UserStatus;
 use App\Models\Company;
 use App\Models\User;
@@ -36,10 +37,27 @@ class UserFactory extends Factory
             // Igual que el default de la columna; explícito para que el
             // usuario en memoria (actingAs) pase el middleware `active`.
             'status' => UserStatus::Active,
+            // Sin rol explícito el modelo en memoria queda con role null y
+            // RoleService lo trata como sin permisos. Employee (y no 'admin',
+            // el default de la columna): tiene los permisos operativos, pero
+            // no está en ninguna regla de rol de las policies (PAC, pagos,
+            // datos fiscales, usuarios), igual que el null de antes. Las
+            // pruebas que necesitan un Admin lo piden explícitamente.
+            'role' => UserRole::Employee,
             'two_factor_secret' => null,
             'two_factor_recovery_codes' => null,
             'two_factor_confirmed_at' => null,
         ];
+    }
+
+    /**
+     * Usuario con rol Client: solo consulta (`*.view`, ver RoleService).
+     */
+    public function client(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'role' => UserRole::Client,
+        ]);
     }
 
     /**

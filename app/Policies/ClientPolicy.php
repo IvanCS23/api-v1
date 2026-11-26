@@ -2,8 +2,10 @@
 
 namespace App\Policies;
 
+use App\Enums\Permission;
 use App\Models\Client;
 use App\Models\User;
+use App\Services\Users\RoleService;
 
 /**
  * Autorización por empresa para Client.
@@ -17,28 +19,33 @@ use App\Models\User;
  */
 class ClientPolicy
 {
+    public function __construct(private readonly RoleService $roles) {}
+
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->roles->allows($user, Permission::ClientsView);
     }
 
     public function view(User $user, Client $client): bool
     {
-        return $user->company_id === $client->company_id;
+        return $user->company_id === $client->company_id
+            && $this->roles->allows($user, Permission::ClientsView);
     }
 
     public function create(User $user): bool
     {
-        return true;
+        return $this->roles->allows($user, Permission::ClientsManage);
     }
 
     public function update(User $user, Client $client): bool
     {
-        return $user->company_id === $client->company_id;
+        return $user->company_id === $client->company_id
+            && $this->roles->allows($user, Permission::ClientsManage);
     }
 
     public function delete(User $user, Client $client): bool
     {
-        return $user->company_id === $client->company_id;
+        return $user->company_id === $client->company_id
+            && $this->roles->allows($user, Permission::ClientsManage);
     }
 }

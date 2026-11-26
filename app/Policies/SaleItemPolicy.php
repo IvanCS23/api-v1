@@ -2,8 +2,10 @@
 
 namespace App\Policies;
 
+use App\Enums\Permission;
 use App\Models\SaleItem;
 use App\Models\User;
+use App\Services\Users\RoleService;
 
 /**
  * Autorización por empresa para SaleItem. En la práctica, las acciones
@@ -13,28 +15,33 @@ use App\Models\User;
  */
 class SaleItemPolicy
 {
+    public function __construct(private readonly RoleService $roles) {}
+
     public function viewAny(User $user): bool
     {
-        return true;
+        return $this->roles->allows($user, Permission::SalesView);
     }
 
     public function view(User $user, SaleItem $saleItem): bool
     {
-        return $user->company_id === $saleItem->company_id;
+        return $user->company_id === $saleItem->company_id
+            && $this->roles->allows($user, Permission::SalesView);
     }
 
     public function create(User $user): bool
     {
-        return true;
+        return $this->roles->allows($user, Permission::SalesManage);
     }
 
     public function update(User $user, SaleItem $saleItem): bool
     {
-        return $user->company_id === $saleItem->company_id;
+        return $user->company_id === $saleItem->company_id
+            && $this->roles->allows($user, Permission::SalesManage);
     }
 
     public function delete(User $user, SaleItem $saleItem): bool
     {
-        return $user->company_id === $saleItem->company_id;
+        return $user->company_id === $saleItem->company_id
+            && $this->roles->allows($user, Permission::SalesManage);
     }
 }
