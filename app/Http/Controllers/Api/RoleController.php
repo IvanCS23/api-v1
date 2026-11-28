@@ -10,7 +10,7 @@ use Illuminate\Http\Request;
 class RoleController extends Controller
 {
     public function __construct(private readonly RoleService $roles) {}
-    
+
     public function index(): JsonResponse
     {
         return response()->json(['data' => $this->roles->catalog()]);

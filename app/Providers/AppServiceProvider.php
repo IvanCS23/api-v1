@@ -36,10 +36,13 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use SocialiteProviders\Manager\SocialiteWasCalled;
+use SocialiteProviders\Microsoft\MicrosoftExtendSocialite;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -70,6 +73,10 @@ class AppServiceProvider extends ServiceProvider
         // que ya consume app-front (ver client.services.ts, que no
         // desenvuelve `.data` en create/update/show).
         JsonResource::withoutWrapping();
+
+        // Login social: Socialite trae Google; Microsoft viene de
+        // socialiteproviders y se registra con este evento (Laravel 11+).
+        Event::listen(SocialiteWasCalled::class, [MicrosoftExtendSocialite::class, 'handle']);
     }
 
     /**

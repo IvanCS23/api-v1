@@ -6,15 +6,16 @@ use App\Enums\UserStatus;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\UserResource;
 use App\Models\User;
+use App\Services\Auth\ApiTokenIssuer;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Hash;
-use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 
 class AuthController extends Controller
 {
+    public function __construct(private readonly ApiTokenIssuer $tokens) {}
+
     /**
      * Authenticate the user and return an API token.
      */
@@ -42,13 +43,7 @@ class AuthController extends Controller
             ]);
         }
 
-        // Generate a new plain-text token, store its SHA-256 hash
-        $plainToken = Str::random(80);
-        $user->forceFill([
-            'api_token' => hash('sha256', $plainToken),
-            'last_login_at' => now(),
-            'last_login_ip' => $request->ip(),
-        ])->save();
+        $plainToken = $this->tokens->issue($user, $request->ip());
 
         return response()->json([
             'token' => $plainToken,

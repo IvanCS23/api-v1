@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\SocialProvider;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
 use App\Http\Controllers\Api\CompanyCsdController;
@@ -23,6 +24,7 @@ use App\Http\Controllers\Api\RoleController;
 use App\Http\Controllers\Api\SaleController;
 use App\Http\Controllers\Api\SaleItemController;
 use App\Http\Controllers\Api\SatCatalogController;
+use App\Http\Controllers\Api\SocialLoginController;
 use App\Http\Controllers\Api\TaxRateController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\UserSecurityController;
@@ -35,6 +37,14 @@ Route::get('/login', function () {
     return redirect()->away($frontendUrl.'/login');
 });
 Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+
+// Login social (Google y Microsoft) solo para usuarios Client existentes.
+// El callback entrega un código de un solo uso; el token nunca va en la URL.
+Route::get('/auth/{provider}/redirect', [SocialLoginController::class, 'redirect'])
+    ->whereIn('provider', SocialProvider::values());
+Route::get('/auth/{provider}/callback', [SocialLoginController::class, 'callback'])
+    ->whereIn('provider', SocialProvider::values());
+Route::post('/auth/social/exchange', [SocialLoginController::class, 'exchange'])->middleware('throttle:10,1');
 
 // Fase 6.32: recuperación de contraseña por correo, sin sesión.
 Route::post('/password/forgot', [PasswordRecoveryController::class, 'forgot'])->middleware('throttle:password-forgot');
